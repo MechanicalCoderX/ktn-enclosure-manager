@@ -57,7 +57,7 @@ class DiskInfoReader:
 
     @staticmethod
     def _normalise_wwn(raw: str | None) -> str | None:
-        """Normalise sysfs wwid ('naa.5000cca058347d84') to '0x5000cca058347d84'.
+        """Normalise sysfs wwid ('naa.5000cca0e0000000') to '0x5000cca0e0000000'.
 
         This is the block layer's node WWN. It is deliberately NOT compared
         against the SAS address reported by SES, which is a port address and

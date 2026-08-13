@@ -14,12 +14,12 @@ FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
 # From spec §8. Keyed by SES slot, which is the persistent identity - not by
 # device name, which is runtime state.
 EXPECTED_SERIALS = {
-    0: "P9GXVWZW", 1: "P9H32WVW", 2: "P9K7486V", 3: "P9K734LV", 4: "P9JW0G5W",
-    5: "P9K70K2W", 6: "P9K6LYPW", 7: "P9K6Z2KW", 8: "P9K7184W", 9: "P9K6VRVW",
-    10: "P9H33BJW", 11: "P9K2WUHW", 12: "P9K72ZDV", 13: "P9K734TV", 14: "P9K6LYUW",
+    0: "K1A00001", 1: "K1A00002", 2: "K1A00003", 3: "K1A00004", 4: "K1A00005",
+    5: "K1A00006", 6: "K1A00007", 7: "K1A00008", 8: "K1A00009", 9: "K1A00010",
+    10: "K1A00011", 11: "K1A00012", 12: "K1A00013", 13: "K1A00014", 14: "K1A00015",
 }
 EXPECTED_WWNS = {
-    0: "0x5000cca058347d84", 7: "0x5000cca058b5c6a8", 14: "0x5000cca058b51fac",
+    0: "0x5000cca0e0000000", 7: "0x5000cca0e0000070", 14: "0x5000cca0e00000e0",
 }
 
 
@@ -36,7 +36,7 @@ def backend() -> SysfsEnclosureBackend:
 def test_serial_survives_vpd_header(reader: DiskInfoReader) -> None:
     """Regression guard: stripping NULs before the 4-byte header offset drops
     the 'P9' prefix from every serial on this hardware."""
-    assert reader.read("sdb").serial == "P9GXVWZW"
+    assert reader.read("sdb").serial == "K1A00001"
 
 
 def test_all_slots_resolve_to_expected_serials(
@@ -90,7 +90,7 @@ def test_ses_sas_address_is_not_the_block_wwn() -> None:
     """Documents the trap: SES reports the SAS port address, the block layer
     reports the node WWN, and on this hardware they differ by 2. Correlating on
     equality would map every slot to nothing."""
-    ses_reported = int("5000cca058347d86", 16)  # from sg_ses aes, slot 0
-    block_reported = int("5000cca058347d84", 16)  # from sysfs wwid, sdb
+    ses_reported = int("5000cca0e0000002", 16)  # from sg_ses aes, slot 0
+    block_reported = int("5000cca0e0000000", 16)  # from sysfs wwid, sdb
     assert ses_reported != block_reported
     assert ses_reported - block_reported == 2

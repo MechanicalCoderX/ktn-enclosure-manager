@@ -189,7 +189,7 @@ container: on a narrow viewport it scrolls rather than wrapping, because
 wrapping would misrepresent the physical layout of the shelf.
 
 Health is conveyed by glyph + text + colour together, and every bay tile carries
-an accessible name (`"Bay 8, SES slot 7, OK, serial P9K6Z2KW"`).
+an accessible name (`"Bay 8, SES slot 7, OK, serial K1A00008"`).
 
 ## Deliberate non-goals
 

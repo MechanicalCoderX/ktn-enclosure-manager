@@ -1,5 +1,5 @@
   EMC       ESES Enclosure    0001
-  Primary enclosure logical identifier (hex): 5006048004a54c3e
+  Primary enclosure logical identifier (hex): 50060480aabbcc00
 Additional element status diagnostic page:
   generation code: 0x7
   additional element status descriptor list
@@ -11,8 +11,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058347d86
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000002
           phy identifier: 0x1
       Element index: 1  eiioe=0
         Transport protocol: SAS
@@ -21,8 +21,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca0583dfdfe
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000012
           phy identifier: 0x1
       Element index: 2  eiioe=0
         Transport protocol: SAS
@@ -31,8 +31,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b6147a
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000022
           phy identifier: 0x1
       Element index: 3  eiioe=0
         Transport protocol: SAS
@@ -41,8 +41,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b603b6
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000032
           phy identifier: 0x1
       Element index: 4  eiioe=0
         Transport protocol: SAS
@@ -51,8 +51,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058a1dafa
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000042
           phy identifier: 0x1
       Element index: 5  eiioe=0
         Transport protocol: SAS
@@ -61,8 +61,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b5dcb6
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000052
           phy identifier: 0x1
       Element index: 6  eiioe=0
         Transport protocol: SAS
@@ -71,8 +71,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b51f9e
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000062
           phy identifier: 0x1
       Element index: 7  eiioe=0
         Transport protocol: SAS
@@ -81,8 +81,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b5c6aa
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000072
           phy identifier: 0x1
       Element index: 8  eiioe=0
         Transport protocol: SAS
@@ -91,8 +91,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b5e766
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000082
           phy identifier: 0x1
       Element index: 9  eiioe=0
         Transport protocol: SAS
@@ -101,8 +101,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b5946e
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e0000092
           phy identifier: 0x1
       Element index: 10  eiioe=0
         Transport protocol: SAS
@@ -111,8 +111,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca0583e051a
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e00000a2
           phy identifier: 0x1
       Element index: 11  eiioe=0
         Transport protocol: SAS
@@ -121,8 +121,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058ae5eca
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e00000b2
           phy identifier: 0x1
       Element index: 12  eiioe=0
         Transport protocol: SAS
@@ -131,8 +131,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b60132
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e00000c2
           phy identifier: 0x1
       Element index: 13  eiioe=0
         Transport protocol: SAS
@@ -141,8 +141,8 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b603ce
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e00000d2
           phy identifier: 0x1
       Element index: 14  eiioe=0
         Transport protocol: SAS
@@ -151,14 +151,14 @@ Additional element status diagnostic page:
           SAS device type: end device
           initiator port for:
           target port for: SSP
-          attached SAS address: 0x5006048004a54c3f
-          SAS address: 0x5000cca058b51fae
+          attached SAS address: 0x50060480aabbcc01
+          SAS address: 0x5000cca0e00000e2
           phy identifier: 0x1
     Element type: SAS expander, subenclosure id: 0 [ti=4]
       Element index: 42  eiioe=0
         Transport protocol: SAS
         number of phys: 25
-        SAS address: 0x5006048004a54c3f
+        SAS address: 0x50060480aabbcc01
         Attached connector; other_element pairs:
           [0] connector ei: 45; other ei: 44
           [1] connector ei: 46; other ei: 44
@@ -192,12 +192,12 @@ Additional element status diagnostic page:
         phy index: 0
           phy_id: 0x18
           no connector; other ei: 42
-          SAS address: 0x5006048004a54c3e
+          SAS address: 0x50060480aabbcc00
     Element type: SAS expander, subenclosure id: 1 [ti=13]
       Element index: 68  eiioe=0
         Transport protocol: SAS
         number of phys: 24
-        SAS address: 0x5006048004a4eabf
+        SAS address: 0x50060480aabbcc11
         Attached connector; other_element pairs:
           [0] connector ei: 71; other ei: 70
           [1] connector ei: 72; other ei: 70
@@ -230,4 +230,4 @@ Additional element status diagnostic page:
         phy index: 0
           phy_id: 0x18
           no connector; other ei: 68
-          SAS address: 0x5006048004a4eabe
+          SAS address: 0x50060480aabbcc10

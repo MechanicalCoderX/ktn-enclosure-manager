@@ -17,7 +17,7 @@ from ktnmgr.enclosure.sysfs import (
 )
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
-LOGICAL_ID = "0x5006048004a54c3e"
+LOGICAL_ID = "0x50060480aabbcc00"
 
 # The authoritative mapping from spec §8. The tail is deliberately
 # non-alphabetical (sdn, sdp, sdo, sdm); that is what proves the mapping comes

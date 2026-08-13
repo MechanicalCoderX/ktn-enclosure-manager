@@ -40,8 +40,8 @@ def test_subenclosure_products(configuration_text: str) -> None:
     assert by_id[0].product == "Viper LCC"
     assert by_id[0].vendor == "EMC"
     assert by_id[0].revision == "0B70"
-    assert by_id[0].logical_id == "5006048004a54c3e"
-    assert by_id[1].logical_id == "5006048004a4eabe"
+    assert by_id[0].logical_id == "50060480aabbcc00"
+    assert by_id[1].logical_id == "50060480aabbcc10"
     assert by_id[2].product == "Viper Encl"
 
 
@@ -154,8 +154,8 @@ def test_all_array_slots_ok(configuration_text: str, join_text: str) -> None:
 
 
 def test_build_telemetry_end_to_end(configuration_text: str, join_text: str) -> None:
-    telemetry = build_telemetry("0x5006048004a54c3e", configuration_text, join_text)
-    assert telemetry.enclosure_id == "0x5006048004a54c3e"
+    telemetry = build_telemetry("0x50060480aabbcc00", configuration_text, join_text)
+    assert telemetry.enclosure_id == "0x50060480aabbcc00"
     assert len(telemetry.subenclosures) == 5
     assert len(telemetry.elements) == 134
     assert telemetry.collected_at is not None

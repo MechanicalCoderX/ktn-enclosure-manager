@@ -26,7 +26,7 @@ from ktnmgr.enclosure.ses import READ_ONLY_PAGES, SesError, SesRunner
 from ktnmgr.enclosure.sysfs import SysfsEnclosureBackend
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
-LOGICAL_ID = "0x5006048004a54c3e"
+LOGICAL_ID = "0x50060480aabbcc00"
 
 # Verbatim from spec §43, plus traversal and injection variants.
 HOSTILE_SLOTS = [
@@ -51,9 +51,9 @@ HOSTILE_SLOTS = [
 HOSTILE_ENCLOSURE_IDS = [
     "../../etc/passwd",
     "/dev/sg0",
-    "0x5006048004a54c3e; rm -rf /",
+    "0x50060480aabbcc00; rm -rf /",
     "$(id)",
-    "0x5006048004a54c3e/../../..",
+    "0x50060480aabbcc00/../../..",
     "",
     "not-hex",
     "0xZZZZ",
@@ -79,7 +79,7 @@ def test_hostile_enclosure_id_is_rejected(enclosure_id: object) -> None:
 
 
 def test_valid_request_is_normalised() -> None:
-    assert validate_request("0X5006048004A54C3E", 7) == (LOGICAL_ID, 7)
+    assert validate_request("0X50060480AABBCC00", 7) == (LOGICAL_ID, 7)
 
 
 def test_slot_upper_bound_enforced() -> None:

@@ -38,7 +38,7 @@ class ZfsState(StrEnum):
 class EnclosureRef(BaseModel):
     """A discovered SES enclosure, identified by attributes rather than path."""
 
-    logical_id: str = Field(description="Enclosure logical identifier, e.g. 0x5006048004a54c3e")
+    logical_id: str = Field(description="Enclosure logical identifier, e.g. 0x50060480aabbcc00")
     vendor: str
     product: str
     revision: str

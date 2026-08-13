@@ -6,7 +6,7 @@ Configuration diagnostic page:
     Subenclosure identifier: 0 [primary]
       relative ES process id: 1, number of ES processes: 1
       number of type descriptor headers: 10
-      enclosure logical identifier (hex): 5006048004a54c3e
+      enclosure logical identifier (hex): 50060480aabbcc00
       enclosure vendor: EMC       product: Viper LCC         rev: 0B70
       vendor-specific data:
         07 81 42 02 00 01 02 4a  57 58 50 4c 31 32 35 32    ..B....JWXPL1252
@@ -26,7 +26,7 @@ Configuration diagnostic page:
     Subenclosure identifier: 1
       relative ES process id: 1, number of ES processes: 1
       number of type descriptor headers: 6
-      enclosure logical identifier (hex): 5006048004a4eabe
+      enclosure logical identifier (hex): 50060480aabbcc10
       enclosure vendor: EMC       product: Viper LCC         rev: 0B70
       vendor-specific data:
         07 80 41 02 01 00 01 4a  57 58 50 4c 31 32 35 32    ..A....JWXPL1252

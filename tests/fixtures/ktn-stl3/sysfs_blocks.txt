@@ -2,119 +2,119 @@
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058347d84
+device/wwid=naa.5000cca0e0000000
 size=5860533168
 rotational=1
-serial=P9GXVWZW        
+serial=K1A00001        
 ### sdc
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca0583dfdfc
+device/wwid=naa.5000cca0e0000010
 size=5860533168
 rotational=1
-serial=P9H32WVW        
+serial=K1A00002        
 ### sdd
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b61478
+device/wwid=naa.5000cca0e0000020
 size=5860533168
 rotational=1
-serial=P9K7486V        
+serial=K1A00003        
 ### sde
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b603b4
+device/wwid=naa.5000cca0e0000030
 size=5860533168
 rotational=1
-serial=P9K734LV        
+serial=K1A00004        
 ### sdf
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058a1daf8
+device/wwid=naa.5000cca0e0000040
 size=5860533168
 rotational=1
-serial=P9JW0G5W        
+serial=K1A00005        
 ### sdg
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b5dcb4
+device/wwid=naa.5000cca0e0000050
 size=5860533168
 rotational=1
-serial=P9K70K2W        
+serial=K1A00006        
 ### sdh
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b51f9c
+device/wwid=naa.5000cca0e0000060
 size=5860533168
 rotational=1
-serial=P9K6LYPW        
+serial=K1A00007        
 ### sdi
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b5c6a8
+device/wwid=naa.5000cca0e0000070
 size=5860533168
 rotational=1
-serial=P9K6Z2KW        
+serial=K1A00008        
 ### sdj
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b5e764
+device/wwid=naa.5000cca0e0000080
 size=5860533168
 rotational=1
-serial=P9K7184W        
+serial=K1A00009        
 ### sdk
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b5946c
+device/wwid=naa.5000cca0e0000090
 size=5860533168
 rotational=1
-serial=P9K6VRVW        
+serial=K1A00010        
 ### sdl
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca0583e0518
+device/wwid=naa.5000cca0e00000a0
 size=5860533168
 rotational=1
-serial=P9H33BJW        
+serial=K1A00011        
 ### sdm
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b51fac
+device/wwid=naa.5000cca0e00000e0
 size=5860533168
 rotational=1
-serial=P9K6LYUW        
+serial=K1A00015        
 ### sdn
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058ae5ec8
+device/wwid=naa.5000cca0e00000b0
 size=5860533168
 rotational=1
-serial=P9K2WUHW        
+serial=K1A00012        
 ### sdo
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b603cc
+device/wwid=naa.5000cca0e00000d0
 size=5860533168
 rotational=1
-serial=P9K734TV        
+serial=K1A00014        
 ### sdp
 device/vendor=HITACHI 
 device/model=HUS72403CLAR3000
 device/rev=C370
-device/wwid=naa.5000cca058b60130
+device/wwid=naa.5000cca0e00000c0
 size=5860533168
 rotational=1
-serial=P9K72ZDV        
+serial=K1A00013        

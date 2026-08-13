@@ -13,7 +13,7 @@ from ktnmgr.config import Settings
 from ktnmgr.main import build_app
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
-LOGICAL_ID = "0x5006048004a54c3e"
+LOGICAL_ID = "0x50060480aabbcc00"
 PASSWORD = "a-sufficiently-long-password"
 CSRF = {"x-ktn-request": "1"}
 
@@ -147,7 +147,7 @@ def test_bay_carries_identity_and_health(auth_client: TestClient) -> None:
     bays = auth_client.get(f"/api/enclosures/{LOGICAL_ID}/bays").json()["bays"]
     bay = next(b for b in bays if b["ses_slot"] == 0)
     assert bay["device"] == "/dev/sdb"
-    assert bay["disk"]["serial"] == "P9GXVWZW"
+    assert bay["disk"]["serial"] == "K1A00001"
     assert bay["health"] == "ok"
     assert bay["locate"] is False
 

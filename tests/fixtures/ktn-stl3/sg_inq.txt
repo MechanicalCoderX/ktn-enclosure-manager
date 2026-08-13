@@ -9,4 +9,4 @@ standard INQUIRY:
  Vendor identification: EMC     
  Product identification: ESES Enclosure  
  Product revision level: 0001
- Unit serial number:    5006048004a54c3e
+ Unit serial number:    50060480aabbcc00

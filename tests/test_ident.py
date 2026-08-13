@@ -12,7 +12,7 @@ from ktnmgr.enclosure.locate import LocateError
 from ktnmgr.services.audit import AuditLog
 from ktnmgr.services.ident import ORIGIN_APP, ORIGIN_EXTERNAL, IdentManager, IdentRecord, IdentState
 
-LOGICAL_ID = "0x5006048004a54c3e"
+LOGICAL_ID = "0x50060480aabbcc00"
 
 
 class FakeWriter:

@@ -52,7 +52,7 @@ def test_all_shelf_disks_attributed_to_pool(pools: list[dict]) -> None:
 def test_vdev_name_is_the_raidz_container_not_the_leaf(pools: list[dict]) -> None:
     """A disk in raidz3-0 must report 'raidz3-0', not its own device name."""
     index = build_zfs_index(pools)
-    assert index["sdb"].pool == "data_pool"
+    assert index["sdb"].pool == "tank"
     assert index["sdb"].vdev == "raidz3-0"
 
 
@@ -119,7 +119,7 @@ def test_unknown_zfs_status_degrades_gracefully() -> None:
 
 def test_disk_index_serials(disks: list[dict]) -> None:
     index = build_disk_index(disks)
-    assert index["sdb"].serial == "P9GXVWZW"
+    assert index["sdb"].serial == "K1A00001"
     assert index["sdb"].model == "HUS72403CLAR3000"
     assert index["sdb"].size_bytes == 3000592982016
 
@@ -186,7 +186,7 @@ def test_end_to_end_slot_to_pool(pools: list[dict], disks: list[dict]) -> None:
         identity = merge_identity(reader.read(slot.block_device), remote.get(slot.block_device))
         info = zfs[slot.block_device]
         assert identity.serial
-        assert info.pool == "data_pool"
+        assert info.pool == "tank"
         assert info.vdev == "raidz3-0"
         resolved += 1
     assert resolved == 15

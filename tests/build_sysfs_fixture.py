@@ -12,7 +12,7 @@ SRC = HERE / "fixtures" / "ktn-stl3" / "sysfs_slots.txt"
 OUT = HERE / "fixtures" / "sysfs_root"
 ADDR = "1:0:15:0"
 
-ENCL = {"id": "0x5006048004a54c3e", "components": "15"}
+ENCL = {"id": "0x50060480aabbcc00", "components": "15"}
 DEVICE = {"vendor": "EMC     ", "model": "ESES Enclosure  ", "rev": "0001", "type": "13"}
 
 def w(p: Path, text: str) -> None:

@@ -1,5 +1,5 @@
   EMC       ESES Enclosure    0001
-  Primary enclosure logical identifier (hex): 5006048004a54c3e
+  Primary enclosure logical identifier (hex): 50060480aabbcc00
 [0,-1]  Element type: Array device slot
   Enclosure Status:
     Predicted failure=0, Disabled=0, Swap=1, status: OK
@@ -25,8 +25,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058347d86
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000002
       phy identifier: 0x1
 [0,1]  Element type: Array device slot
   Enclosure Status:
@@ -44,8 +44,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca0583dfdfe
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000012
       phy identifier: 0x1
 [0,2]  Element type: Array device slot
   Enclosure Status:
@@ -63,8 +63,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b6147a
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000022
       phy identifier: 0x1
 [0,3]  Element type: Array device slot
   Enclosure Status:
@@ -82,8 +82,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b603b6
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000032
       phy identifier: 0x1
 [0,4]  Element type: Array device slot
   Enclosure Status:
@@ -101,8 +101,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058a1dafa
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000042
       phy identifier: 0x1
 [0,5]  Element type: Array device slot
   Enclosure Status:
@@ -120,8 +120,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b5dcb6
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000052
       phy identifier: 0x1
 [0,6]  Element type: Array device slot
   Enclosure Status:
@@ -139,8 +139,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b51f9e
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000062
       phy identifier: 0x1
 [0,7]  Element type: Array device slot
   Enclosure Status:
@@ -158,8 +158,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b5c6aa
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000072
       phy identifier: 0x1
 [0,8]  Element type: Array device slot
   Enclosure Status:
@@ -177,8 +177,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b5e766
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000082
       phy identifier: 0x1
 [0,9]  Element type: Array device slot
   Enclosure Status:
@@ -196,8 +196,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b5946e
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e0000092
       phy identifier: 0x1
 [0,10]  Element type: Array device slot
   Enclosure Status:
@@ -215,8 +215,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca0583e051a
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e00000a2
       phy identifier: 0x1
 [0,11]  Element type: Array device slot
   Enclosure Status:
@@ -234,8 +234,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058ae5eca
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e00000b2
       phy identifier: 0x1
 [0,12]  Element type: Array device slot
   Enclosure Status:
@@ -253,8 +253,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b60132
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e00000c2
       phy identifier: 0x1
 [0,13]  Element type: Array device slot
   Enclosure Status:
@@ -272,8 +272,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b603ce
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e00000d2
       phy identifier: 0x1
 [0,14]  Element type: Array device slot
   Enclosure Status:
@@ -291,8 +291,8 @@
       SAS device type: end device
       initiator port for:
       target port for: SSP
-      attached SAS address: 0x5006048004a54c3f
-      SAS address: 0x5000cca058b51fae
+      attached SAS address: 0x50060480aabbcc01
+      SAS address: 0x5000cca0e00000e2
       phy identifier: 0x1
 [1,-1]  Element type: Temperature sensor
   Enclosure Status:
@@ -433,7 +433,7 @@
   Additional Element Status:
     Transport protocol: SAS
     number of phys: 25
-    SAS address: 0x5006048004a54c3f
+    SAS address: 0x50060480aabbcc01
     Attached connector; other_element pairs:
       [0] broken [conn_idx=45]; broken [oth_elem_idx=44]
       [1] broken [conn_idx=46]; broken [oth_elem_idx=44]
@@ -474,7 +474,7 @@
     phy index: 0
       phy_id: 0x18
       no connector; broken [oth_elem_idx=42]
-      SAS address: 0x5006048004a54c3e
+      SAS address: 0x50060480aabbcc00
 [6,-1]  Element type: SAS connector
   Enclosure Status:
     Predicted failure=0, Disabled=0, Swap=0, status: Not installed
@@ -629,7 +629,7 @@
   Additional Element Status:
     Transport protocol: SAS
     number of phys: 24
-    SAS address: 0x5006048004a4eabf
+    SAS address: 0x50060480aabbcc11
     Attached connector; other_element pairs:
       [0] broken [conn_idx=71]; broken [oth_elem_idx=70]
       [1] broken [conn_idx=72]; broken [oth_elem_idx=70]
@@ -669,7 +669,7 @@
     phy index: 0
       phy_id: 0x18
       no connector; broken [oth_elem_idx=68]
-      SAS address: 0x5006048004a4eabe
+      SAS address: 0x50060480aabbcc10
 [15,-1]  Element type: SAS connector
   Enclosure Status:
     Predicted failure=0, Disabled=0, Swap=0, status: Not installed

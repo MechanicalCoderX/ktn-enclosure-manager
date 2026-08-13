@@ -73,7 +73,7 @@ test.describe("drive map", () => {
   });
 
   test("bay one shows the expected disk", async ({ page }) => {
-    await expect(page.getByRole("listitem", { name: /^Bay 1, / })).toContainText("P9GXVWZW");
+    await expect(page.getByRole("listitem", { name: /^Bay 1, / })).toContainText("K1A00001");
   });
 
   test("selecting a bay opens the detail panel", async ({ page }) => {
@@ -81,11 +81,11 @@ test.describe("drive map", () => {
     const detail = page.getByTestId("bay-detail");
     await expect(detail.getByRole("heading", { name: /Bay 8.*SES slot 7/ })).toBeVisible();
     // Scoped to the detail panel: the serial also appears on the tile itself.
-    await expect(detail.getByText("P9K6Z2KW")).toBeVisible();
+    await expect(detail.getByText("K1A00008")).toBeVisible();
   });
 
   test("search narrows to a serial", async ({ page }) => {
-    await page.getByLabel("Search bays").fill("P9K6Z2KW");
+    await page.getByLabel("Search bays").fill("K1A00008");
     const dimmed = page.locator(".bay.dim");
     await expect(dimmed).toHaveCount(15);
   });
@@ -139,7 +139,7 @@ test.describe("chassis and diagnostics", () => {
   test("diagnostics exposes discovery and no credentials", async ({ page }) => {
     await page.getByRole("tab", { name: "Diagnostics" }).click();
     const pre = page.locator("pre.raw").first();
-    await expect(pre).toContainText("0x5006048004a54c3e");
+    await expect(pre).toContainText("0x50060480aabbcc00");
     await expect(pre).not.toContainText("api_key");
     await expect(pre).not.toContainText("password");
   });
