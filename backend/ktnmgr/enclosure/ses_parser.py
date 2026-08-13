@@ -230,3 +230,21 @@ def build_telemetry(
         overall_flags=parse_overall_flags(join_text) or parse_overall_flags(configuration_text),
         collected_at=datetime.now(UTC),
     )
+
+
+#: SES element type name for a drive bay, as sg_ses prints it.
+ARRAY_DEVICE_SLOT = "Array device slot"
+
+
+def array_slot_type_index(descriptors: list[TypeDescriptor]) -> int | None:
+    """Find the type descriptor index that holds the drive bays.
+
+    ``sg_ses --index=T,E`` addresses element E of type descriptor T, so IDENT
+    needs T. It is 0 on the KTN-STL3 but that is not guaranteed on other
+    shelves, so it is discovered from the configuration page rather than
+    assumed.
+    """
+    for descriptor in descriptors:
+        if descriptor.element_type == ARRAY_DEVICE_SLOT and descriptor.count > 0:
+            return descriptor.index
+    return None

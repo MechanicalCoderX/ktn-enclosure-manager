@@ -37,7 +37,8 @@ if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
         --socket "$KTN_IDENT_HELPER_SOCKET" \
         --socket-group 1000 \
         --sysfs-root "${KTN_SYSFS_ROOT:-/sys}" \
-        --allow "${KTN_ENCLOSURE_ALLOWLIST:-}" &
+        --allow "${KTN_ENCLOSURE_ALLOWLIST:-}" \
+        --ident-method "${KTN_IDENT_METHOD:-auto}" &
     HELPER_PID=$!
 
     # Wait briefly for the socket so the first request cannot race startup.

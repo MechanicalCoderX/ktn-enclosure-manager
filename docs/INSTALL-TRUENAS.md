@@ -45,19 +45,12 @@ lines marked `### EDIT ###`:
 `http://<truenas>:8420`. First run has **no account and no default password**;
 you create the administrator in the browser.
 
-### Enabling the Identify button
+### Privileges this asks for
 
-By default the app is fully functional except Identify, which needs to write
-`/sys`. Docker's default AppArmor profile denies that regardless of
-capabilities. To enable it, uncomment this line in the YAML and redeploy:
-
-```yaml
-      - apparmor=unconfined
-```
-
-Please read [SECURITY.md](../SECURITY.md) first — it explains exactly what that
-does and does not expose, and why the alternative (a custom AppArmor profile)
-is not the default.
+One device node — your enclosure — and nothing else. The container is not
+privileged, mounts no host path besides its own data dataset, keeps Docker's
+default AppArmor profile, and drops every capability except the two used to
+drop the web process to uid 1000. See [SECURITY.md](../SECURITY.md).
 
 ---
 

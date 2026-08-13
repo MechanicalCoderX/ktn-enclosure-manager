@@ -3,8 +3,6 @@ groups:
     description: Which disk shelf to manage
   - name: TrueNAS Integration
     description: Optional — adds pool, vdev, ZFS error and SMART data
-  - name: Identify (LED) Control
-    description: Whether the app may light drive-bay LEDs
   - name: Network Configuration
     description: Where the web interface listens
   - name: Storage Configuration
@@ -75,30 +73,6 @@ questions:
           schema:
             type: boolean
             default: true
-
-  # ----------------------------------------------------- ident
-  - variable: ident
-    label: ""
-    group: Identify (LED) Control
-    schema:
-      type: dict
-      attrs:
-        - variable: enabled
-          label: Allow lighting drive-bay LEDs
-          description: |
-            Turning this on runs the container with AppArmor unconfined.
-
-            Docker's default AppArmor profile denies every write under /sys
-            regardless of user or capabilities, so the IDENT LED cannot be lit
-            without it. This is much narrower than privileged mode —
-            capabilities stay dropped to three, the only device exposed is the
-            enclosure, and the web process still runs unprivileged with no
-            device access — but it IS a real relaxation.
-
-            Leave this off and everything except the Identify button works.
-          schema:
-            type: boolean
-            default: false
 
   # ----------------------------------------------------- network
   - variable: network

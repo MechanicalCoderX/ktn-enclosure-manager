@@ -108,8 +108,8 @@ another shelf's labels come through unchanged.
 ```
 request ─► validate (hex id, bounded int slot)
         ─► acquire per-enclosure lock
-        ─► read current locate
-        ─► write locate
+        ─► read current locate (sysfs, a read)
+        ─► sg_ses --index=T,E --set=ident   (T discovered from the config page)
         ─► POLL read-back until it settles (measured 0.17–0.22 s)
         ─► audit with previous, result and verification
         ─► persist record + expiry
@@ -142,7 +142,7 @@ web process (uid 1000, no caps, no /dev access)
       │  {"op":"identify_on","enclosure_id":"0x…","slot":0}
       │  {"op":"ses_read","enclosure_id":"0x…","page":"join"}
       ▼
-IDENT helper (root)  ── re-validates independently ──► sysfs / sg_ses
+IDENT helper (root)  ── re-validates independently ──► sg_ses / sysfs reads
 ```
 
 The socket protocol carries only semantics. There is no field for a path, a
@@ -152,6 +152,16 @@ repeats it, and enforces the enclosure allow-list itself.
 
 Routing SES reads through the helper as well means the web process needs no
 access to `/dev/sg*` at all.
+
+### Why the LED is set with a SCSI command, not a sysfs write
+
+Both work on the hardware. The SCSI path is preferred purely for deployment:
+Docker's default AppArmor profile denies every write under `/sys` regardless of
+uid, capabilities or mount flags, while leaving `SG_IO` alone. Driving the LED
+through the enclosure device therefore lets the container keep the default
+profile, drop `CAP_DAC_OVERRIDE`, and mount no `/sys` at all. The sysfs path
+remains available as `KTN_IDENT_METHOD=sysfs` for enclosures whose SES
+implementation does not honour the identify bit.
 
 ## Polling and caching
 

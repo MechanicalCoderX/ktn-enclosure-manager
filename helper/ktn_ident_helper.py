@@ -33,7 +33,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
-from ktnmgr.enclosure.locate import LocateError, validate_request
+from ktnmgr.enclosure.locate import (
+    LocateError,
+    build_local_locate_writer,
+    validate_request,
+)
 from ktnmgr.enclosure.ses import READ_ONLY_PAGES, SesError, SesRunner
 from ktnmgr.enclosure.sysfs import (
     EnclosureNotFoundError,
@@ -50,6 +54,7 @@ class IdentHandler(socketserver.StreamRequestHandler):
     backend: SysfsEnclosureBackend
     allowlist: set[str]
     ses: SesRunner
+    writer: object
 
     def handle(self) -> None:
         raw = self.rfile.readline(MAX_REQUEST_BYTES)
@@ -114,7 +119,7 @@ class IdentHandler(socketserver.StreamRequestHandler):
         try:
             if op == "identify_read":
                 return {"ok": True, "locate": self.backend.read_locate(ref, slot)}
-            state = self.backend.set_locate(ref, slot, op == "identify_on")
+            state = self.writer.write(enclosure_id, slot, op == "identify_on")
         except SlotNotFoundError as exc:
             raise LocateError("slot not present on this enclosure") from exc
         except OSError as exc:
@@ -137,6 +142,8 @@ def main() -> int:
     parser.add_argument("--sysfs-root", default=Path("/sys"), type=Path)
     parser.add_argument("--allow", default="",
                         help="comma-separated enclosure logical ids; empty means any")
+    parser.add_argument("--ident-method", default="auto", choices=("auto", "ses", "sysfs"),
+                        help="how to drive the LED; 'ses' avoids needing a writable /sys")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -148,6 +155,9 @@ def main() -> int:
     IdentHandler.backend = SysfsEnclosureBackend(sysfs_root=args.sysfs_root)
     IdentHandler.allowlist = {e.strip().lower() for e in args.allow.split(",") if e.strip()}
     IdentHandler.ses = SesRunner()
+    IdentHandler.writer = build_local_locate_writer(
+        IdentHandler.backend, IdentHandler.ses, args.ident_method
+    )
 
     args.socket.parent.mkdir(parents=True, exist_ok=True)
     if args.socket.exists():

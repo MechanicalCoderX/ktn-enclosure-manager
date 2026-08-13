@@ -77,21 +77,15 @@ lsscsi -g | grep enclosu          # -> /dev/sgN
 cat /sys/class/enclosure/*/id     # -> 0x...  (put in KTN_ENCLOSURE_ALLOWLIST)
 ```
 
-### Identify button: one extra step
+### Privileges
 
-The shipped compose file is hardened and **read-only**: everything works except
-Identify, which needs to write `/sys`. Docker's default AppArmor profile denies
-all `/sys` writes regardless of capabilities. To enable Identify, add one line
-to the service:
+The container is **not** privileged, mounts no host path other than its own data
+directory, runs under the default AppArmor profile, and drops every capability
+except `SETUID`/`SETGID` (used once, to drop the web process to uid 1000). Its
+only hardware access is the SES device node.
 
-```yaml
-    security_opt:
-      - no-new-privileges:true
-      - apparmor=unconfined
-```
-
-Read [SECURITY.md](SECURITY.md) before doing so — it explains exactly what that
-does and does not expose, and describes a stricter custom-profile alternative.
+The Identify LED is driven by a SCSI command rather than a sysfs write, which is
+what makes that possible — see [SECURITY.md](SECURITY.md).
 
 ### TrueNAS Custom App
 
@@ -153,8 +147,10 @@ enclosures.
 and it must be granted `rw` (see SECURITY.md — `SG_IO` counts as a write).
 Confirm with `docker exec ktn-enclosure-manager sg_ses -p cf /dev/sgN`.
 
-**Identify returns a permission error.** Expected in the default hardened
-configuration; see "Identify button" above.
+**Identify returns a permission error.** Check the SES device is granted `:rw`
+(see above). If your enclosure does not support the SES identify command, set
+`KTN_IDENT_METHOD=sysfs` — but note that path needs a writable `/sys` and
+`apparmor=unconfined`.
 
 **Pool/vdev/SMART columns empty.** TrueNAS is unreachable or the API key is
 wrong. The banner names the error, and the drive map keeps working — bay state

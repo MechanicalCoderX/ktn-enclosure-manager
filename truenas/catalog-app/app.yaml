@@ -1,9 +1,7 @@
 annotations:
   min_scale_version: 24.10.0
-app_version: 1.0.0
+app_version: 1.1.0
 capabilities:
-  - name: DAC_OVERRIDE
-    description: Needed to write the root-owned enclosure `locate` attribute (IDENT LED).
   - name: SETUID
     description: Needed to drop the web process from root to uid 1000 at startup.
   - name: SETGID
@@ -16,13 +14,7 @@ date_added: '2026-08-13'
 description: Physical drive-bay map, chassis telemetry and IDENT LED control for SES
   disk shelves attached to TrueNAS SCALE.
 home: https://github.com/MechanicalCoderX/ktn-enclosure-manager
-host_mounts:
-  - host_path: /sys
-    description: >-
-      Enclosure discovery, per-bay state and the IDENT write all use the Linux
-      enclosure sysfs ABI. It must be /sys rather than /sys/class/enclosure,
-      because the attributes live under /sys/devices and the class entries are
-      only symlinks into it.
+host_mounts: []
 icon: https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/icon.png
 keywords:
   - enclosure
@@ -62,4 +54,4 @@ sources:
   - https://github.com/MechanicalCoderX/ktn-enclosure-manager
 title: KTN Enclosure Manager
 train: community
-version: 1.0.0
+version: 1.1.0

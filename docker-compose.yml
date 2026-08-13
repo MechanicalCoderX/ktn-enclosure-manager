@@ -2,27 +2,27 @@
 #
 # HOST ACCESS THIS CONTAINER REQUIRES, and why (spec §32):
 #
-#   /sys  (read-write)  Enclosure discovery, slot state and the IDENT write all
-#                       go through the Linux enclosure sysfs ABI. Docker mounts
-#                       /sys read-only by default, and the enclosure attributes
-#                       live under /sys/devices (the /sys/class/enclosure entries
-#                       are symlinks into it), so a narrower bind of just
-#                       /sys/class/enclosure does not work - its symlinks would
-#                       resolve back into the container's read-only /sys.
+#   /dev/sg*   The SES enclosure device. Everything the app does to the
+#              hardware goes through it: read-only telemetry pages, and the one
+#              write it can perform (the IDENT LED).
 #
-#   /dev/sg*            SCSI generic device for read-only sg_ses telemetry.
-#                       Granted per-device rather than by mounting all of /dev.
+#              ':rw' is required and was determined by measurement: sg_ses
+#              submits SCSI commands through the SG_IO ioctl, which the device
+#              cgroup treats as a write even for a read-only diagnostic page.
+#              This addresses the enclosure processor, not disk data.
 #
-# The container does NOT use --privileged. It drops all capabilities except
-# DAC_OVERRIDE, which is what the sysfs write actually needs.
+# That is the entire list. In particular this app does NOT need:
 #
-# If you are unwilling to grant a writable /sys, set KTN_IDENT_HELPER_SOCKET
-# empty and the app still runs read-only: the drive map, chassis telemetry and
-# all TrueNAS data work; only the Identify button is unavailable.
+#   - a /sys bind mount. Docker's own read-only /sys already exposes
+#     /sys/class/enclosure, which is all the app reads.
+#   - a writable /sys, CAP_DAC_OVERRIDE, or apparmor=unconfined. The IDENT LED
+#     is driven by a SCSI command rather than a sysfs write, and SG_IO is not
+#     restricted by Docker's default AppArmor profile.
+#   - --privileged, ever.
 
 services:
   ktn-enclosure-manager:
-    image: ktn-enclosure-manager:1.0.0
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.1.0
     build:
       context: .
       dockerfile: Dockerfile
@@ -34,41 +34,32 @@ services:
 
     volumes:
       # Application state: accounts, session key, IDENT timers, audit log.
+      # Must be writable by uid 1000; the app refuses to start otherwise.
       - ${KTN_DATA_PATH:-./data}:/data
-      # Enclosure sysfs. See the note above on why this is /sys and not narrower.
-      - /sys:/sys:rw
 
     devices:
-      # Adjust if your SES device is not sg16; the app discovers the correct
-      # one at runtime but the device node must be exposed to the container.
-      #
-      # ':rw' is required and was determined by measurement, not assumption:
-      # sg_ses submits SCSI commands through the SG_IO ioctl, which the device
-      # cgroup treats as a write even for a read-only diagnostic page. With
-      # ':r' every sg_ses call fails with "Operation not permitted".
-      # This is NOT write access to disk data - it addresses the enclosure
-      # processor, and the application only ever issues allow-listed read-only
-      # pages (see backend/ktnmgr/enclosure/ses.py).
-      # CAP_SYS_RAWIO was tested and is NOT needed; it is deliberately not granted.
       - "${KTN_SG_DEVICE:-/dev/sg16}:${KTN_SG_DEVICE:-/dev/sg16}:rw"
 
     cap_drop:
       - ALL
     cap_add:
-      # Write access to the locate attribute, which is root-owned on the host.
-      - DAC_OVERRIDE
       # setpriv drops the web process to uid/gid 1000. Without these the whole
-      # application would have to stay root, which is strictly worse.
+      # application would have to stay root, which is strictly worse. No
+      # capability is needed for the LED itself.
       - SETUID
       - SETGID
+
     security_opt:
       - no-new-privileges:true
+      # Note: the default AppArmor profile is deliberately left in place.
 
     environment:
       KTN_DATA_DIR: /data
       KTN_PORT: "8420"
       KTN_IDENT_HELPER_SOCKET: /run/ktn/ident.sock
-      KTN_SYSFS_ROOT: /sys
+      # 'ses' issues a SCSI command; 'sysfs' writes the locate attribute and
+      # would then require a writable /sys and apparmor=unconfined.
+      KTN_IDENT_METHOD: ${KTN_IDENT_METHOD:-auto}
       KTN_TRUENAS_URL: ${KTN_TRUENAS_URL:-}
       KTN_TRUENAS_API_KEY: ${KTN_TRUENAS_API_KEY:-}
       KTN_TRUENAS_VERIFY_TLS: ${KTN_TRUENAS_VERIFY_TLS:-true}
@@ -80,6 +71,6 @@ services:
       KTN_POLL_SMART_SECONDS: ${KTN_POLL_SMART_SECONDS:-120}
 
     tmpfs:
-      # setgid (2770) so the helper's socket inherits gid 1000 on creation and
-      # the container needs no CAP_CHOWN.
+      # setgid so the helper's socket inherits gid 1000 and the container needs
+      # no CAP_CHOWN.
       - /run/ktn:mode=2770,uid=0,gid=1000

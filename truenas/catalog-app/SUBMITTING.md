@@ -11,19 +11,19 @@ third-party one** — `catalog.create` does not exist any more. So the official
 train is the only route to "appears in Discover Apps like every other app", and
 it is gated by iXsystems review.
 
-**Be realistic about the odds.** This app needs things a normal catalog app does
-not:
+This app needs a little more than a typical web app, but far less than it once
+did:
 
 | Requirement | Why | Likely reviewer reaction |
 |---|---|---|
-| `/sys` mounted read-write | the enclosure sysfs ABI is the whole point | unusual, but declarable via `host_mounts` |
 | An `/dev/sg*` device, `rw` | `SG_IO` counts as a write even for read-only pages | reasonable, narrow |
-| `DAC_OVERRIDE`, `SETUID`, `SETGID` | write `locate`; drop to uid 1000 | declarable via `capabilities` |
-| **AppArmor unconfined** (opt-in) | Docker's default profile blocks all `/sys` writes | **the hard one** |
+| `SETUID`, `SETGID` | drop the web process to uid 1000 | declarable via `capabilities`, and used only to *reduce* privilege |
 
-The AppArmor requirement is the likely sticking point. It is off by default and
-the app is fully functional without it, which is the strongest argument
-available: users who never enable Identify run a fully confined container.
+That is the whole list. No host mounts, no `--privileged`, no AppArmor
+relaxation, no `CAP_DAC_OVERRIDE`, and the container keeps Docker's default
+profile. Version 1.0.0 needed `apparmor=unconfined` to write the LED through
+sysfs; 1.1.0 drives it with a SCSI command instead, which removed the only
+genuinely contentious requirement.
 
 If it is rejected, nothing is lost — **Install via YAML works today** and is
 documented in [`../../docs/INSTALL-TRUENAS.md`](../../docs/INSTALL-TRUENAS.md).
@@ -49,8 +49,8 @@ documented in [`../../docs/INSTALL-TRUENAS.md`](../../docs/INSTALL-TRUENAS.md).
    `templates/docker-compose.yaml` here is written in their idiom but has *not*
    been rendered against a pinned library, because vendoring it into this repo
    would mean shipping thousands of lines of someone else's code. Expect to fix
-   API details — particularly `add_tmpfs`, `security_opt.add_apparmor` and
-   `devices.add_device` signatures, which vary between library versions.
+   API details — particularly the `add_tmpfs` and `devices.add_device`
+   signatures, which vary between library versions.
 
    From a truenas/apps checkout:
 
@@ -60,8 +60,8 @@ documented in [`../../docs/INSTALL-TRUENAS.md`](../../docs/INSTALL-TRUENAS.md).
    ```
 
 6. **Add test values.** Their CI renders `templates/test_values/*.yaml`. At
-   minimum add `basic-values.yaml` (Identify off) and `ident-values.yaml`
-   (Identify on) so both branches of the template are exercised.
+   minimum add `basic-values.yaml`, plus one exercising a Host Path data volume
+   rather than an ixVolume.
 
 7. **Run their checks** (`make test`, cspell, etc.) before opening the PR.
 
@@ -77,14 +77,10 @@ and open the PR. Lead with what a reviewer needs in order to decide:
   [`../../SECURITY.md`](../../SECURITY.md), which documents that
   `CAP_SYS_RAWIO` was tested and deliberately **not** taken, and that
   `--privileged` is never used;
-- that AppArmor unconfined is opt-in, off by default, and only affects the
-  Identify button;
 - that the only write the app can perform is the IDENT LED, enforced by an
   allow-list with no mutating `sg_ses` option reachable, and covered by tests.
 
 ## If it is rejected
 
-Keep shipping via Install via YAML. Consider asking iX whether a custom AppArmor
-profile shipped with the app would be acceptable — that would remove the only
-genuinely contentious requirement, at the cost of writing to the host's
-`/etc/apparmor.d`, which this project currently refuses to do.
+Keep shipping via Install via YAML, which works today and needs no approval
+from anyone.

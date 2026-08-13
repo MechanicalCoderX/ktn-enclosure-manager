@@ -41,6 +41,15 @@ class Settings(BaseSettings):
             "never writes sysfs itself and needs no elevated privilege (§31)."
         ),
     )
+    ident_method: str = Field(
+        default="auto",
+        description=(
+            "How the IDENT LED is driven: 'ses' issues a SCSI command (works under "
+            "the default container AppArmor profile), 'sysfs' writes the locate "
+            "attribute (needs a writable /sys and apparmor=unconfined), 'auto' "
+            "prefers ses and falls back to sysfs."
+        ),
+    )
     #: Optional administrative override for which enclosures to manage (§4).
     enclosure_allowlist: str = ""
 

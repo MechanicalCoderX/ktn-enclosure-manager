@@ -44,7 +44,12 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         else SesRunner(binary=settings.sg_ses_binary)
     )
     audit = AuditLog(settings.audit_path)
-    writer = build_locate_writer(backend, settings.ident_helper_socket)
+    writer = build_locate_writer(
+        backend,
+        settings.ident_helper_socket,
+        ses=SesRunner(binary=settings.sg_ses_binary),
+        method=settings.ident_method,
+    )
     ident = IdentManager(writer=writer, audit=audit, state_path=settings.ident_state_path)
 
     truenas: TrueNASClient | None = None

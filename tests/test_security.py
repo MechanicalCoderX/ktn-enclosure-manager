@@ -160,3 +160,72 @@ def test_no_mutating_sg_ses_option_is_reachable() -> None:
         joined = " ".join(argv)
         for option in forbidden:
             assert option not in joined, f"page {page!r} can mutate via {option}"
+
+
+# ------------------------------------------------- the one mutating SES call
+
+
+def test_ident_args_contain_only_identify() -> None:
+    """IDENT is the only mutating SES operation. Its arguments must address the
+    identify bit and nothing else - not device_off, fault, or a PHY reset."""
+    from ktnmgr.enclosure.ses import IDENT_ARGS
+
+    assert set(IDENT_ARGS.values()) == {"--set=ident", "--clear=ident"}
+    for value in IDENT_ARGS.values():
+        assert "device_off" not in value
+        assert "fault" not in value
+
+
+@pytest.mark.parametrize("bad", [-1, 1024, 99999, True, 1.5, "0", None, "0;rm -rf /", [0]])
+def test_ident_rejects_hostile_indices(bad: object) -> None:
+    """Both indices are range-checked integers, so nothing else is expressible."""
+    runner = SesRunner()
+    with pytest.raises(SesError):
+        runner.set_ident("/dev/sg16", bad, 0, True)  # type: ignore[arg-type]
+    with pytest.raises(SesError):
+        runner.set_ident("/dev/sg16", 0, bad, True)  # type: ignore[arg-type]
+
+
+def test_ident_rejects_relative_device() -> None:
+    with pytest.raises(SesError):
+        SesRunner().set_ident("sg16", 0, 0, True)
+
+
+def test_ident_argv_is_exactly_the_expected_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Capture the argv without executing it: every element is either a fixed
+    literal or a formatted integer, so no caller input reaches the shell."""
+    captured: dict[str, object] = {}
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        captured["argv"] = argv
+        captured["shell"] = kwargs.get("shell")
+        return Result()
+
+    monkeypatch.setattr("ktnmgr.enclosure.ses.subprocess.run", fake_run)
+
+    runner = SesRunner(binary="/usr/bin/sg_ses")
+    runner.set_ident("/dev/sg16", 0, 7, True)
+    assert captured["argv"] == [
+        "/usr/bin/sg_ses", "--index=0,7", "--set=ident", "/dev/sg16",
+    ]
+    assert captured["shell"] is False
+
+    runner.set_ident("/dev/sg16", 0, 7, False)
+    assert captured["argv"][2] == "--clear=ident"
+
+
+def test_ident_failure_is_reported_not_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "sg_ses failed: Operation not permitted"
+
+    monkeypatch.setattr("ktnmgr.enclosure.ses.subprocess.run",
+                        lambda argv, **kw: Result())
+    with pytest.raises(SesError, match="ident failed"):
+        SesRunner().set_ident("/dev/sg16", 0, 0, True)

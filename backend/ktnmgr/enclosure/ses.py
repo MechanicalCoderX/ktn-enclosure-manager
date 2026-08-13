@@ -33,6 +33,12 @@ READ_ONLY_PAGES: dict[str, tuple[str, ...]] = {
 
 DEFAULT_TIMEOUT = 20.0
 
+#: The ONLY mutating SES operations this application can perform. Both address
+#: a single array-device-slot element's identify bit. There is no code path to
+#: any other --set/--clear target (device_off, fault, PHY reset, ...), and the
+#: element is addressed by two integers that are range-checked before use.
+IDENT_ARGS: dict[bool, str] = {True: "--set=ident", False: "--clear=ident"}
+
 
 class SesError(RuntimeError):
     """sg_ses could not be run, timed out, or returned a failure."""
@@ -114,6 +120,48 @@ class SesRunner:
         if not getattr(ref, "sg_device", None):
             raise SesError("enclosure has no sg device")
         return self.read_page(ref.sg_device, page)
+
+    def set_ident(self, device: str, type_index: int, element_index: int, on: bool) -> None:
+        """Set or clear one array device slot's identify bit.
+
+        This is the application's only mutating SES call. It reaches the LED
+        through a SCSI command on the enclosure device rather than through a
+        sysfs write, which matters for deployment: Docker's default AppArmor
+        profile denies every write under /sys, but does not touch SG_IO. Using
+        this path means the container needs no AppArmor relaxation, no
+        CAP_DAC_OVERRIDE and no writable /sys.
+
+        ``--index=`` is used rather than ``--dev-slot-num=``, which behaved
+        inconsistently on sg_ses 2.48.
+        """
+        for name, value in (("type_index", type_index), ("element_index", element_index)):
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1023:
+                raise SesError(f"{name} must be an integer in 0..1023")
+
+        device_path = Path(device)
+        if not device_path.is_absolute():
+            raise SesError(f"refusing non-absolute device path {device!r}")
+
+        argv = [
+            self._binary,
+            f"--index={type_index},{element_index}",
+            IDENT_ARGS[bool(on)],
+            str(device_path),
+        ]
+        try:
+            proc = subprocess.run(  # noqa: S603 - argv from validated ints + fixed literals
+                argv, shell=False, capture_output=True, text=True,
+                timeout=self.timeout, check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SesError(f"sg_ses ident timed out after {self.timeout}s") from exc
+        except OSError as exc:
+            raise SesError(f"could not execute {self._binary}: {exc}") from exc
+
+        if proc.returncode != 0:
+            raise SesError(
+                f"sg_ses ident failed (rc={proc.returncode}): {proc.stderr.strip()[:200]}"
+            )
 
 
 class HelperSesRunner:

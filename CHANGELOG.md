@@ -4,6 +4,47 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-08-13
+
+Removes the AppArmor relaxation entirely. The container now runs under Docker's
+default confinement with no host mounts and two capabilities.
+
+### Changed
+- **The IDENT LED is driven by a SCSI command instead of a sysfs write.**
+  `sg_ses --index=T,E --set=ident`, where `T` is discovered from the enclosure's
+  own configuration page rather than assumed, and `E` is the validated slot.
+  Verification still reads the sysfs `locate` attribute, which is a read and
+  always permitted.
+- Container privileges reduced accordingly:
+
+  | | 1.0.0 | 1.1.0 |
+  |---|---|---|
+  | AppArmor | `unconfined` required for Identify | **default profile** |
+  | `/sys` | bind-mounted read-write | **not mounted at all** |
+  | Capabilities | `DAC_OVERRIDE`, `SETUID`, `SETGID` | `SETUID`, `SETGID` |
+  | Host paths | `/sys` + data | data only |
+
+- The TrueNAS catalog app drops its "Allow lighting drive-bay LEDs" question;
+  Identify now works in the default configuration, so there is nothing to opt
+  into.
+
+### Added
+- `KTN_IDENT_METHOD` (`auto` | `ses` | `sysfs`). `auto` prefers the SCSI path and
+  falls back to sysfs only if `sg_ses` is unavailable. `sysfs` reintroduces the
+  need for a writable `/sys` and `apparmor=unconfined`, and exists for
+  enclosures that do not honour the SES identify bit.
+- Security tests covering the new mutating call: hostile indices are rejected,
+  the emitted argv is asserted element by element, and `--set=ident` /
+  `--clear=ident` are proven to be the only mutating SES arguments reachable.
+
+### Why this was possible
+Docker's default AppArmor profile blocks writes under `/sys` but does not
+restrict `SG_IO`. Both facts were measured on real hardware: the sysfs write
+fails `EACCES` even as root with `CAP_DAC_OVERRIDE`, while the SCSI command
+lights the same LED with `--cap-drop ALL` and the default profile active.
+Docker's own read-only `/sys` already exposes `/sys/class/enclosure`, so the
+bind mount was unnecessary for reads too.
+
 ## [1.0.0] — 2026-08-13
 
 First release. Validated end to end against a live EMC KTN-STL3 on

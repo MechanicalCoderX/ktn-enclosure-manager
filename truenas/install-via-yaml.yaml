@@ -4,11 +4,15 @@
 # Paste this whole file, edit the ### EDIT ### lines, and install.
 #
 # Nothing is installed on the host and no TrueNAS configuration is changed.
-# Full explanation of every privilege below: https://github.com/MechanicalCoderX/ktn-enclosure-manager/blob/main/SECURITY.md
+# The container runs under the default AppArmor profile with all capabilities
+# dropped except the two needed to drop privileges. It is not privileged and
+# needs no /sys mount.
+#
+# Full explanation: https://github.com/MechanicalCoderX/ktn-enclosure-manager/blob/main/SECURITY.md
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:latest
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.1.0
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 
@@ -22,54 +26,41 @@ services:
       # The app refuses to start if this is not writable by uid 1000.
       - /mnt/YOURPOOL/apps/ktn-enclosure-manager:/data
 
-      # Enclosure sysfs. This must be /sys and not a narrower path: the
-      # attributes live under /sys/devices and /sys/class/enclosure only holds
-      # symlinks into it, so binding just the class directory leaves them
-      # dangling in the container.
-      - /sys:/sys:rw
-
     devices:
       # ### EDIT ### your SES device.  Find it with:  lsscsi -g | grep enclosu
-      # ':rw' is required even though the app only ever reads: sg_ses submits
-      # SCSI commands via the SG_IO ioctl, which the device cgroup counts as a
-      # write. This addresses the enclosure processor, not disk data.
+      #
+      # This is the only hardware access the app needs. ':rw' is required even
+      # though nothing on your disks is written: sg_ses submits SCSI commands
+      # through the SG_IO ioctl, which the device cgroup counts as a write.
+      # It addresses the enclosure processor, not disk data.
       - "/dev/sg16:/dev/sg16:rw"
 
     cap_drop:
       - ALL
     cap_add:
-      - DAC_OVERRIDE   # write the root-owned 'locate' attribute
-      - SETUID         # drop the web process to uid 1000
+      # Only to drop the web process from root to uid 1000 at startup.
+      - SETUID
       - SETGID
 
     security_opt:
       - no-new-privileges:true
-      # ### EDIT (optional) ### Uncomment to enable the Identify button.
-      #
-      # Docker's default AppArmor profile denies every write under /sys
-      # regardless of uid, capabilities or mount flags, so the LED cannot be
-      # lit without this. Everything else — the drive map, chassis telemetry,
-      # pool/vdev/ZFS state, SMART, diagnostics — works without it.
-      #
-      # Read SECURITY.md before enabling. It is far narrower than privileged
-      # mode, but it is a real relaxation and should be a deliberate choice.
-      #
-      # - apparmor=unconfined
+      # The default AppArmor profile stays in place. Earlier versions of this
+      # app needed apparmor=unconfined to write the LED through sysfs; it now
+      # uses a SCSI command instead, which that profile permits.
 
     tmpfs:
-      # setgid so the helper's socket inherits gid 1000 and the container needs
-      # no CAP_CHOWN.
+      # setgid so the helper's socket inherits gid 1000; avoids needing CAP_CHOWN.
       - /run/ktn:mode=2770,uid=0,gid=1000
 
     environment:
       KTN_DATA_DIR: /data
       KTN_PORT: "8420"
       KTN_IDENT_HELPER_SOCKET: /run/ktn/ident.sock
-      KTN_SYSFS_ROOT: /sys
+      KTN_IDENT_METHOD: "auto"
 
       # ### EDIT ### TrueNAS API, for pool / vdev / ZFS error / SMART data.
       # Credentials → API Keys → Add. Leave the URL empty to run without it;
-      # the drive map and chassis telemetry still work.
+      # the drive map, chassis telemetry and Identify all still work.
       KTN_TRUENAS_URL: "https://YOUR-TRUENAS-ADDRESS"
       KTN_TRUENAS_API_KEY: ""
       # Set false only for a self-signed certificate you cannot replace.

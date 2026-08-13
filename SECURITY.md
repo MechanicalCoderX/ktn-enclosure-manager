@@ -14,7 +14,7 @@ authentication.
 
 | | |
 |---|---|
-| **Can** | Read enclosure sysfs, run allow-listed read-only `sg_ses` pages, read the TrueNAS API, turn a bay's IDENT LED on and off |
+| **Can** | Read enclosure sysfs, run allow-listed read-only `sg_ses` pages, read the TrueNAS API, turn a bay's IDENT LED on and off with one allow-listed SCSI command |
 | **Cannot** | Write any SES page, power a drive off, reset a PHY or expander, touch fault LEDs, change PSU or fan state, flash firmware, run arbitrary commands, read or write any file outside its own data directory |
 
 There is no code path from an HTTP request to a shell. `subprocess` is called
@@ -31,8 +31,16 @@ An IDENT request is expressed semantically as `identify(enclosure_id, slot)`:
    slot 1) in `0..1023`.
 3. The enclosure is then **resolved from that id by scanning sysfs**, inside the
    privileged process. A path is never accepted from the caller.
-4. The write targets `<enclosure>/<slot>/locate` and nothing else.
-5. The result is verified by reading the value back.
+4. The LED is set with a single SCSI command, `sg_ses --index=T,E --set=ident`,
+   where `T` is discovered from the enclosure's own configuration page and `E`
+   is the validated slot. Both are formatted integers; every other argv element
+   is a fixed literal.
+5. The result is verified by reading the sysfs `locate` attribute back, polling
+   until it settles.
+
+`--set=ident` and `--clear=ident` are the **only** mutating SES arguments the
+code can emit. There is no code path to `--set=device_off`, `--clear=fault`, a
+PHY reset, or microcode download, and a test asserts it.
 
 Because of (1) and (2), the hostile inputs named in the specification —
 `7;rm -rf /`, `../../etc/passwd`, `$(id)`, `7 --set=device_off`,
@@ -55,59 +63,46 @@ the IDENT write and the read-only `sg_ses` telemetry cross the socket. The
 helper re-validates every request independently — it does not trust the web
 process to have validated anything — and enforces the enclosure allow-list.
 
-## Container privileges, and the one relaxation
+## Container privileges
 
 The shipped `docker-compose.yml` drops **all** capabilities and adds back only:
 
 | Capability | Why |
 |---|---|
-| `DAC_OVERRIDE` | write the root-owned `locate` attribute |
 | `SETUID`, `SETGID` | `setpriv` drops the web process to uid 1000 |
 
-`no-new-privileges` is set. The only device exposed is the SES node. No host
-path other than `/sys` is mounted. `--privileged` is **not** used.
+`no-new-privileges` is set, the **default AppArmor profile is left in place**,
+`--privileged` is never used, and there is no `/sys` bind mount. The only host
+access is the SES device node.
+
+Notably absent: `CAP_DAC_OVERRIDE`. The LED is driven by a SCSI command rather
+than a sysfs write, so no capability is needed for it at all.
 
 ### `/dev/sg16` is granted `rw`, and that is not what it sounds like
 
 `sg_ses` submits SCSI commands through the `SG_IO` ioctl, which the device
-cgroup classifies as a write even for a read-only diagnostic page. Measured: with
-`:r` every `sg_ses` call fails `Operation not permitted`. This grants access to
-the *enclosure processor*, not to disk data, and the application only ever issues
-allow-listed read-only pages. `CAP_SYS_RAWIO` was tested and is **not** required,
-so it is not granted.
+cgroup classifies as a write even for a read-only diagnostic page. Measured:
+with `:r` every `sg_ses` call fails `Operation not permitted`. This grants access
+to the *enclosure processor*, not to disk data. `CAP_SYS_RAWIO` was tested and is
+**not** required, so it is not granted.
 
-### AppArmor and the Identify button
+### Why there is no AppArmor relaxation
 
-Docker's default AppArmor profile (`docker-default`) **denies every write under
-`/sys`**, regardless of uid, capabilities, or mount flags. This was measured, not
-assumed: with `docker-default` the locate write fails `EACCES` even as root with
-`CAP_DAC_OVERRIDE` and `/sys` mounted `rw`; with the profile removed and an
-otherwise identical capability set, it succeeds.
+Docker's default AppArmor profile (`docker-default`) denies every write under
+`/sys`, regardless of uid, capabilities, or mount flags. Measured: with
+`docker-default` a `locate` write fails `EACCES` even as root with
+`CAP_DAC_OVERRIDE` and `/sys` mounted `rw`.
 
-So there are exactly two supported deployment modes:
+Version 1.0.0 therefore asked for `apparmor=unconfined` to use the sysfs path.
+**1.1.0 does not.** `SG_IO` is not restricted by that profile, so the same LED is
+driven by a SCSI command on a device the container already has, under full
+default confinement. Verified on real hardware: the LED lights and clears with
+`--cap-drop ALL` and `docker-default` active.
 
-**Read-only mode (shipped default).** Everything works — the drive map, chassis
-telemetry, pool/vdev/ZFS state, SMART, diagnostics, audit — except the Identify
-button, which returns a permission error. Nothing about the host is relaxed.
-
-**Identify-enabled mode (opt-in).** Add to the service in `docker-compose.yml`:
-
-```yaml
-    security_opt:
-      - no-new-privileges:true
-      - apparmor=unconfined      # required for the locate write; see above
-```
-
-This is a real relaxation and should be a deliberate choice. It remains far
-narrower than `--privileged`: capabilities stay dropped to three, the only
-device is the SES node, no other host path is mounted, and the web process still
-runs unprivileged with no device access.
-
-**The stricter alternative**, if you want Identify without unconfining: install a
-custom AppArmor profile on the host permitting writes only to
-`/sys/devices/**/enclosure/**/locate`. That is genuinely tighter. It is not the
-default because installing it modifies the TrueNAS host (`/etc/apparmor.d`),
-which this project deliberately does not do.
+The sysfs path still exists as `KTN_IDENT_METHOD=sysfs` for enclosures where the
+SES command is unavailable. Choosing it reintroduces the need for a writable
+`/sys`, `CAP_DAC_OVERRIDE` and `apparmor=unconfined`; `auto` (the default)
+prefers the SCSI path and only falls back if `sg_ses` is missing.
 
 ## Authentication
 
