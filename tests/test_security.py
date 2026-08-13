@@ -16,7 +16,6 @@ import shutil
 from pathlib import Path
 
 import pytest
-
 from ktnmgr.enclosure.locate import (
     DirectLocateWriter,
     LocateError,

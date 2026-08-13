@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
 from ktnmgr.config import Settings
 from ktnmgr.main import build_app
 

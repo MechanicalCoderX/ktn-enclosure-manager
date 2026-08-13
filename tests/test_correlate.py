@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from ktnmgr.enclosure.disks import DiskInfoReader
 from ktnmgr.enclosure.sysfs import SysfsEnclosureBackend
 from ktnmgr.models import DiskIdentity, ZfsState

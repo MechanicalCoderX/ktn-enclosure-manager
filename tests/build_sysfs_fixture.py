@@ -4,7 +4,8 @@
 Lets the whole sysfs layer be tested with no hardware attached (spec §42).
 Regenerate with: python3 tests/build_sysfs_fixture.py
 """
-import re, shutil
+import re
+import shutil
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -19,6 +20,19 @@ def w(p: Path, text: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text + "\n")
 
+
+def keepdir(p: Path) -> None:
+    """Create a directory that git will actually track.
+
+    The sysfs tree encodes information in bare directory NAMES - the device a
+    bay holds is `<slot>/device/block/sdb`, an empty directory. git does not
+    track empty directories, so without a placeholder file every bay comes back
+    deviceless in a fresh clone: serials vanish and Identify is disabled, while
+    the developer's working copy passes.
+    """
+    p.mkdir(parents=True, exist_ok=True)
+    (p / ".gitkeep").write_text("")
+
 if OUT.exists():
     shutil.rmtree(OUT)
 
@@ -27,7 +41,7 @@ for k, v in ENCL.items():
     w(base / k, v)
 for k, v in DEVICE.items():
     w(base / "device" / k, v)
-(base / "device" / "scsi_generic" / "sg16").mkdir(parents=True, exist_ok=True)
+keepdir(base / "device" / "scsi_generic" / "sg16")
 
 slot = None
 count = 0
@@ -42,7 +56,7 @@ for line in SRC.read_text().splitlines():
     key, _, val = line.partition("=")
     if key == "block":
         if val:
-            (base / slot / "device" / "block" / val).mkdir(parents=True, exist_ok=True)
+            keepdir(base / slot / "device" / "block" / val)
     else:
         w(base / slot / key, val)
 

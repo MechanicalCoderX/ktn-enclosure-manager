@@ -7,10 +7,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from ktnmgr.enclosure.locate import LocateError
 from ktnmgr.services.audit import AuditLog
-from ktnmgr.services.ident import ORIGIN_APP, ORIGIN_EXTERNAL, IdentManager, IdentRecord, IdentState
+from ktnmgr.services.ident import (
+    ORIGIN_APP,
+    ORIGIN_EXTERNAL,
+    IdentManager,
+    IdentRecord,
+    IdentState,
+)
 
 LOGICAL_ID = "0x50060480aabbcc00"
 
