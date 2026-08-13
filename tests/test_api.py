@@ -27,6 +27,11 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         data_dir=tmp_path / "data",
         truenas_url="",
         poll_slots_seconds=0.1,
+        # The fixture is a synthetic sysfs tree with no real SES device, so pin
+        # the sysfs writer. 'auto' would pick the SES command path wherever
+        # sg_ses happens to be installed (it is, on GitHub runners) and then
+        # fail against a device node that does not exist.
+        ident_method="sysfs",
     )
     with TestClient(build_app(settings)) as test_client:
         yield test_client

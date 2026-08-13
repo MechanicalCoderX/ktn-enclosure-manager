@@ -18,6 +18,8 @@ export KTN_DEV_ROOT="$DATA/dev"
 export KTN_DATA_DIR="$DATA"
 export KTN_TRUENAS_URL=""
 export KTN_POLL_SLOTS_SECONDS=0.5
+# Synthetic sysfs tree, no SES device - see tests/test_api.py.
+export KTN_IDENT_METHOD=sysfs
 export PYTHONPATH="$ROOT/backend"
 
 exec "$ROOT/.venv/bin/python" -m uvicorn ktnmgr.main:app \

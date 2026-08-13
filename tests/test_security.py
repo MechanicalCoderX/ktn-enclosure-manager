@@ -229,3 +229,58 @@ def test_ident_failure_is_reported_not_swallowed(monkeypatch: pytest.MonkeyPatch
                         lambda argv, **kw: Result())
     with pytest.raises(SesError, match="ident failed"):
         SesRunner().set_ident("/dev/sg16", 0, 0, True)
+
+
+# ------------------------------------------------------- writer selection
+
+
+def test_auto_prefers_ses_when_available(tmp_path: Path) -> None:
+    """'auto' must pick the SES command path when sg_ses exists, because that
+    is the one that works under the container's default AppArmor profile."""
+    from ktnmgr.enclosure.locate import SesLocateWriter, build_local_locate_writer
+
+    class PresentSes(SesRunner):
+        def available(self) -> bool:
+            return True
+
+    writer = build_local_locate_writer(
+        SysfsEnclosureBackend(sysfs_root=tmp_path), PresentSes(), "auto"
+    )
+    assert isinstance(writer, SesLocateWriter)
+
+
+def test_auto_falls_back_to_sysfs_without_sg_ses(tmp_path: Path) -> None:
+    from ktnmgr.enclosure.locate import DirectLocateWriter, build_local_locate_writer
+
+    class AbsentSes(SesRunner):
+        def available(self) -> bool:
+            return False
+
+    writer = build_local_locate_writer(
+        SysfsEnclosureBackend(sysfs_root=tmp_path), AbsentSes(), "auto"
+    )
+    assert isinstance(writer, DirectLocateWriter)
+
+
+def test_explicit_ses_refuses_to_silently_downgrade(tmp_path: Path) -> None:
+    """Asking for 'ses' and getting sysfs would quietly reintroduce the need for
+    a writable /sys, so it must error instead."""
+    from ktnmgr.enclosure.locate import build_local_locate_writer
+
+    class AbsentSes(SesRunner):
+        def available(self) -> bool:
+            return False
+
+    with pytest.raises(LocateError):
+        build_local_locate_writer(
+            SysfsEnclosureBackend(sysfs_root=tmp_path), AbsentSes(), "ses"
+        )
+
+
+def test_unknown_method_is_rejected(tmp_path: Path) -> None:
+    from ktnmgr.enclosure.locate import build_local_locate_writer
+
+    with pytest.raises(LocateError):
+        build_local_locate_writer(
+            SysfsEnclosureBackend(sysfs_root=tmp_path), SesRunner(), "whatever"
+        )
