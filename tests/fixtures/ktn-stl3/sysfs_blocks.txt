@@ -1,0 +1,120 @@
+### sdb
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058347d84
+size=5860533168
+rotational=1
+serial=P9GXVWZW        
+### sdc
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca0583dfdfc
+size=5860533168
+rotational=1
+serial=P9H32WVW        
+### sdd
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b61478
+size=5860533168
+rotational=1
+serial=P9K7486V        
+### sde
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b603b4
+size=5860533168
+rotational=1
+serial=P9K734LV        
+### sdf
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058a1daf8
+size=5860533168
+rotational=1
+serial=P9JW0G5W        
+### sdg
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b5dcb4
+size=5860533168
+rotational=1
+serial=P9K70K2W        
+### sdh
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b51f9c
+size=5860533168
+rotational=1
+serial=P9K6LYPW        
+### sdi
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b5c6a8
+size=5860533168
+rotational=1
+serial=P9K6Z2KW        
+### sdj
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b5e764
+size=5860533168
+rotational=1
+serial=P9K7184W        
+### sdk
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b5946c
+size=5860533168
+rotational=1
+serial=P9K6VRVW        
+### sdl
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca0583e0518
+size=5860533168
+rotational=1
+serial=P9H33BJW        
+### sdm
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b51fac
+size=5860533168
+rotational=1
+serial=P9K6LYUW        
+### sdn
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058ae5ec8
+size=5860533168
+rotational=1
+serial=P9K2WUHW        
+### sdo
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b603cc
+size=5860533168
+rotational=1
+serial=P9K734TV        
+### sdp
+device/vendor=HITACHI 
+device/model=HUS72403CLAR3000
+device/rev=C370
+device/wwid=naa.5000cca058b60130
+size=5860533168
+rotational=1
+serial=P9K72ZDV        

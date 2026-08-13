@@ -1,0 +1,290 @@
+"""Semantic HTTP API.
+
+Every endpoint is semantic: the browser names an enclosure by logical id and a
+slot by integer. There is no parameter anywhere in this surface through which a
+path, a command, an argument list, or a shell fragment could reach the system
+(spec §30, §43).
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from pydantic import BaseModel, Field
+
+from ktnmgr.enclosure.locate import LocateError
+from ktnmgr.enclosure.ses import READ_ONLY_PAGES, SesError
+from ktnmgr.enclosure.sysfs import EnclosureNotFoundError, SlotNotFoundError
+from ktnmgr.services.auth import SESSION_COOKIE, AuthError, AuthService
+from ktnmgr.services.ident import ALLOWED_DURATIONS
+
+log = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api")
+
+#: Mutating requests must carry this header. Combined with a SameSite=Strict
+#: cookie it blocks cross-site form posts, which cannot set custom headers.
+CSRF_HEADER = "x-ktn-request"
+
+
+# --------------------------------------------------------------- dependencies
+
+
+def get_auth(request: Request) -> AuthService:
+    return request.app.state.auth
+
+
+def get_state(request: Request) -> Any:
+    return request.app.state.service
+
+
+def current_user(request: Request) -> str:
+    auth: AuthService = request.app.state.auth
+    username = auth.read_session(request.cookies.get(SESSION_COOKIE))
+    if username is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication required")
+    return username
+
+
+def require_csrf(x_ktn_request: Annotated[str | None, Header()] = None) -> None:
+    if x_ktn_request is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "missing request header")
+
+
+CurrentUser = Annotated[str, Depends(current_user)]
+
+
+# ------------------------------------------------------------------- schemas
+
+
+class BootstrapBody(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=12, max_length=256)
+
+
+class LoginBody(BaseModel):
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=256)
+
+
+class PasswordBody(BaseModel):
+    current_password: str = Field(max_length=256)
+    new_password: str = Field(min_length=12, max_length=256)
+
+
+class IdentifyBody(BaseModel):
+    on: bool
+    duration_seconds: int | None = Field(
+        default=None,
+        description="One of 10, 30, 60, 300, or null for 'until cleared'.",
+    )
+
+
+# ---------------------------------------------------------------------- auth
+
+
+@router.get("/auth/status")
+def auth_status(request: Request, auth: Annotated[AuthService, Depends(get_auth)]) -> dict:
+    return {
+        "needs_bootstrap": auth.needs_bootstrap,
+        "user": auth.read_session(request.cookies.get(SESSION_COOKIE)),
+    }
+
+
+@router.post("/auth/bootstrap", dependencies=[Depends(require_csrf)])
+def bootstrap(body: BootstrapBody, auth: Annotated[AuthService, Depends(get_auth)]) -> dict:
+    try:
+        auth.bootstrap(body.username, body.password)
+    except AuthError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"ok": True}
+
+
+def _set_session(response: Response, request: Request, token: str, max_age: int) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=max_age,
+        httponly=True,
+        samesite="strict",
+        secure=request.url.scheme == "https",
+        path="/",
+    )
+
+
+@router.post("/auth/login", dependencies=[Depends(require_csrf)])
+def login(
+    body: LoginBody,
+    request: Request,
+    response: Response,
+    auth: Annotated[AuthService, Depends(get_auth)],
+) -> dict:
+    client = request.client.host if request.client else "unknown"
+    try:
+        auth.limiter.check(client)
+        username = auth.verify(body.username, body.password)
+    except AuthError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+    auth.limiter.reset(client)
+    _set_session(response, request, auth.issue_session(username), auth.max_age_seconds)
+    return {"ok": True, "user": username}
+
+
+@router.post("/auth/logout", dependencies=[Depends(require_csrf)])
+def logout(response: Response) -> dict:
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"ok": True}
+
+
+@router.post("/auth/password", dependencies=[Depends(require_csrf)])
+def change_password(
+    body: PasswordBody, user: CurrentUser, auth: Annotated[AuthService, Depends(get_auth)]
+) -> dict:
+    try:
+        auth.change_password(user, body.current_password, body.new_password)
+    except AuthError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- enclosures
+
+
+@router.get("/enclosures")
+def list_enclosures(user: CurrentUser, service: Annotated[Any, Depends(get_state)]) -> list[dict]:
+    return [
+        {
+            **ref.model_dump(),
+            "slots_discovered": len(service.slots.value.get(ref.logical_id, [])),
+        }
+        for ref in service.enclosures.value
+    ]
+
+
+def _resolve(service: Any, enclosure_id: str) -> None:
+    try:
+        service.enclosure(enclosure_id)
+    except EnclosureNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "enclosure not attached") from exc
+
+
+@router.get("/enclosures/{enclosure_id}/bays")
+def list_bays(
+    enclosure_id: str, user: CurrentUser, service: Annotated[Any, Depends(get_state)]
+) -> dict:
+    _resolve(service, enclosure_id)
+    return {
+        "bays": [b.model_dump(mode="json") for b in service.bays(enclosure_id)],
+        "sources": {
+            "slots": service.slots.updated_at,
+            "truenas": service.zfs.updated_at,
+            "truenas_error": service.zfs.last_error,
+            "smart": service.smart.updated_at,
+        },
+    }
+
+
+@router.get("/enclosures/{enclosure_id}/chassis")
+def chassis(
+    enclosure_id: str, user: CurrentUser, service: Annotated[Any, Depends(get_state)]
+) -> dict:
+    _resolve(service, enclosure_id)
+    telemetry = service.chassis.value.get(enclosure_id.lower())
+    if telemetry is None:
+        return {
+            "available": False,
+            "error": service.chassis.last_error or "chassis telemetry not collected yet",
+        }
+    return {"available": True, **telemetry.model_dump(mode="json")}
+
+
+@router.post("/enclosures/{enclosure_id}/slots/{ses_slot}/identify",
+             dependencies=[Depends(require_csrf)])
+async def identify(
+    enclosure_id: str,
+    ses_slot: int,
+    body: IdentifyBody,
+    user: CurrentUser,
+    service: Annotated[Any, Depends(get_state)],
+) -> dict:
+    """The only write this application exposes (§15, §43)."""
+    if body.on and body.duration_seconds not in ALLOWED_DURATIONS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"duration must be one of {[d for d in ALLOWED_DURATIONS if d]} or null",
+        )
+    _resolve(service, enclosure_id)
+
+    serial = None
+    for bay in service.bays(enclosure_id):
+        if bay.ses_slot == ses_slot:
+            serial = bay.disk.serial
+            break
+
+    try:
+        record = await service.ident.identify(
+            enclosure_id,
+            ses_slot,
+            on=body.on,
+            user=user,
+            duration_seconds=body.duration_seconds,
+            serial=serial,
+        )
+    except SlotNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "slot not present") from exc
+    except LocateError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return {
+        "ok": True,
+        "locate": body.on,
+        "expires_at": record.expires_at if record else None,
+        "origin": record.origin if record else None,
+    }
+
+
+# --------------------------------------------------------------- diagnostics
+
+
+@router.get("/diagnostics")
+def diagnostics(user: CurrentUser, service: Annotated[Any, Depends(get_state)]) -> dict:
+    return service.diagnostics()
+
+
+@router.get("/audit")
+def audit(
+    user: CurrentUser, request: Request, limit: int = 100
+) -> list[dict]:
+    return [e.model_dump(mode="json") for e in request.app.state.audit.tail(limit)]
+
+
+@router.get("/raw/pages")
+def raw_pages(user: CurrentUser) -> list[str]:
+    return sorted(READ_ONLY_PAGES)
+
+
+@router.get("/raw/{enclosure_id}/{page}")
+def raw_page(
+    enclosure_id: str, page: str, user: CurrentUser,
+    service: Annotated[Any, Depends(get_state)],
+) -> dict:
+    """Predefined read-only diagnostic output only (§36).
+
+    ``page`` is looked up in an allow-list; arbitrary sg_ses parameters are not
+    expressible through this endpoint.
+    """
+    if page not in READ_ONLY_PAGES:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown diagnostic page")
+    try:
+        ref = service.enclosure(enclosure_id)
+    except EnclosureNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "enclosure not attached") from exc
+    if not ref.sg_device:
+        raise HTTPException(status.HTTP_409_CONFLICT, "no sg device for this enclosure")
+    try:
+        result = service.ses.read_page(ref.sg_device, page)
+    except SesError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    return {"page": page, "output": result.stdout}

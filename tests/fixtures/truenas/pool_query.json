@@ -1,0 +1,662 @@
+[
+ {
+  "name": "data_pool",
+  "status": "ONLINE",
+  "healthy": true,
+  "scan": {
+   "function": "RESILVER",
+   "state": "FINISHED",
+   "percentage": 99.99994039535522
+  },
+  "topology": {
+   "data": [
+    {
+     "type": "RAIDZ3",
+     "name": "raidz3-0",
+     "device": null,
+     "disk": null,
+     "status": "ONLINE",
+     "stats": {
+      "timestamp": 1570904450595304,
+      "read_errors": 0,
+      "write_errors": 0,
+      "checksum_errors": 0,
+      "ops": [
+       0,
+       242170169,
+       343953875,
+       0,
+       0,
+       0,
+       0
+      ],
+      "bytes": [
+       0,
+       48660843270144,
+       53946596962304,
+       0,
+       0,
+       0,
+       0
+      ],
+      "size": 44959717654528,
+      "allocated": 21590689513472,
+      "fragmentation": 11,
+      "self_healed": 0,
+      "configured_ashift": 12,
+      "logical_ashift": 9,
+      "physical_ashift": 9
+     },
+     "unavail_disk": null,
+     "children": [
+      {
+       "type": "DISK",
+       "name": "d0952f2e-dacb-4637-bc1c-47a52a178cb4",
+       "device": "sdb1",
+       "disk": "sdb",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450662971,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17474260,
+         24350658,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3473383415808,
+         3750351294464,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "c8e13b90-74ef-41d1-bbe9-863689f465c5",
+       "device": "sdc1",
+       "disk": "sdc",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450692390,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17824085,
+         24401188,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3473742163968,
+         3750341197824,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "9e30e79c-b32b-44e6-b1e4-420257724e1c",
+       "device": "sdd1",
+       "disk": "sdd",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450721356,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         16882740,
+         24204264,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3474891038720,
+         3750355386368,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "85f4c863-247c-429c-8fed-33165666443a",
+       "device": "sde1",
+       "disk": "sde",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450747573,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17064225,
+         24250999,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3474936848384,
+         3750348701696,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "385b732f-fc11-46df-942b-2462d68b5f31",
+       "device": "sdf1",
+       "disk": "sdf",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 85344666796984,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         254841,
+         3649514,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         24411402240,
+         1441696256000,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "aa4f1601-f422-460e-8007-77f719dd2de4",
+       "device": "sdg1",
+       "disk": "sdg",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450804522,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17840273,
+         24420779,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3474066137088,
+         3750327160832,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "b21c698e-e7db-4b30-b1fb-ebbe6d55b4a4",
+       "device": "sdh1",
+       "disk": "sdh",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450833960,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17403991,
+         24327543,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3474203414528,
+         3750342721536,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "10a48efd-dfbe-4ed1-913d-1dba50f668b3",
+       "device": "sdi1",
+       "disk": "sdi",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450861466,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17603232,
+         24373457,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3473664204800,
+         3750337048576,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "ca65784b-26e4-4fc0-bad3-65fa8ee684bd",
+       "device": "sdj1",
+       "disk": "sdj",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450887105,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17220452,
+         24310232,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3473443954688,
+         3750338871296,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "f71ff272-888a-4b87-8b27-cd0b521e8ff4",
+       "device": "sdk1",
+       "disk": "sdk",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450918533,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17908896,
+         24461869,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3472873115648,
+         3750341185536,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "5ef5fa11-4288-4557-9029-e72c39c7b47a",
+       "device": "sdl1",
+       "disk": "sdl",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450949220,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         16742707,
+         24212322,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3474117746688,
+         3750361194496,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "9cd3c2b9-10f1-4033-8dea-0663d549a9b0",
+       "device": "sdm1",
+       "disk": "sdm",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904450978325,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17205851,
+         24284642,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3473988075520,
+         3750367920128,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "b457df80-b08a-4775-a832-47f58cb78e6b",
+       "device": "sdn1",
+       "disk": "sdn",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904451007247,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         17308994,
+         24308181,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3474200555520,
+         3750360145920,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "c3def76b-5400-4d22-8a4c-57a56241ac93",
+       "device": "sdo1",
+       "disk": "sdo",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904451037699,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         16729177,
+         24204330,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3474684674048,
+         3750362251264,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      },
+      {
+       "type": "DISK",
+       "name": "afae790f-397b-4f1c-937c-83628767c969",
+       "device": "sdp1",
+       "disk": "sdp",
+       "status": "ONLINE",
+       "stats": {
+        "timestamp": 1570904451067519,
+        "read_errors": 0,
+        "write_errors": 0,
+        "checksum_errors": 0,
+        "ops": [
+         0,
+         16706445,
+         24193897,
+         0,
+         0,
+         0,
+         0
+        ],
+        "bytes": [
+         0,
+         3474236522496,
+         3750365626368,
+         0,
+         0,
+         0,
+         0
+        ],
+        "size": 0,
+        "allocated": 0,
+        "fragmentation": 0,
+        "self_healed": 0,
+        "configured_ashift": 12,
+        "logical_ashift": 9,
+        "physical_ashift": 9
+       },
+       "unavail_disk": null,
+       "children": []
+      }
+     ]
+    }
+   ],
+   "special": [],
+   "dedup": [],
+   "log": [],
+   "cache": [],
+   "spare": []
+  }
+ }
+]

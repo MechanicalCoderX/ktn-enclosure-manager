@@ -46,6 +46,34 @@ for line in SRC.read_text().splitlines():
     else:
         w(base / slot / key, val)
 
+# ---------------------------------------------------------------- /sys/block
+# vpd_pg80 is written as real bytes with its 4-byte header, so the serial
+# parser is exercised on the byte layout the kernel actually produces rather
+# than on a convenient pre-stripped string. Getting the header offset wrong
+# silently truncates the 'P9' prefix off every serial on this hardware.
+BLOCKS = HERE / "fixtures" / "ktn-stl3" / "sysfs_blocks.txt"
+dev = None
+for line in BLOCKS.read_text().splitlines():
+    m = re.match(r"### (\w+)", line)
+    if m:
+        dev = m.group(1)
+        continue
+    if dev is None or "=" not in line:
+        continue
+    key, _, val = line.partition("=")
+    bdir = OUT / "block" / dev
+    if key == "serial":
+        serial = val.rstrip()
+        payload = bytes([0x00, 0x80, 0x00, len(serial)]) + serial.encode("ascii")
+        (bdir / "device").mkdir(parents=True, exist_ok=True)
+        (bdir / "device" / "vpd_pg80").write_bytes(payload)
+    elif key == "rotational":
+        w(bdir / "queue" / "rotational", val)
+    elif key.startswith("device/"):
+        w(bdir / "device" / key.split("/", 1)[1], val)
+    else:
+        w(bdir / key, val)
+
 # An empty bay and a decoy non-slot directory, so discovery is proven to key on
 # the presence of a 'slot' attribute rather than on directory naming.
 w(base / "99" / "slot", "99")
