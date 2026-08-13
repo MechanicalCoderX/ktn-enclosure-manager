@@ -1,0 +1,65 @@
+annotations:
+  min_scale_version: 24.10.0
+app_version: 1.0.0
+capabilities:
+  - name: DAC_OVERRIDE
+    description: Needed to write the root-owned enclosure `locate` attribute (IDENT LED).
+  - name: SETUID
+    description: Needed to drop the web process from root to uid 1000 at startup.
+  - name: SETGID
+    description: Needed to drop the web process from root to gid 1000 at startup.
+categories:
+  - storage
+  - monitoring
+changelog_url: https://github.com/OWNER/ktn-enclosure-manager/blob/main/CHANGELOG.md
+date_added: '2026-08-13'
+description: Physical drive-bay map, chassis telemetry and IDENT LED control for SES
+  disk shelves attached to TrueNAS SCALE.
+home: https://github.com/OWNER/ktn-enclosure-manager
+host_mounts:
+  - host_path: /sys
+    description: >-
+      Enclosure discovery, per-bay state and the IDENT write all use the Linux
+      enclosure sysfs ABI. It must be /sys rather than /sys/class/enclosure,
+      because the attributes live under /sys/devices and the class entries are
+      only symlinks into it.
+icon: https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/icon.png
+keywords:
+  - enclosure
+  - ses
+  - sas
+  - jbod
+  - disk-shelf
+  - identify
+lib_version: 2.3.4
+lib_version_hash: REPLACE_WITH_HASH_FROM_TRUENAS_APPS_AT_SUBMISSION_TIME
+maintainers:
+  - email: REPLACE@example.com
+    name: OWNER
+    url: https://github.com/OWNER/ktn-enclosure-manager
+name: ktn-enclosure-manager
+run_as_context:
+  - description: >-
+      The web application runs as a non-root user with no capabilities and no
+      device access.
+    gid: 1000
+    group_name: ktn
+    uid: 1000
+    user_name: ktn
+  - description: >-
+      A small IDENT helper runs as root. It accepts only identify_on,
+      identify_off and read-only SES page reads over a unix socket, and cannot
+      be passed a filesystem path or a command.
+    gid: 0
+    group_name: root
+    uid: 0
+    user_name: root
+screenshots:
+  - https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/drive-map-dark.png
+  - https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/bay-detail.png
+  - https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/chassis.png
+sources:
+  - https://github.com/OWNER/ktn-enclosure-manager
+title: KTN Enclosure Manager
+train: community
+version: 1.0.0

@@ -1,0 +1,222 @@
+groups:
+  - name: Enclosure Configuration
+    description: Which disk shelf to manage
+  - name: TrueNAS Integration
+    description: Optional — adds pool, vdev, ZFS error and SMART data
+  - name: Identify (LED) Control
+    description: Whether the app may light drive-bay LEDs
+  - name: Network Configuration
+    description: Where the web interface listens
+  - name: Storage Configuration
+    description: Where application state is kept
+  - name: Resources Configuration
+    description: CPU and memory limits
+
+questions:
+  # ----------------------------------------------------- enclosure
+  - variable: enclosure
+    label: ""
+    group: Enclosure Configuration
+    schema:
+      type: dict
+      attrs:
+        - variable: sg_device
+          label: SES device node
+          description: |
+            The SCSI generic device for your enclosure. Find it with:
+              lsscsi -g | grep enclosu
+            The application discovers the correct enclosure itself; this only
+            has to point at a node that exists.
+          schema:
+            type: string
+            required: true
+            default: /dev/sg16
+            valid_chars: '^/dev/(sg|bsg)[a-zA-Z0-9/:]+$'
+            valid_chars_error: Must be a /dev/sg* or /dev/bsg/* path
+
+        - variable: allowlist
+          label: Restrict to enclosure ID (optional)
+          description: |
+            Comma-separated enclosure logical identifiers. Leave empty to manage
+            every enclosure found. Find yours with:
+              cat /sys/class/enclosure/*/id
+          schema:
+            type: string
+            default: ""
+
+  # ----------------------------------------------------- truenas api
+  - variable: truenas
+    label: ""
+    group: TrueNAS Integration
+    schema:
+      type: dict
+      attrs:
+        - variable: url
+          label: TrueNAS URL
+          description: |
+            Leave empty to run without it. The drive map, chassis telemetry and
+            IDENT all work without the API; only pool, vdev, ZFS error and SMART
+            data need it.
+          schema:
+            type: string
+            default: ""
+
+        - variable: api_key
+          label: API key
+          description: Credentials → API Keys → Add. Stored only in the container environment.
+          schema:
+            type: string
+            default: ""
+            private: true
+
+        - variable: verify_tls
+          label: Verify TLS certificate
+          description: Disable only for a self-signed certificate you cannot replace.
+          schema:
+            type: boolean
+            default: true
+
+  # ----------------------------------------------------- ident
+  - variable: ident
+    label: ""
+    group: Identify (LED) Control
+    schema:
+      type: dict
+      attrs:
+        - variable: enabled
+          label: Allow lighting drive-bay LEDs
+          description: |
+            Turning this on runs the container with AppArmor unconfined.
+
+            Docker's default AppArmor profile denies every write under /sys
+            regardless of user or capabilities, so the IDENT LED cannot be lit
+            without it. This is much narrower than privileged mode —
+            capabilities stay dropped to three, the only device exposed is the
+            enclosure, and the web process still runs unprivileged with no
+            device access — but it IS a real relaxation.
+
+            Leave this off and everything except the Identify button works.
+          schema:
+            type: boolean
+            default: false
+
+  # ----------------------------------------------------- network
+  - variable: network
+    label: ""
+    group: Network Configuration
+    schema:
+      type: dict
+      attrs:
+        - variable: web_port
+          label: Web Port
+          schema:
+            type: dict
+            attrs:
+              - variable: bind_mode
+                label: Port Bind Mode
+                schema:
+                  type: string
+                  default: published
+                  enum:
+                    - value: published
+                      description: Publish port on the host for external access
+                    - value: exposed
+                      description: Expose port for inter-container communication
+                    - value: ""
+                      description: None
+              - variable: port_number
+                label: Port Number
+                schema:
+                  type: int
+                  default: 8420
+                  min: 1024
+                  max: 65535
+              - variable: host_ips
+                label: Host IPs
+                schema:
+                  type: list
+                  default: []
+                  items:
+                    - variable: host_ip
+                      label: Host IP
+                      schema:
+                        type: string
+                        required: true
+                        "$ref":
+                          - definitions/node_bind_ip
+
+  # ----------------------------------------------------- storage
+  - variable: storage
+    label: ""
+    group: Storage Configuration
+    schema:
+      type: dict
+      attrs:
+        - variable: data
+          label: Application data
+          description: |
+            Accounts, session key, IDENT timers and the audit log. Use a dataset
+            so these survive redeployment.
+          schema:
+            type: dict
+            attrs:
+              - variable: type
+                label: Type
+                schema:
+                  type: string
+                  required: true
+                  default: ix_volume
+                  enum:
+                    - value: host_path
+                      description: Host Path (Local Path)
+                    - value: ix_volume
+                      description: ixVolume (dataset created automatically)
+              - variable: ix_volume_config
+                label: ixVolume Configuration
+                schema:
+                  type: dict
+                  show_if: [["type", "=", "ix_volume"]]
+                  attrs:
+                    - variable: dataset_name
+                      label: Dataset Name
+                      schema:
+                        type: string
+                        required: true
+                        immutable: true
+                        default: data
+              - variable: host_path_config
+                label: Host Path Configuration
+                schema:
+                  type: dict
+                  show_if: [["type", "=", "host_path"]]
+                  attrs:
+                    - variable: path
+                      label: Host Path
+                      schema:
+                        type: hostpath
+                        required: true
+
+  # ----------------------------------------------------- resources
+  - variable: resources
+    group: Resources Configuration
+    label: ""
+    schema:
+      type: dict
+      attrs:
+        - variable: limits
+          label: Limits
+          schema:
+            type: dict
+            attrs:
+              - variable: cpus
+                label: CPUs
+                schema:
+                  type: int
+                  default: 2
+                  required: true
+              - variable: memory
+                label: Memory (in MB)
+                schema:
+                  type: int
+                  default: 512
+                  required: true

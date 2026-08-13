@@ -1,0 +1,10 @@
+categories:
+  - storage
+  - monitoring
+icon_url: https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/icon.png
+screenshots:
+  - https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/drive-map-dark.png
+tags:
+  - enclosure
+  - ses
+  - jbod

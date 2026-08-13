@@ -43,15 +43,27 @@ Nothing is installed on the host. `sg3-utils` ships inside the image.
 
 ## Install
 
+**On TrueNAS SCALE — no shell required.** Apps → Discover Apps → **⋮** →
+**Install via YAML**, paste [`truenas/install-via-yaml.yaml`](truenas/install-via-yaml.yaml),
+edit the four `### EDIT ###` lines, install. Full walkthrough:
+**[docs/INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md)**.
+
+A prebuilt image is published for every release, so there is nothing to build:
+
+```
+ghcr.io/OWNER/ktn-enclosure-manager:latest
+```
+
+**From a shell instead:**
+
 ```bash
-git clone <this-repo> ktn-enclosure-manager
+git clone https://github.com/OWNER/ktn-enclosure-manager.git
 cd ktn-enclosure-manager
 cp .env.example .env && chmod 600 .env
 $EDITOR .env                     # set KTN_TRUENAS_URL / API key / KTN_SG_DEVICE
 
 mkdir -p data && chown -R 1000:1000 data     # required: the app runs as uid 1000
 
-docker compose build
 docker compose up -d
 ```
 

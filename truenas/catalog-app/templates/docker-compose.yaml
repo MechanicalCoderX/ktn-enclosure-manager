@@ -1,0 +1,87 @@
+{% set tpl = ix_lib.base.render.Render(values) %}
+
+{% set c = tpl.add_container(values.consts.app_name, "image") %}
+{% do c.set_user(0, 0) %}
+{#
+  The container starts as root so the privileged IDENT helper can bind its
+  socket and open the enclosure; the entrypoint immediately drops the web
+  process to uid/gid 1000 with setpriv. The helper is the only component that
+  stays privileged, and it accepts nothing but identify_on / identify_off /
+  read-only SES page reads over a unix socket.
+#}
+{% do c.restart.set_policy("unless-stopped") %}
+{% do c.healthcheck.set_test("curl", {"port": values.consts.internal_port, "path": "/healthz"}) %}
+
+{# ------------------------------------------------------------- privileges #}
+{% do c.remove_all_caps() %}
+{% do c.add_caps(["DAC_OVERRIDE", "SETUID", "SETGID"]) %}
+{% do c.security_opt.add_no_new_privileges() %}
+
+{% if values.ident.enabled %}
+{#
+  Docker's default AppArmor profile denies every write under /sys regardless of
+  uid, capability set or mount flags, so the enclosure `locate` attribute
+  cannot be written without unconfining. The user opts into this explicitly in
+  questions.yaml; with it off the app is fully functional except the Identify
+  button.
+#}
+{% do c.security_opt.add_apparmor("unconfined") %}
+{% endif %}
+
+{# ------------------------------------------------------------------ device #}
+{#
+  ':rw' is required even though only read-only pages are ever issued: sg_ses
+  submits SCSI commands through the SG_IO ioctl, which the device cgroup counts
+  as a write. This addresses the enclosure processor, not disk data.
+#}
+{% do c.devices.add_device(values.enclosure.sg_device, values.enclosure.sg_device, "rwm") %}
+
+{# ------------------------------------------------------------------- mounts #}
+{#
+  Must be /sys, not /sys/class/enclosure: the attributes live under
+  /sys/devices and the class directory holds only symlinks into it, so a
+  narrower bind leaves them dangling inside the container.
+#}
+{% do c.add_storage("/sys", {"type": "host_path", "host_path_config": {"path": "/sys", "create_host_path": false}}) %}
+{% do c.add_storage("/data", values.storage.data) %}
+{% do c.add_tmpfs("/run/ktn", {"mode": "2770", "uid": 0, "gid": values.consts.app_group_id}) %}
+
+{# -------------------------------------------------------------- environment #}
+{% do c.environment.add_env("KTN_DATA_DIR", "/data") %}
+{% do c.environment.add_env("KTN_PORT", values.consts.internal_port) %}
+{% do c.environment.add_env("KTN_SYSFS_ROOT", "/sys") %}
+{% do c.environment.add_env("KTN_ENCLOSURE_ALLOWLIST", values.enclosure.allowlist) %}
+{% do c.environment.add_env("KTN_TRUENAS_URL", values.truenas.url) %}
+{% do c.environment.add_env("KTN_TRUENAS_API_KEY", values.truenas.api_key) %}
+{% do c.environment.add_env("KTN_TRUENAS_VERIFY_TLS", values.truenas.verify_tls) %}
+
+{% if values.ident.enabled %}
+{% do c.environment.add_env("KTN_IDENT_HELPER_SOCKET", values.consts.ident_socket) %}
+{% endif %}
+
+{# ------------------------------------------------------------------- ports #}
+{% if values.network.web_port.bind_mode %}
+{% do c.ports.add_port(values.network.web_port.port_number, values.consts.internal_port, {"bind_mode": values.network.web_port.bind_mode, "host_ips": values.network.web_port.host_ips}) %}
+{% endif %}
+
+{% do c.resources.set_profile(values.resources) %}
+
+{% do tpl.portals.add_portal({"port": values.network.web_port.port_number, "scheme": "http", "name": "Web UI"}) %}
+
+{% do tpl.notes.add_warning(
+  "First run has no account and no default password. Open the Web UI and create
+   the administrator before exposing this app to your network."
+) %}
+{% do tpl.notes.add_warning(
+  "The application data dataset must be writable by uid 1000. If you chose a
+   Host Path, run: chown -R 1000:1000 <path>"
+) %}
+{% if not values.ident.enabled %}
+{% do tpl.notes.add_body(
+  "Identify (LED) control is disabled. Everything else - drive map, chassis
+   telemetry, pool/vdev/ZFS state, SMART and diagnostics - is fully functional.
+   Enable it in the app's Identify settings if you want to light drive bays."
+) %}
+{% endif %}
+
+{{ tpl.render() | tojson }}
