@@ -1,14 +1,14 @@
 # KTN Enclosure Manager — paste-into-TrueNAS install
 #
 # TrueNAS SCALE → Apps → Discover Apps → ⋮ → Install via YAML
-# Paste this whole file, edit the four ### EDIT ### lines, and install.
+# Paste this whole file, edit the ### EDIT ### lines, and install.
 #
 # Nothing is installed on the host and no TrueNAS configuration is changed.
-# Full explanation of every privilege below: https://github.com/OWNER/ktn-enclosure-manager/blob/main/SECURITY.md
+# Full explanation of every privilege below: https://github.com/MechanicalCoderX/ktn-enclosure-manager/blob/main/SECURITY.md
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/OWNER/ktn-enclosure-manager:latest   ### EDIT ### replace OWNER
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:latest
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 

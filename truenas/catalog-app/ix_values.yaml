@@ -1,6 +1,6 @@
 images:
   image:
-    repository: ghcr.io/OWNER/ktn-enclosure-manager
+    repository: ghcr.io/mechanicalcoderx/ktn-enclosure-manager
     tag: 1.0.0
 
 consts:

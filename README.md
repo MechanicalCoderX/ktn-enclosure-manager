@@ -51,13 +51,13 @@ edit the four `### EDIT ###` lines, install. Full walkthrough:
 A prebuilt image is published for every release, so there is nothing to build:
 
 ```
-ghcr.io/OWNER/ktn-enclosure-manager:latest
+ghcr.io/mechanicalcoderx/ktn-enclosure-manager:latest
 ```
 
 **From a shell instead:**
 
 ```bash
-git clone https://github.com/OWNER/ktn-enclosure-manager.git
+git clone https://github.com/MechanicalCoderX/ktn-enclosure-manager.git
 cd ktn-enclosure-manager
 cp .env.example .env && chmod 600 .env
 $EDITOR .env                     # set KTN_TRUENAS_URL / API key / KTN_SG_DEVICE

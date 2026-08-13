@@ -11,11 +11,11 @@ capabilities:
 categories:
   - storage
   - monitoring
-changelog_url: https://github.com/OWNER/ktn-enclosure-manager/blob/main/CHANGELOG.md
+changelog_url: https://github.com/MechanicalCoderX/ktn-enclosure-manager/blob/main/CHANGELOG.md
 date_added: '2026-08-13'
 description: Physical drive-bay map, chassis telemetry and IDENT LED control for SES
   disk shelves attached to TrueNAS SCALE.
-home: https://github.com/OWNER/ktn-enclosure-manager
+home: https://github.com/MechanicalCoderX/ktn-enclosure-manager
 host_mounts:
   - host_path: /sys
     description: >-
@@ -23,7 +23,7 @@ host_mounts:
       enclosure sysfs ABI. It must be /sys rather than /sys/class/enclosure,
       because the attributes live under /sys/devices and the class entries are
       only symlinks into it.
-icon: https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/icon.png
+icon: https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/icon.png
 keywords:
   - enclosure
   - ses
@@ -35,8 +35,8 @@ lib_version: 2.3.4
 lib_version_hash: REPLACE_WITH_HASH_FROM_TRUENAS_APPS_AT_SUBMISSION_TIME
 maintainers:
   - email: REPLACE@example.com
-    name: OWNER
-    url: https://github.com/OWNER/ktn-enclosure-manager
+    name: MechanicalCoderX
+    url: https://github.com/MechanicalCoderX/ktn-enclosure-manager
 name: ktn-enclosure-manager
 run_as_context:
   - description: >-
@@ -55,11 +55,11 @@ run_as_context:
     uid: 0
     user_name: root
 screenshots:
-  - https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/drive-map-dark.png
-  - https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/bay-detail.png
-  - https://raw.githubusercontent.com/OWNER/ktn-enclosure-manager/main/docs/images/chassis.png
+  - https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/drive-map-dark.png
+  - https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/bay-detail.png
+  - https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/chassis.png
 sources:
-  - https://github.com/OWNER/ktn-enclosure-manager
+  - https://github.com/MechanicalCoderX/ktn-enclosure-manager
 title: KTN Enclosure Manager
 train: community
 version: 1.0.0

@@ -36,7 +36,6 @@ lines marked `### EDIT ###`:
 
 | Edit | What |
 |---|---|
-| `image:` | replace `OWNER` with the GitHub owner |
 | `/mnt/YOURPOOL/...` | the dataset from step 1 |
 | `/dev/sg16` | your SES device from step 2 |
 | `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | optional, for pool/vdev/SMART data |
@@ -65,7 +64,7 @@ is not the default.
 ## 2. Docker Compose from a shell
 
 ```bash
-git clone https://github.com/OWNER/ktn-enclosure-manager.git
+git clone https://github.com/MechanicalCoderX/ktn-enclosure-manager.git
 cd ktn-enclosure-manager
 cp .env.example .env && chmod 600 .env
 $EDITOR .env

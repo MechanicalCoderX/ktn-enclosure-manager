@@ -30,11 +30,12 @@ documented in [`../../docs/INSTALL-TRUENAS.md`](../../docs/INSTALL-TRUENAS.md).
 
 ## Before opening a PR
 
-1. **Replace every placeholder.** `OWNER`, `REPLACE@example.com`, and
-   `REPLACE_WITH_HASH_FROM_TRUENAS_APPS_AT_SUBMISSION_TIME` in `app.yaml`.
+1. **Replace the remaining placeholders** in `app.yaml`:
+   `REPLACE@example.com` (maintainer contact) and
+   `REPLACE_WITH_HASH_FROM_TRUENAS_APPS_AT_SUBMISSION_TIME` (library hash).
 
 2. **Publish the image first.** `ix_values.yaml` points at
-   `ghcr.io/OWNER/ktn-enclosure-manager`. It must be public and pullable
+   `ghcr.io/mechanicalcoderx/ktn-enclosure-manager`. It must be public and pullable
    anonymously, or nothing can install.
 
 3. **Add an icon.** `docs/images/icon.png`, square, at least 256×256.
