@@ -1,0 +1,155 @@
+  EMC       ESES Enclosure    0001
+Configuration diagnostic page:
+  number of secondary subenclosures: 4
+  generation code: 0x7
+  enclosure descriptor list
+    Subenclosure identifier: 0 [primary]
+      relative ES process id: 1, number of ES processes: 1
+      number of type descriptor headers: 10
+      enclosure logical identifier (hex): 5006048004a54c3e
+      enclosure vendor: EMC       product: Viper LCC         rev: 0B70
+      vendor-specific data:
+        07 81 42 02 00 01 02 4a  57 58 50 4c 31 32 35 32    ..B....JWXPL1252
+        30 34 31 30 30 00 00 05  2a a6 20 31 35 35 20 53    04100...*. 155 S
+        58 50 20 32 34 78 36 47  73 65 63 00 2a 20 20 33    XP 24x6Gsec.*  3
+        31 38 20 53 58 50 20 32  34 78 36 47 73 65 63 00    18 SXP 24x6Gsec.
+        2a 21 20 32 32 32 20 53  58 50 20 32 34 78 36 47    *! 222 SXP 24x6G
+        73 65 63 00 2a 22 20 32  31 36 20 53 58 50 20 32    sec.*" 216 SXP 2
+        34 78 36 47 73 65 63 00  2a 23 20 30 32 31 20 43    4x6Gsec.*# 021 C
+        44 45 46 00 00 00 00 00  00 00 00 00 10 02 80 00    DEF.............
+        01 03 00 02 01 04 80 02  00 05 01 2a 00 06 03 2a    ...........*...*
+        00 07 85 00 00 08 86 00  00 09 02 00 00 0a 02 01    ................
+        00 0b 02 02 00 0c 02 03  00 0d 02 04 00 0e 02 05    ................
+        00 0f 02 06 00 10 02 07  00 11 04 00 00 02 c0 c1    ................
+        05 4c 43 43 20 42                                   .LCC B          
+
+    Subenclosure identifier: 1
+      relative ES process id: 1, number of ES processes: 1
+      number of type descriptor headers: 6
+      enclosure logical identifier (hex): 5006048004a4eabe
+      enclosure vendor: EMC       product: Viper LCC         rev: 0B70
+      vendor-specific data:
+        07 80 41 02 01 00 01 4a  57 58 50 4c 31 32 35 32    ..A....JWXPL1252
+        30 32 38 30 36 00 00 05  44 06 20 31 35 35 20 53    02806...D. 155 S
+        58 50 20 32 34 78 36 47  73 65 63 00 44 00 20 33    XP 24x6Gsec.D. 3
+        31 38 20 53 58 50 20 32  34 78 36 47 73 65 63 00    18 SXP 24x6Gsec.
+        44 01 20 32 32 32 20 53  58 50 20 32 34 78 36 47    D. 222 SXP 24x6G
+        73 65 63 00 44 02 20 32  31 36 20 53 58 50 20 32    sec.D. 216 SXP 2
+        34 78 36 47 73 65 63 00  44 03 20 30 32 31 20 43    4x6Gsec.D. 021 C
+        44 45 46 00 00 00 00 00  00 00 00 00 03 12 00 03    DEF.............
+        01 13 80 03 00 14 03 44  00 01 c2 05 4c 43 43 20    .......D....LCC 
+        41                                                  A               
+
+    Subenclosure identifier: 2
+      relative ES process id: 1, number of ES processes: 1
+      number of type descriptor headers: 4
+      enclosure logical identifier (hex): 5006048000000000
+      enclosure vendor: EMC       product: Viper Encl        rev: 0011
+      vendor-specific data:
+        0e 1f 4d 02 02 02 00 41  50 4d 30 30 31 38 34 36    ..M....APM001846
+        34 31 34 35 33 00 00 00  02 00 00 01 01 01 80 01    41453...........
+        00 01 c3 07 43 68 61 73  73 69 73                   ....Chassis     
+
+    Subenclosure identifier: 3
+      relative ES process id: 1, number of ES processes: 1
+      number of type descriptor headers: 3
+      enclosure logical identifier (hex): 5006048000000000
+      enclosure vendor: EMC       product: 000B0015  rev: 2950
+      vendor-specific data:
+        02 81 42 02 00 04 33 41  43 37 39 34 31 32 35 30    ..B...3AC7941250
+        31 39 31 32 35 20 20 01  66 a4 20 35 2e 32 31 53    19125  .f. 5.21S
+        58 50 33 36 78 36 47 00  00 00 00 00 02 15 00 04    XP36x6G.........
+        01 16 80 04 00 01 c4 0e  50 6f 77 65 72 20 53 75    ........Power Su
+        70 70 6c 79 20 42                                   pply B          
+
+    Subenclosure identifier: 4
+      relative ES process id: 1, number of ES processes: 1
+      number of type descriptor headers: 3
+      enclosure logical identifier (hex): 5006048000000000
+      enclosure vendor: EMC       product: 000B0015  rev: 2950
+      vendor-specific data:
+        02 80 41 02 01 03 32 41  43 37 39 34 31 32 35 30    ..A...2AC7941250
+        31 39 31 32 36 20 20 01  6b 04 20 35 2e 32 31 53    19126  .k. 5.21S
+        58 50 33 36 78 36 47 00  00 00 00 00 02 17 00 05    XP36x6G.........
+        01 18 80 05 00 01 c5 0e  50 6f 77 65 72 20 53 75    ........Power Su
+        70 70 6c 79 20 41                                   pply A          
+
+  type descriptor header and text list
+    Element type: Array device slot, subenclosure id: 0
+      number of possible elements: 15
+      text: Array Device
+    Element type: Temperature sensor, subenclosure id: 0
+      number of possible elements: 1
+      text: Temp. Sensor B
+    Element type: Enclosure, subenclosure id: 0
+      number of possible elements: 1
+      text: LCC B
+    Element type: vendor specific [0x81], subenclosure id: 0
+      number of possible elements: 25
+      text: Expander Phy
+    Element type: SAS expander, subenclosure id: 0
+      number of possible elements: 1
+      text: Expander B
+    Element type: Enclosure services controller electronics, subenclosure id: 0
+      number of possible elements: 1
+      text: Controller B
+    Element type: SAS connector, subenclosure id: 0
+      number of possible elements: 10
+      text: SAS Connector B
+    Element type: Display, subenclosure id: 0
+      number of possible elements: 2
+      text: Display Green
+    Element type: Display, subenclosure id: 0
+      number of possible elements: 1
+      text: Display Blue
+    Element type: Language, subenclosure id: 0
+      number of possible elements: 1
+      text: Language
+    Element type: Temperature sensor, subenclosure id: 1
+      number of possible elements: 1
+      text: Temp. Sensor A
+    Element type: Enclosure, subenclosure id: 1
+      number of possible elements: 1
+      text: LCC A
+    Element type: vendor specific [0x81], subenclosure id: 1
+      number of possible elements: 8
+      text: Expander Phy
+    Element type: SAS expander, subenclosure id: 1
+      number of possible elements: 1
+      text: Expander A
+    Element type: Enclosure services controller electronics, subenclosure id: 1
+      number of possible elements: 1
+      text: Controller A
+    Element type: SAS connector, subenclosure id: 1
+      number of possible elements: 10
+      text: SAS Connector A
+    Element type: Enclosure, subenclosure id: 2
+      number of possible elements: 1
+      text: Enclosure
+    Element type: Cooling, subenclosure id: 2
+      number of possible elements: 0
+      text: Cooling Fan M
+    Element type: Temperature sensor, subenclosure id: 2
+      number of possible elements: 1
+      text: Temp. Sensor M
+    Element type: SAS connector, subenclosure id: 2
+      number of possible elements: 16
+      text: SAS Connector M
+    Element type: Cooling, subenclosure id: 3
+      number of possible elements: 2
+      text: Cooling Fan B
+    Element type: Temperature sensor, subenclosure id: 3
+      number of possible elements: 2
+      text: Temp. Sensor B
+    Element type: Power supply, subenclosure id: 3
+      number of possible elements: 1
+      text: Power Supply B
+    Element type: Cooling, subenclosure id: 4
+      number of possible elements: 2
+      text: Cooling Fan A
+    Element type: Temperature sensor, subenclosure id: 4
+      number of possible elements: 2
+      text: Temp. Sensor A
+    Element type: Power supply, subenclosure id: 4
+      number of possible elements: 1
+      text: Power Supply A

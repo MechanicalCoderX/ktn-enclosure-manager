@@ -1,0 +1,12 @@
+standard INQUIRY:
+  PQual=0  PDT=13  RMB=0  LU_CONG=0  hot_pluggable=0  version=0x06  [SPC-4]
+  [AERC=0]  [TrmTsk=0]  NormACA=0  HiSUP=1  Resp_data_format=2
+  SCCS=0  ACC=0  TPGS=0  3PC=0  Protect=0  [BQue=1]
+  EncServ=1  MultiP=1 (VS=0)  [MChngr=0]  [ACKREQQ=0]  Addr16=0
+  [RelAdr=0]  WBus16=0  Sync=0  [Linked=0]  [TranDis=0]  CmdQue=1
+  [SPI: Clocking=0x0  QAS=0  IUS=0]
+    length=136 (0x88)   Peripheral device type: enclosure services device
+ Vendor identification: EMC     
+ Product identification: ESES Enclosure  
+ Product revision level: 0001
+ Unit serial number:    5006048004a54c3e

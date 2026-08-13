@@ -1,0 +1,233 @@
+  EMC       ESES Enclosure    0001
+  Primary enclosure logical identifier (hex): 5006048004a54c3e
+Additional element status diagnostic page:
+  generation code: 0x7
+  additional element status descriptor list
+    Element type: Array device slot, subenclosure id: 0 [ti=0]
+      Element index: 0  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 0
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058347d86
+          phy identifier: 0x1
+      Element index: 1  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 1
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca0583dfdfe
+          phy identifier: 0x1
+      Element index: 2  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 2
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b6147a
+          phy identifier: 0x1
+      Element index: 3  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 3
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b603b6
+          phy identifier: 0x1
+      Element index: 4  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 4
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058a1dafa
+          phy identifier: 0x1
+      Element index: 5  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 5
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b5dcb6
+          phy identifier: 0x1
+      Element index: 6  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 6
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b51f9e
+          phy identifier: 0x1
+      Element index: 7  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 7
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b5c6aa
+          phy identifier: 0x1
+      Element index: 8  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 8
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b5e766
+          phy identifier: 0x1
+      Element index: 9  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 9
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b5946e
+          phy identifier: 0x1
+      Element index: 10  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 10
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca0583e051a
+          phy identifier: 0x1
+      Element index: 11  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 11
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058ae5eca
+          phy identifier: 0x1
+      Element index: 12  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 12
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b60132
+          phy identifier: 0x1
+      Element index: 13  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 13
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b603ce
+          phy identifier: 0x1
+      Element index: 14  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 14
+        phy index: 0
+          SAS device type: end device
+          initiator port for:
+          target port for: SSP
+          attached SAS address: 0x5006048004a54c3f
+          SAS address: 0x5000cca058b51fae
+          phy identifier: 0x1
+    Element type: SAS expander, subenclosure id: 0 [ti=4]
+      Element index: 42  eiioe=0
+        Transport protocol: SAS
+        number of phys: 25
+        SAS address: 0x5006048004a54c3f
+        Attached connector; other_element pairs:
+          [0] connector ei: 45; other ei: 44
+          [1] connector ei: 46; other ei: 44
+          [2] connector ei: 47; other ei: 44
+          [3] connector ei: 48; other ei: 44
+          [4] connector ei: 50; other ei: 49
+          [5] connector ei: 51; other ei: 49
+          [6] connector ei: 52; other ei: 49
+          [7] connector ei: 53; other ei: 49
+          [8] no connector
+          [9] connector ei: 82; other ei: 0
+          [10] connector ei: 83; other ei: 1
+          [11] connector ei: 84; other ei: 2
+          [12] connector ei: 85; other ei: 3
+          [13] connector ei: 86; other ei: 4
+          [14] connector ei: 87; other ei: 5
+          [15] connector ei: 88; other ei: 6
+          [16] connector ei: 89; other ei: 7
+          [17] connector ei: 90; other ei: 8
+          [18] connector ei: 91; other ei: 9
+          [19] connector ei: 92; other ei: 10
+          [20] connector ei: 96; other ei: 14
+          [21] connector ei: 93; other ei: 11
+          [22] connector ei: 95; other ei: 13
+          [23] connector ei: 94; other ei: 12
+          [24] connector ei: 97; other ei: 42
+    Element type: Enclosure services controller electronics, subenclosure id: 0 [ti=5]
+      Element index: 43  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1
+        phy index: 0
+          phy_id: 0x18
+          no connector; other ei: 42
+          SAS address: 0x5006048004a54c3e
+    Element type: SAS expander, subenclosure id: 1 [ti=13]
+      Element index: 68  eiioe=0
+        Transport protocol: SAS
+        number of phys: 24
+        SAS address: 0x5006048004a4eabf
+        Attached connector; other_element pairs:
+          [0] connector ei: 71; other ei: 70
+          [1] connector ei: 72; other ei: 70
+          [2] connector ei: 73; other ei: 70
+          [3] connector ei: 74; other ei: 70
+          [4] connector ei: 76; other ei: 75
+          [5] connector ei: 77; other ei: 75
+          [6] connector ei: 78; other ei: 75
+          [7] connector ei: 79; other ei: 75
+          [8] no connector
+          [9] no connector
+          [10] no connector
+          [11] no connector
+          [12] no connector
+          [13] no connector
+          [14] no connector
+          [15] no connector
+          [16] no connector
+          [17] no connector
+          [18] no connector
+          [19] no connector
+          [20] no connector
+          [21] no connector
+          [22] no connector
+          [23] no connector
+    Element type: Enclosure services controller electronics, subenclosure id: 1 [ti=14]
+      Element index: 69  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1
+        phy index: 0
+          phy_id: 0x18
+          no connector; other ei: 68
+          SAS address: 0x5006048004a4eabe

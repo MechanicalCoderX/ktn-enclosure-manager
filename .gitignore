@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Runtime state - contains the app's own secrets and session keys
+.env
+*.env
+!.env.example
+data/
+*.db
+*.sqlite3
+audit.log
+
+# Never commit a real TrueNAS API key or CA bundle
+secrets/
+*.pem
+!tests/fixtures/**/*.pem

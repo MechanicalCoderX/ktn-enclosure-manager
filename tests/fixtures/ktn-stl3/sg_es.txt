@@ -1,0 +1,603 @@
+  EMC       ESES Enclosure    0001
+Enclosure Status diagnostic page:
+  INVOP=0, INFO=0, NON-CRIT=0, CRIT=0, UNRECOV=0
+  generation code: 0x7
+  status descriptor list
+    Element type: Array device slot, subenclosure id: 0 [ti=0]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=1, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 2 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 3 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 4 descriptor:
+        Predicted failure=0, Disabled=0, Swap=1, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 5 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 6 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 7 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 8 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 9 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 10 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 11 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 12 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 13 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+      Element 14 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        OK=0, Reserved device=0, Hot spare=0, Cons check=0
+        In crit array=0, In failed array=0, Rebuild/remap=0, R/R abort=0
+        App client bypass A=0, Do not remove=0, Enc bypass A=0, Enc bypass B=0
+        Ready to insert=0, RMV=0, Ident=0, Report=0
+        App client bypass B=0, Fault sensed=0, Fault reqstd=0, Device off=0
+        Bypassed A=0, Bypassed B=0, Dev bypassed A=0, Dev bypassed B=0
+    Element type: Temperature sensor, subenclosure id: 0 [ti=1]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=31 C
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=31 C
+    Element type: Enclosure, subenclosure id: 0 [ti=2]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Time until power cycle=0, Failure indication=0
+        Warning indication=0, Requested power off duration=0
+        Failure requested=0, Warning requested=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Time until power cycle=0, Failure indication=0
+        Warning indication=0, Requested power off duration=0
+        Failure requested=0, Warning requested=0
+    Element type: vendor specific [0x81], subenclosure id: 0 [ti=3]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not available
+        Vendor specific element type, status in hex: 07 00 00 e0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 00 e0
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 01 e0
+      Element 2 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 02 e0
+      Element 3 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 03 e0
+      Element 4 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 04 20
+      Element 5 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 05 20
+      Element 6 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 06 20
+      Element 7 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 07 20
+      Element 8 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not available
+        Vendor specific element type, status in hex: 07 2a 08 20
+      Element 9 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 09 e0
+      Element 10 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 0a e0
+      Element 11 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 0b e0
+      Element 12 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 0c e0
+      Element 13 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 0d e0
+      Element 14 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 0e e0
+      Element 15 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 0f e0
+      Element 16 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 10 e0
+      Element 17 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 11 e0
+      Element 18 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 12 e0
+      Element 19 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 13 e0
+      Element 20 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 14 e0
+      Element 21 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 15 e0
+      Element 22 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 16 e0
+      Element 23 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 17 e0
+      Element 24 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 2a 18 e0
+    Element type: SAS expander, subenclosure id: 0 [ti=4]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0
+    Element type: Enclosure services controller electronics, subenclosure id: 0 [ti=5]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, Do not remove=0, Report=1, Hot swap=1
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, Do not remove=0, Report=1, Hot swap=1
+    Element type: SAS connector, subenclosure id: 0 [ti=6]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, No information
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x0, Mated=0, Fail=0, OC=0
+      Element 2 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x1, Mated=0, Fail=0, OC=0
+      Element 3 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x2, Mated=0, Fail=0, OC=0
+      Element 4 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x3, Mated=0, Fail=0, OC=0
+      Element 5 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 6 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x0, Mated=0, Fail=0, OC=0
+      Element 7 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x1, Mated=0, Fail=0, OC=0
+      Element 8 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x2, Mated=0, Fail=0, OC=0
+      Element 9 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x3, Mated=0, Fail=0, OC=0
+    Element type: Display, subenclosure id: 0 [ti=7]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=1, Fail=0, Display mode status=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=1, Fail=0, Display mode status=1, Display character status=0x2d00 ['-']
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=1, Fail=0, Display mode status=1, Display character status=0x2d00 ['-']
+    Element type: Display, subenclosure id: 0 [ti=8]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=1, Fail=0, Display mode status=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=1, Fail=0, Display mode status=1, Display character status=0x2d00 ['-']
+    Element type: Language, subenclosure id: 0 [ti=9]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Language code: 
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Language code: 
+    Element type: Temperature sensor, subenclosure id: 1 [ti=10]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=31 C
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=31 C
+    Element type: Enclosure, subenclosure id: 1 [ti=11]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Time until power cycle=0, Failure indication=0
+        Warning indication=0, Requested power off duration=0
+        Failure requested=0, Warning requested=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Time until power cycle=0, Failure indication=0
+        Warning indication=0, Requested power off duration=0
+        Failure requested=0, Warning requested=0
+    Element type: vendor specific [0x81], subenclosure id: 1 [ti=12]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 ff 00 20
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 44 00 20
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 44 01 20
+      Element 2 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 44 02 20
+      Element 3 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 44 03 20
+      Element 4 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 44 04 20
+      Element 5 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 44 05 20
+      Element 6 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 44 06 20
+      Element 7 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Vendor specific element type, status in hex: 01 44 07 20
+    Element type: SAS expander, subenclosure id: 1 [ti=13]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0
+    Element type: Enclosure services controller electronics, subenclosure id: 1 [ti=14]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, Do not remove=0, Report=0, Hot swap=1
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, Do not remove=0, Report=0, Hot swap=1
+    Element type: SAS connector, subenclosure id: 1 [ti=15]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, No information
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x0, Mated=0, Fail=0, OC=0
+      Element 2 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x1, Mated=0, Fail=0, OC=0
+      Element 3 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x2, Mated=0, Fail=0, OC=0
+      Element 4 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x3, Mated=0, Fail=0, OC=0
+      Element 5 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 6 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x0, Mated=0, Fail=0, OC=0
+      Element 7 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x1, Mated=0, Fail=0, OC=0
+      Element 8 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x2, Mated=0, Fail=0, OC=0
+      Element 9 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: Not installed
+        Ident=0, Mini SAS 4x receptacle (SFF-8088) [max 4 phys]
+        Connector physical link=0x3, Mated=0, Fail=0, OC=0
+    Element type: Enclosure, subenclosure id: 2 [ti=16]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Time until power cycle=0, Failure indication=0
+        Warning indication=0, Requested power off duration=0
+        Failure requested=0, Warning requested=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Time until power cycle=0, Failure indication=0
+        Warning indication=0, Requested power off duration=0
+        Failure requested=0, Warning requested=0
+    Element type: Cooling, subenclosure id: 2 [ti=17]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=0
+        Off=0, Actual speed=5300 rpm, Fan at highest speed
+    Element type: Temperature sensor, subenclosure id: 2 [ti=18]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=28 C
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=21 C
+    Element type: SAS connector, subenclosure id: 2 [ti=19]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, No information
+        Connector physical link=0x0, Mated=0, Fail=0, OC=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 2 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 3 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 4 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 5 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 6 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 7 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 8 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 9 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 10 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 11 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 12 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 13 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 14 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS Drive backplane receptacle (SFF-8482) [max 2 phys]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+      Element 15 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, SAS virtual connector [max 1 phy]
+        Connector physical link=0xff, Mated=0, Fail=0, OC=0
+    Element type: Cooling, subenclosure id: 3 [ti=20]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+        Off=0, Actual speed=5300 rpm, Fan at highest speed
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=0
+        Off=0, Actual speed=5300 rpm, Fan at highest speed
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+        Off=0, Actual speed=5300 rpm, Fan at highest speed
+    Element type: Temperature sensor, subenclosure id: 3 [ti=21]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=22 C
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=28 C
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=22 C
+    Element type: Power supply, subenclosure id: 3 [ti=22]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, DC overvoltage=0, DC undervoltage=0
+        DC overcurrent=0, Hot swap=1, Fail=0, Requested on=0, Off=0
+        Overtmp fail=0, Temperature warn=0, AC fail=0, DC fail=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, DC overvoltage=0, DC undervoltage=0
+        DC overcurrent=0, Hot swap=1, Fail=0, Requested on=0, Off=0
+        Overtmp fail=0, Temperature warn=0, AC fail=0, DC fail=0
+    Element type: Cooling, subenclosure id: 4 [ti=23]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=0
+        Off=0, Actual speed=5300 rpm, Fan at highest speed
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=0
+        Off=0, Actual speed=5300 rpm, Fan at highest speed
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=0
+        Off=0, Actual speed=5300 rpm, Fan at highest speed
+    Element type: Temperature sensor, subenclosure id: 4 [ti=24]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=21 C
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=28 C
+      Element 1 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Fail=0, OT failure=0, OT warning=0, UT failure=0
+        UT warning=0
+        Temperature=21 C
+    Element type: Power supply, subenclosure id: 4 [ti=25]
+      Overall descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, DC overvoltage=0, DC undervoltage=0
+        DC overcurrent=0, Hot swap=1, Fail=0, Requested on=0, Off=0
+        Overtmp fail=0, Temperature warn=0, AC fail=0, DC fail=0
+      Element 0 descriptor:
+        Predicted failure=0, Disabled=0, Swap=0, status: OK
+        Ident=0, Do not remove=0, DC overvoltage=0, DC undervoltage=0
+        DC overcurrent=0, Hot swap=1, Fail=0, Requested on=0, Off=0
+        Overtmp fail=0, Temperature warn=0, AC fail=0, DC fail=0
