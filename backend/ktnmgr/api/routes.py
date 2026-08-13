@@ -237,6 +237,11 @@ async def identify(
     except LocateError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
+    # Refresh the slot cache immediately rather than waiting for the next poll
+    # tick, so the caller's next read - and the countdown the UI starts showing
+    # straight away - reflect the write that was just verified.
+    await service.poll_hardware()
+
     return {
         "ok": True,
         "locate": body.on,
@@ -284,7 +289,7 @@ def raw_page(
     if not ref.sg_device:
         raise HTTPException(status.HTTP_409_CONFLICT, "no sg device for this enclosure")
     try:
-        result = service.ses.read_page(ref.sg_device, page)
+        result = service.ses.read_for(ref, page)
     except SesError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
     return {"page": page, "output": result.stdout}

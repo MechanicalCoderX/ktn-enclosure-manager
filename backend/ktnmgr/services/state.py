@@ -180,11 +180,9 @@ class StateService:
                 continue
             try:
                 configuration = await loop.run_in_executor(
-                    None, self.ses.read_page, ref.sg_device, "configuration"
+                    None, self.ses.read_for, ref, "configuration"
                 )
-                joined = await loop.run_in_executor(
-                    None, self.ses.read_page, ref.sg_device, "join"
-                )
+                joined = await loop.run_in_executor(None, self.ses.read_for, ref, "join")
                 collected[ref.logical_id] = build_telemetry(
                     ref.logical_id, configuration.stdout, joined.stdout
                 )

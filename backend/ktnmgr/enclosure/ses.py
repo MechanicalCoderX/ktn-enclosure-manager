@@ -17,6 +17,7 @@ import shutil
 import subprocess  # noqa: S404 - argv-only, shell=False, allow-listed arguments
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -106,3 +107,65 @@ class SesRunner:
                 f"sg_ses {page} failed (rc={proc.returncode}): {proc.stderr.strip()[:200]}"
             )
         return SesResult(page=page, stdout=proc.stdout, returncode=proc.returncode)
+
+    def read_for(self, ref: Any, page: str) -> SesResult:
+        """Read a page for a discovered enclosure. Shared interface with
+        HelperSesRunner so callers never have to know which one is in use."""
+        if not getattr(ref, "sg_device", None):
+            raise SesError("enclosure has no sg device")
+        return self.read_page(ref.sg_device, page)
+
+
+class HelperSesRunner:
+    """Reads allow-listed sg_ses pages through the privileged helper.
+
+    With this in place the web process needs no access to /dev/sg* at all: the
+    device node stays root-owned and only the helper opens it. The page name is
+    still validated on both sides, and the helper resolves the device from the
+    enclosure's logical id rather than accepting a path.
+    """
+
+    def __init__(self, socket_path: Path, timeout: float = 40.0) -> None:
+        from ktnmgr.enclosure.helper_client import HelperUnavailableError, send
+
+        self._send = send
+        self._unavailable = HelperUnavailableError
+        self.socket_path = Path(socket_path)
+        self.timeout = timeout
+        self._version: str | None = None
+
+    @property
+    def binary(self) -> str:
+        return f"(privileged helper at {self.socket_path})"
+
+    def available(self) -> bool:
+        return self.socket_path.exists()
+
+    def version(self) -> str | None:
+        if self._version is None:
+            try:
+                response = self._send(
+                    self.socket_path, {"op": "ses_version"}, timeout=self.timeout
+                )
+                self._version = str(response.get("version") or "") or None
+            except self._unavailable:
+                return None
+        return self._version
+
+    def read_for(self, ref: Any, page: str) -> SesResult:
+        return self.read_page_for(ref.logical_id, page)
+
+    def read_page_for(self, enclosure_id: str, page: str) -> SesResult:
+        if page not in READ_ONLY_PAGES:
+            raise SesError(f"page {page!r} is not an allow-listed read-only page")
+        try:
+            response = self._send(
+                self.socket_path,
+                {"op": "ses_read", "enclosure_id": enclosure_id, "page": page},
+                timeout=self.timeout,
+            )
+        except self._unavailable as exc:
+            raise SesError(str(exc)) from exc
+        if not response.get("ok"):
+            raise SesError(str(response.get("error") or "helper refused the SES read"))
+        return SesResult(page=page, stdout=str(response.get("output") or ""), returncode=0)

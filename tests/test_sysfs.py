@@ -141,3 +141,52 @@ def test_missing_sysfs_root_returns_empty_not_crash(tmp_path: Path) -> None:
     """§37: enclosure disconnected / kernel support absent must degrade, not raise."""
     backend = SysfsEnclosureBackend(sysfs_root=tmp_path / "nope", dev_root=tmp_path)
     assert backend.discover() == []
+
+
+class _SlowSettlingBackend(SysfsEnclosureBackend):
+    """Simulates the real hardware: the attribute keeps reporting the old value
+    for the first few reads after a write."""
+
+    stale_reads = 3
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self._remaining = 0
+
+    def set_locate(self, ref, ses_slot, on, **kwargs):  # type: ignore[no-untyped-def]
+        self._remaining = self.stale_reads
+        return super().set_locate(ref, ses_slot, on, **kwargs)
+
+    def _read_locate_at(self, path: Path) -> bool:
+        if self._remaining > 0:
+            self._remaining -= 1
+            return not super()._read_locate_at(path)  # stale: the previous value
+        return super()._read_locate_at(path)
+
+
+def test_locate_readback_polls_until_the_value_settles(tmp_path: Path) -> None:
+    """Regression guard for a bug only real hardware exposed: sysfs does not
+    update synchronously with the write, so a single immediate read returns the
+    previous value and every IDENT would be reported as failed verification."""
+    import shutil
+
+    root = tmp_path / "sys"
+    shutil.copytree(FIXTURE_ROOT, root)
+    backend = _SlowSettlingBackend(sysfs_root=root, dev_root=tmp_path / "dev")
+    ref = backend.resolve(LOGICAL_ID)
+
+    assert backend.set_locate(ref, 0, True, poll_interval=0.001) is True
+    assert backend.set_locate(ref, 0, False, poll_interval=0.001) is False
+
+
+def test_locate_readback_gives_up_and_reports_failure(tmp_path: Path) -> None:
+    """If it never settles, the caller must learn that - not be told it worked."""
+    import shutil
+
+    root = tmp_path / "sys"
+    shutil.copytree(FIXTURE_ROOT, root)
+    backend = _SlowSettlingBackend(sysfs_root=root, dev_root=tmp_path / "dev")
+    backend.stale_reads = 10_000
+    ref = backend.resolve(LOGICAL_ID)
+
+    assert backend.set_locate(ref, 0, True, settle_timeout=0.05, poll_interval=0.001) is False

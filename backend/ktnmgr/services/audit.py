@@ -6,7 +6,6 @@ engine with no user present. Never records secrets.
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from datetime import UTC, datetime

@@ -1,0 +1,85 @@
+# KTN Enclosure Manager - TrueNAS SCALE Custom App / docker compose.
+#
+# HOST ACCESS THIS CONTAINER REQUIRES, and why (spec §32):
+#
+#   /sys  (read-write)  Enclosure discovery, slot state and the IDENT write all
+#                       go through the Linux enclosure sysfs ABI. Docker mounts
+#                       /sys read-only by default, and the enclosure attributes
+#                       live under /sys/devices (the /sys/class/enclosure entries
+#                       are symlinks into it), so a narrower bind of just
+#                       /sys/class/enclosure does not work - its symlinks would
+#                       resolve back into the container's read-only /sys.
+#
+#   /dev/sg*            SCSI generic device for read-only sg_ses telemetry.
+#                       Granted per-device rather than by mounting all of /dev.
+#
+# The container does NOT use --privileged. It drops all capabilities except
+# DAC_OVERRIDE, which is what the sysfs write actually needs.
+#
+# If you are unwilling to grant a writable /sys, set KTN_IDENT_HELPER_SOCKET
+# empty and the app still runs read-only: the drive map, chassis telemetry and
+# all TrueNAS data work; only the Identify button is unavailable.
+
+services:
+  ktn-enclosure-manager:
+    image: ktn-enclosure-manager:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ktn-enclosure-manager
+    restart: unless-stopped
+
+    ports:
+      - "${KTN_BIND_ADDRESS:-0.0.0.0}:${KTN_PUBLISH_PORT:-8420}:8420"
+
+    volumes:
+      # Application state: accounts, session key, IDENT timers, audit log.
+      - ${KTN_DATA_PATH:-./data}:/data
+      # Enclosure sysfs. See the note above on why this is /sys and not narrower.
+      - /sys:/sys:rw
+
+    devices:
+      # Adjust if your SES device is not sg16; the app discovers the correct
+      # one at runtime but the device node must be exposed to the container.
+      #
+      # ':rw' is required and was determined by measurement, not assumption:
+      # sg_ses submits SCSI commands through the SG_IO ioctl, which the device
+      # cgroup treats as a write even for a read-only diagnostic page. With
+      # ':r' every sg_ses call fails with "Operation not permitted".
+      # This is NOT write access to disk data - it addresses the enclosure
+      # processor, and the application only ever issues allow-listed read-only
+      # pages (see backend/ktnmgr/enclosure/ses.py).
+      # CAP_SYS_RAWIO was tested and is NOT needed; it is deliberately not granted.
+      - "${KTN_SG_DEVICE:-/dev/sg16}:${KTN_SG_DEVICE:-/dev/sg16}:rw"
+
+    cap_drop:
+      - ALL
+    cap_add:
+      # Write access to the locate attribute, which is root-owned on the host.
+      - DAC_OVERRIDE
+      # setpriv drops the web process to uid/gid 1000. Without these the whole
+      # application would have to stay root, which is strictly worse.
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      KTN_DATA_DIR: /data
+      KTN_PORT: "8420"
+      KTN_IDENT_HELPER_SOCKET: /run/ktn/ident.sock
+      KTN_SYSFS_ROOT: /sys
+      KTN_TRUENAS_URL: ${KTN_TRUENAS_URL:-}
+      KTN_TRUENAS_API_KEY: ${KTN_TRUENAS_API_KEY:-}
+      KTN_TRUENAS_VERIFY_TLS: ${KTN_TRUENAS_VERIFY_TLS:-true}
+      KTN_TRUENAS_CA_BUNDLE: ${KTN_TRUENAS_CA_BUNDLE:-}
+      KTN_ENCLOSURE_ALLOWLIST: ${KTN_ENCLOSURE_ALLOWLIST:-}
+      KTN_POLL_SLOTS_SECONDS: ${KTN_POLL_SLOTS_SECONDS:-5}
+      KTN_POLL_TRUENAS_SECONDS: ${KTN_POLL_TRUENAS_SECONDS:-20}
+      KTN_POLL_SES_SECONDS: ${KTN_POLL_SES_SECONDS:-30}
+      KTN_POLL_SMART_SECONDS: ${KTN_POLL_SMART_SECONDS:-120}
+
+    tmpfs:
+      # setgid (2770) so the helper's socket inherits gid 1000 on creation and
+      # the container needs no CAP_CHOWN.
+      - /run/ktn:mode=2770,uid=0,gid=1000

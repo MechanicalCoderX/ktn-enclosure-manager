@@ -18,12 +18,11 @@ parameter through which a path, a command, or an sg_ses argument could travel.
 
 from __future__ import annotations
 
-import json
 import logging
-import socket
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from ktnmgr.enclosure.helper_client import HelperUnavailableError, send
 from ktnmgr.enclosure.sysfs import SysfsEnclosureBackend
 
 log = logging.getLogger(__name__)
@@ -101,25 +100,14 @@ class HelperLocateWriter:
             raise LocateError(f"unsupported operation {op!r}")
         enclosure_id, slot = validate_request(enclosure_id, slot)
 
-        payload = json.dumps({"op": op, "enclosure_id": enclosure_id, "slot": slot}) + "\n"
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(self.timeout)
-                client.connect(str(self.socket_path))
-                client.sendall(payload.encode("utf-8"))
-                chunks: list[bytes] = []
-                while b"\n" not in b"".join(chunks):
-                    chunk = client.recv(4096)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-        except OSError as exc:
-            raise LocateError(f"IDENT helper unreachable: {exc}") from exc
-
-        try:
-            response = json.loads(b"".join(chunks).decode("utf-8").strip() or "{}")
-        except ValueError as exc:
-            raise LocateError("IDENT helper returned malformed response") from exc
+            response = send(
+                self.socket_path,
+                {"op": op, "enclosure_id": enclosure_id, "slot": slot},
+                timeout=self.timeout,
+            )
+        except HelperUnavailableError as exc:
+            raise LocateError(str(exc)) from exc
 
         if not response.get("ok"):
             raise LocateError(str(response.get("error") or "IDENT helper refused the request"))

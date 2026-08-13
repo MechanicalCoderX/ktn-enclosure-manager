@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 
 from ktnmgr.models import EnclosureRef, SlotState
@@ -22,6 +23,13 @@ log = logging.getLogger(__name__)
 
 DEFAULT_SYSFS_ROOT = Path("/sys")
 DEFAULT_DEV_ROOT = Path("/dev")
+
+# How long to wait for a locate write to be reflected back by sysfs, and how
+# often to re-read while waiting. Measured settle time on the KTN-STL3 is
+# 0.17-0.22s; 2s leaves generous headroom for a busy expander without making a
+# genuinely failed write hang the request.
+DEFAULT_SETTLE_TIMEOUT = 2.0
+DEFAULT_SETTLE_POLL = 0.05
 
 # A slot directory is any child of the enclosure directory that carries a
 # 'slot' attribute. Non-slot children (device, power, subsystem, components,
@@ -228,16 +236,46 @@ class SysfsEnclosureBackend:
     def read_locate(self, ref: EnclosureRef, ses_slot: int) -> bool:
         return _read_bool(self.slot_dir(ref, ses_slot) / "locate")
 
-    def set_locate(self, ref: EnclosureRef, ses_slot: int, on: bool) -> bool:
+    def _read_locate_at(self, path: Path) -> bool:
+        """Indirection point so tests can simulate a slow-settling attribute."""
+        return _read_bool(path)
+
+    def set_locate(
+        self,
+        ref: EnclosureRef,
+        ses_slot: int,
+        on: bool,
+        settle_timeout: float = DEFAULT_SETTLE_TIMEOUT,
+        poll_interval: float = DEFAULT_SETTLE_POLL,
+    ) -> bool:
         """Write locate and verify by reading it back (§26 steps 6-9).
 
-        Returns the verified post-write state. Raises OSError if the write
-        itself fails; returns a mismatching value if the write succeeded but
-        the hardware did not honour it, which the caller reports as a failed
-        verification rather than as success.
+        The read-back POLLS rather than reading once. On the KTN-STL3 the
+        sysfs attribute does not update synchronously with the write: the
+        kernel dispatches a SES control command and refreshes the cached value
+        only once the enclosure processor has answered. Measured on real
+        hardware this takes 0.17-0.22s, so a single immediate read returns the
+        *previous* value and every operation would be reported as a failed
+        verification while actually having succeeded.
+
+        Returns the settled state, or the last value observed if it never
+        settled within ``settle_timeout`` - which the caller then reports as a
+        genuine verification failure.
         """
         target = self.slot_dir(ref, ses_slot) / "locate"
         payload = "1" if on else "0"
         with target.open("w") as handle:
             handle.write(payload)
-        return _read_bool(target)
+
+        deadline = time.monotonic() + settle_timeout
+        observed = self._read_locate_at(target)
+        while observed is not on and time.monotonic() < deadline:
+            time.sleep(poll_interval)
+            observed = self._read_locate_at(target)
+
+        if observed is not on:
+            log.warning(
+                "locate on %s slot %s did not settle to %s within %ss (still %s)",
+                ref.logical_id, ses_slot, int(on), settle_timeout, int(observed),
+            )
+        return observed

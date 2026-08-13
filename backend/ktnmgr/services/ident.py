@@ -15,7 +15,6 @@ Design points from the spec:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -107,7 +106,9 @@ class IdentManager:
     def record_for(self, enclosure_id: str, ses_slot: int) -> IdentRecord | None:
         return self._records.get((enclosure_id.lower(), ses_slot))
 
-    def describe(self, enclosure_id: str, ses_slot: int, locate_on: bool) -> tuple[str | None, datetime | None]:
+    def describe(
+        self, enclosure_id: str, ses_slot: int, locate_on: bool
+    ) -> tuple[str | None, datetime | None]:
         """Return (origin, expires_at) for a bay given its observed locate state."""
         record = self.record_for(enclosure_id, ses_slot)
         if not locate_on:

@@ -15,7 +15,7 @@ from ktnmgr.api.routes import router
 from ktnmgr.config import Settings, get_settings
 from ktnmgr.enclosure.disks import DiskInfoReader
 from ktnmgr.enclosure.locate import build_locate_writer
-from ktnmgr.enclosure.ses import SesRunner
+from ktnmgr.enclosure.ses import HelperSesRunner, SesRunner
 from ktnmgr.enclosure.sysfs import SysfsEnclosureBackend
 from ktnmgr.services.audit import AuditLog
 from ktnmgr.services.auth import AuthService
@@ -36,7 +36,13 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     backend = SysfsEnclosureBackend(sysfs_root=settings.sysfs_root, dev_root=settings.dev_root)
     disks = DiskInfoReader(sysfs_root=settings.sysfs_root)
-    ses = SesRunner(binary=settings.sg_ses_binary)
+    # When a helper socket is configured the web process reads SES pages
+    # through it, so it needs no access to /dev/sg* at all.
+    ses = (
+        HelperSesRunner(settings.ident_helper_socket)
+        if settings.ident_helper_socket
+        else SesRunner(binary=settings.sg_ses_binary)
+    )
     audit = AuditLog(settings.audit_path)
     writer = build_locate_writer(backend, settings.ident_helper_socket)
     ident = IdentManager(writer=writer, audit=audit, state_path=settings.ident_state_path)

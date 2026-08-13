@@ -1,0 +1,211 @@
+# KTN Enclosure Manager
+
+A local, zero-cost, web-based enclosure manager for SAS disk shelves attached to
+**TrueNAS SCALE Community Edition** — validated end to end against an
+**EMC KTN-STL3**.
+
+TrueNAS gates its built-in enclosure UI behind iX hardware
+(`truenas.is_ix_hardware → False`, `enclosure2.query → []`), so *View Enclosure*
+shows "Enclosure Unavailable" on a community system with a third-party shelf.
+This application fills that gap **without** patching middleware, spoofing
+hardware identity, or touching the TrueNAS WebUI.
+
+![Drive map](docs/images/drive-map-dark.png)
+
+---
+
+## What it does
+
+- **Physical drive map** — one horizontal row matching the real shelf, Bay 1 on
+  the left. Bay numbers are 1-based for humans; the SES slot is always shown too.
+- **Per-bay detail** — serial, WWN, model, firmware, capacity, current `/dev/sdX`,
+  pool, vdev, ZFS state and error counters, SMART temperature.
+- **Chassis telemetry** — LCC A/B, both controllers, both SAS expanders, both
+  PSUs with their fail/AC/DC flags, cooling fans with RPM, every temperature
+  sensor.
+- **Identify** — light a bay's LED for 10s, 30s, 60s, 5 minutes, or until
+  cleared. Timers are server-side, so closing the browser cannot strand a lit LED.
+- **Diagnostics and audit** — sanitised, copyable diagnostics; every write logged.
+
+| | |
+|---|---|
+| ![Bay detail](docs/images/bay-detail.png) | ![Chassis](docs/images/chassis.png) |
+
+## Requirements
+
+- TrueNAS SCALE (developed and validated on **25.10.5**, kernel 6.12.95)
+- A SAS HBA in IT/HBA mode with an SES enclosure attached, visible as
+  `/sys/class/enclosure/*`
+- Docker (present on TrueNAS SCALE) or the TrueNAS *Custom App* UI
+- Optional: a TrueNAS API key, for pool/vdev/ZFS/SMART data
+
+Nothing is installed on the host. `sg3-utils` ships inside the image.
+
+## Install
+
+```bash
+git clone <this-repo> ktn-enclosure-manager
+cd ktn-enclosure-manager
+cp .env.example .env && chmod 600 .env
+$EDITOR .env                     # set KTN_TRUENAS_URL / API key / KTN_SG_DEVICE
+
+mkdir -p data && chown -R 1000:1000 data     # required: the app runs as uid 1000
+
+docker compose build
+docker compose up -d
+```
+
+Then open `http://<truenas>:8420` and **create the administrator account** — the
+first run has no account and no default password.
+
+Find your SES device and enclosure id:
+
+```bash
+lsscsi -g | grep enclosu          # -> /dev/sgN
+cat /sys/class/enclosure/*/id     # -> 0x...  (put in KTN_ENCLOSURE_ALLOWLIST)
+```
+
+### Identify button: one extra step
+
+The shipped compose file is hardened and **read-only**: everything works except
+Identify, which needs to write `/sys`. Docker's default AppArmor profile denies
+all `/sys` writes regardless of capabilities. To enable Identify, add one line
+to the service:
+
+```yaml
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=unconfined
+```
+
+Read [SECURITY.md](SECURITY.md) before doing so — it explains exactly what that
+does and does not expose, and describes a stricter custom-profile alternative.
+
+### TrueNAS Custom App
+
+Apps → Discover Apps → Custom App, or install via the compose file above from a
+shell. Use a dataset path for `KTN_DATA_PATH` so accounts and the audit log
+survive redeployment, and remember `chown -R 1000:1000` on it.
+
+## Configuration
+
+Everything is environment driven; see [`.env.example`](.env.example) for the
+annotated list. The essentials:
+
+| Variable | Meaning |
+|---|---|
+| `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | pool, vdev, ZFS error and SMART data. Leave empty to run without |
+| `KTN_TRUENAS_VERIFY_TLS` | defaults to `true`; prefer `KTN_TRUENAS_CA_BUNDLE` over disabling |
+| `KTN_SG_DEVICE` | SES device node to expose to the container |
+| `KTN_ENCLOSURE_ALLOWLIST` | restrict management to specific enclosure ids |
+| `KTN_POLL_*_SECONDS` | polling intervals (5 / 20 / 30 / 120 by default) |
+
+One backend poll serves every connected browser; expensive `sg_ses` and SMART
+reads are cached and never run per client.
+
+## How it identifies hardware
+
+`/dev/sdX` is **never** identity. A bay is keyed by *(enclosure logical id, SES
+slot)*, and the disk in it by serial + WWN. Device names are runtime detail and
+are expected to change.
+
+Slot-to-disk mapping comes from `<enclosure>/<slot>/device/block` in sysfs. Two
+findings from this hardware are worth knowing, because a plausible
+implementation gets both wrong:
+
+- The mapping is **not** alphabetical. On this shelf slots 11–14 are
+  `sdn, sdp, sdo, sdm`. Sorting device names produces a wrong map that looks
+  right for the first eleven bays.
+- SES reports a drive's SAS **port** address while the block layer reports its
+  **node** WWN, and they differ by 2. Correlating the two by equality silently
+  matches nothing.
+
+## Health states
+
+Health is never conveyed by colour alone: every state carries a glyph, a text
+label, and an accessible name.
+
+`✓ OK` · `▲ Warning` · `✕ Failed` · `○ Empty` · `? Unknown` · `● Identify active`
+
+An IDENT that this application did not start is shown as
+**external/unknown origin** and is never cleared automatically.
+
+## Troubleshooting
+
+**No enclosure detected.** Confirm `/sys/class/enclosure` is non-empty on the
+host and that the HBA is passed through to the TrueNAS VM. Check
+`docker logs ktn-enclosure-manager` for the startup line listing discovered
+enclosures.
+
+**Chassis section says unavailable.** The container needs the SES device node
+and it must be granted `rw` (see SECURITY.md — `SG_IO` counts as a write).
+Confirm with `docker exec ktn-enclosure-manager sg_ses -p cf /dev/sgN`.
+
+**Identify returns a permission error.** Expected in the default hardened
+configuration; see "Identify button" above.
+
+**Pool/vdev/SMART columns empty.** TrueNAS is unreachable or the API key is
+wrong. The banner names the error, and the drive map keeps working — bay state
+is read directly from the enclosure.
+
+**Everything logs out on restart.** `/data` is not writable by uid 1000. The
+container refuses to start in this state and prints the fix.
+
+## Upgrades, backup, uninstall
+
+```bash
+# upgrade
+git pull && docker compose build && docker compose up -d
+
+# backup - accounts, session key, IDENT timers, audit log
+tar czf ktn-backup.tgz data/
+
+# uninstall (removes the app; touches nothing on the host)
+docker compose down && docker rmi ktn-enclosure-manager:1.0.0
+```
+
+State lives entirely in `/data`. The application creates no host files, no
+systemd units, and no TrueNAS configuration.
+
+## Development
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e 'backend[dev]'
+PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q      # 155 tests, no hardware needed
+
+cd frontend && npm install && npm run build
+npx playwright test                                          # E2E against the real backend
+```
+
+The whole suite runs against captured KTN-STL3 fixtures in
+`tests/fixtures/`, so it needs no shelf attached. Regenerate the synthetic sysfs
+tree with `python3 tests/build_sysfs_fixture.py`.
+
+## Compatibility
+
+Validated on an EMC KTN-STL3 (15 bays, dual Viper LCC, dual PSU). The discovery,
+mapping and IDENT layers are generic Linux enclosure sysfs code with no
+KTN-specific logic, so other SES shelves are likely to work; the chassis parser
+reads element labels from the device itself rather than assuming this shelf's
+layout. Multiple enclosures are supported by the backend and selectable in the UI.
+
+## Acknowledgements
+
+Concepts were validated against, and this project was informed by, these
+MIT-licensed projects — no code was copied:
+[truenas-disk-map](https://github.com/Alex-Goaga/truenas-disk-map),
+[ses-led-control](https://github.com/nmuellerdo/ses-led-control),
+[freenas-drive-locator](https://github.com/abdlmalekluttee/freenas-drive-locator).
+
+The slot-mapping and IDENT behaviour of TrueNAS'
+`middlewared.plugins.enclosure_.sysfs_disks` was used as *reference behaviour*
+only; this is an independent implementation against the Linux sysfs ABI, with no
+runtime dependency on TrueNAS internals.
+
+## Licence and trademarks
+
+[MIT](LICENSE).
+
+Not affiliated with, endorsed by, or sponsored by iXsystems or Dell EMC.
+"TrueNAS" is a trademark of iXsystems, Inc.; "EMC" of Dell Inc. Used here only
+to describe compatibility. This is not an official TrueNAS feature.

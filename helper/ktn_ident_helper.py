@@ -33,8 +33,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
-from ktnmgr.enclosure.locate import LocateError, validate_request  # noqa: E402
-from ktnmgr.enclosure.sysfs import (  # noqa: E402
+from ktnmgr.enclosure.locate import LocateError, validate_request
+from ktnmgr.enclosure.ses import READ_ONLY_PAGES, SesError, SesRunner
+from ktnmgr.enclosure.sysfs import (
     EnclosureNotFoundError,
     SlotNotFoundError,
     SysfsEnclosureBackend,
@@ -48,6 +49,7 @@ MAX_REQUEST_BYTES = 4096
 class IdentHandler(socketserver.StreamRequestHandler):
     backend: SysfsEnclosureBackend
     allowlist: set[str]
+    ses: SesRunner
 
     def handle(self) -> None:
         raw = self.rfile.readline(MAX_REQUEST_BYTES)
@@ -67,6 +69,33 @@ class IdentHandler(socketserver.StreamRequestHandler):
             raise LocateError("request must be an object")
 
         op = request.get("op")
+
+        # Read-only SES telemetry. The web process has no access to /dev/sg*,
+        # so these reads also cross the privilege boundary. The page name is
+        # checked against the same allow-list, and the device is resolved here
+        # from the enclosure id - never supplied by the caller.
+        if op == "ses_version":
+            return {"ok": True, "version": self.ses.version()}
+
+        if op == "ses_read":
+            page = request.get("page")
+            if page not in READ_ONLY_PAGES:
+                raise LocateError("page is not an allow-listed read-only page")
+            enclosure_id, _ = validate_request(request.get("enclosure_id"), 0)
+            if self.allowlist and enclosure_id not in self.allowlist:
+                raise LocateError("enclosure not in allowlist")
+            try:
+                ref = self.backend.resolve(enclosure_id)
+            except EnclosureNotFoundError as exc:
+                raise LocateError("enclosure not attached") from exc
+            if not ref.sg_device:
+                raise LocateError("enclosure has no sg device")
+            try:
+                result = self.ses.read_page(ref.sg_device, page)
+            except SesError as exc:
+                raise LocateError(str(exc)) from exc
+            return {"ok": True, "output": result.stdout}
+
         if op not in ("identify_on", "identify_off", "identify_read"):
             raise LocateError("unsupported operation")
 
@@ -118,6 +147,7 @@ def main() -> int:
 
     IdentHandler.backend = SysfsEnclosureBackend(sysfs_root=args.sysfs_root)
     IdentHandler.allowlist = {e.strip().lower() for e in args.allow.split(",") if e.strip()}
+    IdentHandler.ses = SesRunner()
 
     args.socket.parent.mkdir(parents=True, exist_ok=True)
     if args.socket.exists():
@@ -126,11 +156,27 @@ def main() -> int:
     server = IdentServer(str(args.socket), IdentHandler)
 
     # Socket is group-accessible only: no world access, no ambient reachability.
+    #
+    # chown is best-effort on purpose. Under a hardened container the socket
+    # directory is a setgid tmpfs, so the socket already inherits the right
+    # group and no CAP_CHOWN is needed; failing here would otherwise force the
+    # deployment to hold a capability it does not actually require.
     if args.socket_group is not None:
         gid = int(args.socket_group) if str(args.socket_group).isdigit() else grp.getgrnam(
             str(args.socket_group)
         ).gr_gid
-        os.chown(args.socket, 0, gid)
+        try:
+            if os.stat(args.socket).st_gid != gid:
+                os.chown(args.socket, 0, gid)
+        except PermissionError:
+            actual = os.stat(args.socket).st_gid
+            if actual != gid:
+                log.warning(
+                    "cannot set socket group to %s (currently %s); the web process "
+                    "may be unable to connect", gid, actual,
+                )
+            else:
+                log.debug("socket already carries group %s; chown not required", gid)
     os.chmod(args.socket, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)
 
     found = IdentHandler.backend.discover()
