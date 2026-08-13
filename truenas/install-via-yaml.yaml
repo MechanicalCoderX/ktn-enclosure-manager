@@ -10,6 +10,17 @@
 #
 # Full explanation: https://github.com/MechanicalCoderX/ktn-enclosure-manager/blob/main/SECURITY.md
 
+# Gives the app a clickable "Web UI" button on its card in the TrueNAS Apps
+# list. TrueNAS reads this top-level key back out of the rendered compose
+# config, so it works for a custom app even though custom apps get no portal
+# by default. Change the port here too if you changed it above.
+x-portals:
+  - name: Web UI
+    scheme: http
+    host: 0.0.0.0
+    port: 8420
+    path: /
+
 services:
   ktn-enclosure-manager:
     image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.1.0

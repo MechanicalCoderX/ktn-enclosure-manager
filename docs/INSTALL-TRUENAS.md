@@ -45,13 +45,15 @@ lines marked `### EDIT ###`:
 `http://<truenas>:8420`. First run has **no account and no default password**;
 you create the administrator in the browser.
 
-> **Why is there no "Web UI" button on the app card?** TrueNAS does not compute
-> portals for *any* custom app — it is an explicit limitation in their
-> middleware (`# TODO: We should not try to get portals for custom apps for
-> now`), not something missing from this YAML. Start, Stop, Update, logs and
-> shell all work normally; only the clickable portal link is absent. Browse to
-> the port directly. It would appear automatically if this app were ever
-> accepted into the official catalog.
+> The app card gets a working **Web UI** button, like a catalog app. That comes
+> from the `x-portals` block at the top of the YAML. TrueNAS reads that key back
+> out of the rendered compose config, so it works for custom apps even though
+> nothing in the Install-via-YAML dialog mentions it. If you change the port,
+> change it in `x-portals` too.
+>
+> The portal is recorded when the app is **installed**. Adding `x-portals` to an
+> app that already exists does not backfill it — edit the YAML and reinstall, or
+> just browse to the port directly.
 
 ### Privileges this asks for
 
