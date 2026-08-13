@@ -45,6 +45,14 @@ lines marked `### EDIT ###`:
 `http://<truenas>:8420`. First run has **no account and no default password**;
 you create the administrator in the browser.
 
+> **Why is there no "Web UI" button on the app card?** TrueNAS does not compute
+> portals for *any* custom app — it is an explicit limitation in their
+> middleware (`# TODO: We should not try to get portals for custom apps for
+> now`), not something missing from this YAML. Start, Stop, Update, logs and
+> shell all work normally; only the clickable portal link is absent. Browse to
+> the port directly. It would appear automatically if this app were ever
+> accepted into the official catalog.
+
 ### Privileges this asks for
 
 One device node — your enclosure — and nothing else. The container is not
