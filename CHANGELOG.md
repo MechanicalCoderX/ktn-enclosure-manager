@@ -4,15 +4,36 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.7] — 2026-08-14
+
+### Fixed
+- **1.2.6 broke enclosure serialisation, and its own warning caught it.**
+  That release tightened the lock file to `0600` on the reasoning that root
+  bypasses the permission check. It does not: the container drops every
+  capability except `SETUID`/`SETGID`, so the root helper has no
+  `CAP_DAC_OVERRIDE` and is subject to the mode exactly like uid 1000. The
+  helper failed with `EACCES` and the app fell back to unsynchronised access,
+  logging the warning that was written for precisely this case.
+
+  The lock is `0666` again - it has to be, since either process may create it
+  and neither can open the other's `0600` file - but it now lives on the
+  private `/run/ktn` tmpfs beside the helper socket instead of in the user's
+  data dataset, which is what the tightening was actually trying to achieve.
+  A world-writable file nobody outside the container can see, and which never
+  reaches a backup, costs nothing. A test now asserts the mode admits a second
+  uid.
+
 ## [1.2.6] — 2026-08-14
 
 ### Changed
-- **The enclosure lock file is no longer world-writable.** It was created
+- **The enclosure lock file is no longer world-writable.** ⚠️ **Superseded by
+  1.2.7 — this change was wrong and broke serialisation.** It was created
   `0666` so the root helper and the web process could both open it whichever
   started first. That put a world-writable file in the user's data dataset for
   the sake of a lock. The entrypoint now pre-creates it as uid 1000 with mode
   `0600` before the helper starts: the web process owns it, and root bypasses
-  the mode check anyway.
+  the mode check anyway — which it does **not**, because the container drops
+  `CAP_DAC_OVERRIDE`. See 1.2.7.
 - **The version is asserted to be consistent across all seven files that state
   it.** Keeping `__init__.py`, `pyproject.toml`, `package.json`, both compose
   files and the catalog-app package in step by hand is exactly the kind of

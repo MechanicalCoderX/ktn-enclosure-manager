@@ -56,9 +56,15 @@ _depth = threading.local()
 def default_lock_path() -> Path:
     """Where both processes agree to put the lock.
 
-    The data directory is the only location guaranteed to exist and to be
-    writable by uid 1000 - the entrypoint refuses to start otherwise - and the
-    root helper can always write there too.
+    The container entrypoint points this at ``/run/ktn/enclosure.lock`` - the
+    same private tmpfs that holds the helper socket. That is the right home
+    for it: the file has to be mode 0666 (see enclosure_access() for why it
+    cannot be tightened), and a world-writable file belongs on a tmpfs nobody
+    else can see rather than in the user's data dataset, where it would also
+    end up in their backups.
+
+    The data directory is the fallback for deployments with no helper, where a
+    single process owns the file and the mode is its own business.
     """
     override = os.environ.get("KTN_ENCLOSURE_LOCK")
     if override:
@@ -94,14 +100,20 @@ def enclosure_access(
     path = Path(lock_path) if lock_path is not None else default_lock_path()
     fd: int | None = None
     try:
-        # 0600, not 0666. Both processes still reach it: the helper runs as
-        # root and bypasses the mode check, and the web process owns the file
-        # because the entrypoint creates it as uid 1000 before the helper
-        # starts. A world-writable file in the user's data dataset is not
-        # something to ship for the sake of a lock.
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+        # 0666, deliberately, and it belongs on the private /run/ktn tmpfs
+        # rather than in the user's data dataset - see default_lock_path().
+        #
+        # It cannot be tightened. The two processes are root (the helper) and
+        # uid 1000 (the web process), and either may create the file first.
+        # Root does NOT bypass the permission check here: the container drops
+        # every capability except SETUID/SETGID, so it has no CAP_DAC_OVERRIDE
+        # and is subject to the mode like anyone else. A 0600 file owned by
+        # whichever process happened to start first therefore locks the other
+        # one out, which was measured, not theorised - the helper failed with
+        # EACCES and the app fell back to unsynchronised access.
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
         try:
-            os.fchmod(fd, 0o600)
+            os.fchmod(fd, 0o666)
         except OSError:
             pass  # not the owner; whoever created it already set the mode
     except OSError as exc:

@@ -178,3 +178,40 @@ def test_explicit_override_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KTN_DATA_DIR", "/somewhere")
     monkeypatch.setenv("KTN_ENCLOSURE_LOCK", "/run/ktn/enclosure.lock")
     assert default_lock_path() == Path("/run/ktn/enclosure.lock")
+
+
+def test_lock_is_openable_by_a_second_uid(tmp_path: Path) -> None:
+    """The mode must let *both* processes in.
+
+    The helper runs as root and the web process as uid 1000, either may create
+    the file first, and the container drops CAP_DAC_OVERRIDE - so root is
+    subject to the mode exactly like uid 1000. A 0600 lock locks one of them
+    out, which is not hypothetical: tightening it to 0600 made the helper fail
+    with EACCES and silently disabled serialisation.
+    """
+    import stat
+
+    lock = tmp_path / "enclosure.lock"
+    with enclosure_access(lock) as held:
+        assert held is True
+
+    mode = stat.S_IMODE(lock.stat().st_mode)
+    assert mode & stat.S_IRUSR and mode & stat.S_IWUSR
+    assert mode & stat.S_IROTH and mode & stat.S_IWOTH, (
+        f"mode {mode:o} would lock out whichever process did not create it"
+    )
+
+
+def test_settings_lock_path_prefers_the_explicit_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Both processes must resolve the same file or they exclude nothing."""
+    from ktnmgr.config import Settings
+
+    settings = Settings(_env_file=None, data_dir=tmp_path)
+    assert settings.enclosure_lock_path == tmp_path / "enclosure.lock"
+
+    overridden = Settings(
+        _env_file=None, data_dir=tmp_path, enclosure_lock=Path("/run/ktn/enclosure.lock")
+    )
+    assert overridden.enclosure_lock_path == Path("/run/ktn/enclosure.lock")

@@ -29,20 +29,20 @@ if ! su -s /bin/sh -c "test -w '$DATA_DIR'" ktn 2>/dev/null; then
     exit 1
 fi
 
-# Create the enclosure lock as the app user, before the root helper can.
-#
-# Both processes must be able to open it read-write: the helper runs sg_ses,
-# the web process reads the sysfs slot tree, and they must not do so at the
-# same time. Root bypasses the mode check, so the file only has to be openable
-# by uid 1000 - which means uid 1000 has to own it. If the helper created it
-# first it would be root-owned 0600 and the web process would silently fall
-# back to unsynchronised access.
-su -s /bin/sh -c "umask 077; : >> '$DATA_DIR/enclosure.lock'" ktn 2>/dev/null \
-    || echo "warning: could not pre-create $DATA_DIR/enclosure.lock" >&2
-
 if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
     SOCK_DIR="$(dirname "$KTN_IDENT_HELPER_SOCKET")"
     mkdir -p "$SOCK_DIR"
+
+    # Put the enclosure lock on the same private tmpfs as the socket rather
+    # than in the user's data dataset.
+    #
+    # It has to be mode 0666: the helper (root) and the web process (uid 1000)
+    # both open it, either may create it first, and the container drops
+    # CAP_DAC_OVERRIDE - so root is subject to the mode just like uid 1000 and
+    # a tighter file locks one of them out. A world-writable file is fine on a
+    # tmpfs nobody else can see; in /data it would also land in backups.
+    KTN_ENCLOSURE_LOCK="${KTN_ENCLOSURE_LOCK:-$SOCK_DIR/enclosure.lock}"
+    export KTN_ENCLOSURE_LOCK
     echo "starting privileged IDENT helper on ${KTN_IDENT_HELPER_SOCKET}"
     python /app/helper/ktn_ident_helper.py \
         --socket "$KTN_IDENT_HELPER_SOCKET" \
@@ -50,7 +50,7 @@ if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
         --sysfs-root "${KTN_SYSFS_ROOT:-/sys}" \
         --allow "${KTN_ENCLOSURE_ALLOWLIST:-}" \
         --ident-method "${KTN_IDENT_METHOD:-auto}" \
-        --enclosure-lock "$DATA_DIR/enclosure.lock" &
+        --enclosure-lock "$KTN_ENCLOSURE_LOCK" &
     HELPER_PID=$!
 
     # Wait briefly for the socket so the first request cannot race startup.

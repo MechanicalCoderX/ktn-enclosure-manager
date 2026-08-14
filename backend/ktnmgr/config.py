@@ -29,6 +29,15 @@ class Settings(BaseSettings):
 
     # --- storage ----------------------------------------------------------
     data_dir: Path = Path("/data")
+    enclosure_lock: Path | None = Field(
+        default=None,
+        description=(
+            "Cross-process lock serialising enclosure access. Set by the "
+            "container entrypoint to a path on the private /run/ktn tmpfs; "
+            "defaults to <data_dir>/enclosure.lock. The web process and the "
+            "privileged helper must agree on it."
+        ),
+    )
 
     # --- hardware ---------------------------------------------------------
     sysfs_root: Path = Path("/sys")
@@ -110,11 +119,16 @@ class Settings(BaseSettings):
     def enclosure_lock_path(self) -> Path:
         """Cross-process lock serialising all access to the enclosure.
 
-        Lives in the data directory because it is the one place both the
-        unprivileged web process and the root helper can always open. See
-        enclosure/access.py for why the lock is needed at all.
+        The container entrypoint sets ``KTN_ENCLOSURE_LOCK`` to a path on the
+        private ``/run/ktn`` tmpfs, because the file must be world-writable
+        (see enclosure/access.py) and that does not belong in the user's data
+        dataset. The data directory is the fallback for deployments with no
+        privileged helper, where one process owns the file.
+
+        Both processes must resolve the same path or they will not exclude
+        each other at all.
         """
-        return self.data_dir / "enclosure.lock"
+        return self.enclosure_lock or (self.data_dir / "enclosure.lock")
 
     def allowed_enclosures(self) -> set[str]:
         return {e.strip().lower() for e in self.enclosure_allowlist.split(",") if e.strip()}

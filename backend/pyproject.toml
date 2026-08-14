@@ -1,6 +1,6 @@
 [project]
 name = "ktn-enclosure-manager"
-version = "1.2.6"
+version = "1.2.7"
 description = "Local, zero-cost enclosure manager for SES disk shelves on TrueNAS SCALE (validated on EMC KTN-STL3)"
 requires-python = ">=3.11"
 license = { text = "MIT" }

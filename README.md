@@ -187,7 +187,7 @@ git pull && docker compose build && docker compose up -d
 tar czf ktn-backup.tgz data/
 
 # uninstall (removes the app; touches nothing on the host)
-docker compose down && docker rmi ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.6
+docker compose down && docker rmi ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.7
 ```
 
 State lives entirely in `/data`. The application creates no host files, no
@@ -197,7 +197,7 @@ systemd units, and no TrueNAS configuration.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e 'backend[dev]'
-PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q      # 266 tests, no hardware needed
+PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q      # 268 tests, no hardware needed
 
 cd frontend && npm install && npm run build
 npx playwright test                                          # E2E against the real backend
