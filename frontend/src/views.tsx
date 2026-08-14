@@ -153,10 +153,13 @@ export function BayDetail({
   bay,
   onIdentify,
   busy,
+  identDisabledReason,
 }: {
   bay: Bay;
   onIdentify: (slot: number, on: boolean, duration: IdentDuration) => void;
   busy: boolean;
+  /** Set when Identify is unavailable; explains why, instead of a dead button. */
+  identDisabledReason?: string | null;
 }) {
   const [duration, setDuration] = useState<IdentDuration>(60);
 
@@ -263,36 +266,46 @@ export function BayDetail({
         </section>
       </div>
 
-      <div className="ident-controls">
-        <label htmlFor="ident-duration" className="muted">Identify for</label>
-        <select
-          id="ident-duration"
-          value={duration === null ? "null" : String(duration)}
-          onChange={(e) =>
-            setDuration(e.target.value === "null" ? null : (Number(e.target.value) as IdentDuration))
-          }
-        >
-          {DURATIONS.map((d) => (
-            <option key={String(d.value)} value={d.value === null ? "null" : String(d.value)}>
-              {d.label}
-            </option>
-          ))}
-        </select>
-        <button
-          className="btn"
-          disabled={busy || !bay.device}
-          onClick={() => onIdentify(bay.ses_slot, true, duration)}
-        >
-          Identify
-        </button>
-        <button
-          className="btn secondary"
-          disabled={busy || !bay.locate}
-          onClick={() => onIdentify(bay.ses_slot, false, null)}
-        >
-          Clear
-        </button>
-      </div>
+      {identDisabledReason ? (
+        // Say why rather than presenting a button that answers 403. The
+        // server refuses this regardless; the UI only has to be honest.
+        <div className="notice warn" style={{ marginTop: 16 }}>
+          {identDisabledReason}
+        </div>
+      ) : (
+        <div className="ident-controls">
+          <label htmlFor="ident-duration" className="muted">Identify for</label>
+          <select
+            id="ident-duration"
+            value={duration === null ? "null" : String(duration)}
+            onChange={(e) =>
+              setDuration(
+                e.target.value === "null" ? null : (Number(e.target.value) as IdentDuration),
+              )
+            }
+          >
+            {DURATIONS.map((d) => (
+              <option key={String(d.value)} value={d.value === null ? "null" : String(d.value)}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn"
+            disabled={busy || !bay.device}
+            onClick={() => onIdentify(bay.ses_slot, true, duration)}
+          >
+            Identify
+          </button>
+          <button
+            className="btn secondary"
+            disabled={busy || !bay.locate}
+            onClick={() => onIdentify(bay.ses_slot, false, null)}
+          >
+            Clear
+          </button>
+        </div>
+      )}
     </div>
   );
 }

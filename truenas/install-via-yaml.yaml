@@ -60,7 +60,7 @@ x-notes: |
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.10
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.3.0
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 
@@ -113,6 +113,16 @@ services:
       KTN_TRUENAS_API_KEY: ""
       # Set false only for a self-signed certificate you cannot replace.
       KTN_TRUENAS_VERIFY_TLS: "true"
+
+      # Optional: run as an open, read-only dashboard with no account, the way
+      # scrutiny and other TrueNAS monitoring apps do. Default "true" (an
+      # account is required). Setting "false" also exposes the audit log and
+      # raw sg_ses output to anyone who can reach the port.
+      KTN_AUTH_REQUIRED: "true"
+      # The Identify LED write stays refused without an account even when the
+      # above is "false" - set this to "true" to permit it. Every comparable
+      # open dashboard is read-only; this one can light a drive LED.
+      KTN_ALLOW_ANONYMOUS_IDENT: "false"
 
       # Optional: restrict management to one enclosure.
       # Find yours with:  cat /sys/class/enclosure/*/id

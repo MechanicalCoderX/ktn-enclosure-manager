@@ -95,6 +95,27 @@ class Settings(BaseSettings):
     login_rate_limit: int = 5
     login_rate_window_seconds: int = 60
 
+    #: Require a local account to view anything. Default on.
+    #:
+    #: Turning this off makes the app an open read-only dashboard, which is the
+    #: norm for this category on TrueNAS - scrutiny, glances, homepage and
+    #: speedtest-tracker all serve disk telemetry with no credentials, and
+    #: scrutiny publishes the same class of data (serial, WWN, SMART) that this
+    #: app does. It is offered because that norm is real, not because the data
+    #: is uninteresting.
+    auth_required: bool = True
+
+    #: Allow the IDENT LED write without authentication.
+    #:
+    #: Deliberately separate from auth_required, and off even when
+    #: authentication is disabled. Every comparable open dashboard is strictly
+    #: read-only; this app can actuate hardware. The LED is non-destructive -
+    #: there is no code path to power a drive off, reset a PHY or touch a fault
+    #: LED - but a write reachable by anyone on the network should be a
+    #: decision someone made on purpose, not a side effect of opening the
+    #: dashboard.
+    allow_anonymous_ident: bool = False
+
     @property
     def audit_path(self) -> Path:
         return self.data_dir / "audit.log"

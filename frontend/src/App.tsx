@@ -58,6 +58,95 @@ function usePolling(callback: () => void, intervalMs: number, active: boolean): 
   }, [callback, intervalMs, active]);
 }
 
+/**
+ * Change the signed-in account's password.
+ *
+ * The endpoint and the API client for this existed from the start but nothing
+ * ever rendered them, so the only way to change a password was to call the API
+ * by hand. Anyone who suspected their credentials were exposed could not act
+ * on it from the application - which is the one moment the feature exists for.
+ */
+function ChangePasswordDialog({
+  onClose,
+  onChanged,
+}: {
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    if (next !== confirm) {
+      setError("New passwords do not match");
+      return;
+    }
+    if (next.length < 12) {
+      setError("New password must be at least 12 characters");
+      return;
+    }
+    if (next === current) {
+      setError("New password must differ from the current one");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.changePassword(current, next);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true"
+         aria-labelledby="cp-title">
+      <div className="modal">
+        <h2 id="cp-title">Change password</h2>
+        <p className="sub">
+          Every other session for this account is signed out, so you will be
+          asked to sign in again.
+        </p>
+        <form onSubmit={submit}>
+          <label htmlFor="cp-current">Current password</label>
+          <input id="cp-current" type="password" autoComplete="current-password"
+                 value={current} onChange={(e) => setCurrent(e.target.value)}
+                 required autoFocus />
+
+          <label htmlFor="cp-new">New password</label>
+          <input id="cp-new" type="password" autoComplete="new-password"
+                 minLength={12} value={next}
+                 onChange={(e) => setNext(e.target.value)} required />
+
+          <label htmlFor="cp-confirm">Confirm new password</label>
+          <input id="cp-confirm" type="password" autoComplete="new-password"
+                 minLength={12} value={confirm}
+                 onChange={(e) => setConfirm(e.target.value)} required />
+
+          {error && <div className="notice error">{error}</div>}
+
+          <div className="modal-actions">
+            <button type="button" className="btn secondary" onClick={onClose}
+                    disabled={busy}>
+              Cancel
+            </button>
+            <button type="submit" className="btn" disabled={busy}>
+              {busy ? "Changing…" : "Change password"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function useTheme(): [Theme, (t: Theme) => void] {
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem("ktn-theme") as Theme) ?? "system",
@@ -76,9 +165,11 @@ function useTheme(): [Theme, (t: Theme) => void] {
 function LoginScreen({
   needsBootstrap,
   onAuthenticated,
+  notice,
 }: {
   needsBootstrap: boolean;
   onAuthenticated: (user: string) => void;
+  notice?: string | null;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -113,6 +204,7 @@ function LoginScreen({
             ? "First run — create the administrator account."
             : "Sign in to continue."}
         </div>
+        {notice && <div className="notice">{notice}</div>}
         {error && <div className="notice error">{error}</div>}
         <label htmlFor="u">Username</label>
         <input id="u" type="text" autoComplete="username" value={username}
@@ -155,6 +247,10 @@ export function App() {
   const [truenasError, setTruenasError] = useState<string | null>(null);
   const [updated, setUpdated] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [authRequired, setAuthRequired] = useState(true);
+  const [anonIdentAllowed, setAnonIdentAllowed] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordChanged, setPasswordChanged] = useState(false);
   const [theme, setTheme] = useTheme();
 
   useEffect(() => {
@@ -162,6 +258,8 @@ export function App() {
       .authStatus()
       .then((s) => {
         setNeedsBootstrap(s.needs_bootstrap);
+        setAuthRequired(s.auth_required);
+        setAnonIdentAllowed(s.anonymous_ident_allowed);
         setUser(s.user);
       })
       .catch(() => undefined)
@@ -225,13 +323,21 @@ export function App() {
   };
 
   if (!ready) return <div className="login-wrap"><div className="panel">Loading…</div></div>;
-  if (!user)
+  // With authentication disabled there is no account to sign in to, so
+  // demanding one would gate nothing and only block the dashboard.
+  if (!user && authRequired)
     return (
       <LoginScreen
         needsBootstrap={needsBootstrap}
+        notice={
+          passwordChanged
+            ? "Password changed. Sign in with your new password."
+            : null
+        }
         onAuthenticated={(u) => {
           setUser(u);
           setNeedsBootstrap(false);
+          setPasswordChanged(false);
         }}
       />
     );
@@ -299,13 +405,40 @@ export function App() {
         </select>
 
         <span className="stamp">updated {updated ? new Date(updated).toLocaleTimeString() : "—"}</span>
-        <button
-          className="btn secondary"
-          onClick={() => api.logout().then(() => setUser(null))}
-        >
-          Sign out ({user})
-        </button>
+        {user ? (
+          <>
+            <button className="btn secondary" onClick={() => setChangingPassword(true)}>
+              Change password
+            </button>
+            <button
+              className="btn secondary"
+              onClick={() => api.logout().then(() => setUser(null))}
+            >
+              Sign out ({user})
+            </button>
+          </>
+        ) : (
+          <span className="badge warning" title="KTN_AUTH_REQUIRED is false">
+            unauthenticated
+          </span>
+        )}
       </header>
+
+      {changingPassword && (
+        <ChangePasswordDialog
+          onClose={() => setChangingPassword(false)}
+          onChanged={() => {
+            // Changing the password bumps the account's session epoch, which
+            // invalidates every existing cookie - including this one. Sending
+            // the user straight back to the login screen is the honest
+            // response; leaving them on a dead session would show confusing
+            // 401s on the next poll.
+            setChangingPassword(false);
+            setUser(null);
+            setPasswordChanged(true);
+          }}
+        />
+      )}
 
       <main>
         {error && <div className="notice error">{error}</div>}
@@ -332,7 +465,18 @@ export function App() {
               query={query}
             />
             {selectedBay ? (
-              <BayDetail bay={selectedBay} onIdentify={identify} busy={busy} />
+              <BayDetail
+                bay={selectedBay}
+                onIdentify={identify}
+                busy={busy}
+                identDisabledReason={
+                  !user && !anonIdentAllowed
+                    ? "Identify needs an account. Authentication is disabled on " +
+                      "this deployment, so the LED write is refused. Re-enable " +
+                      "authentication, or set KTN_ALLOW_ANONYMOUS_IDENT=true."
+                    : null
+                }
+              />
             ) : (
               <div className="panel muted">Select a bay to see disk, ZFS and SMART detail.</div>
             )}

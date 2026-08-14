@@ -242,6 +242,11 @@ class AuthService:
         self.verify(username, current)
         if len(new or "") < MIN_PASSWORD_LENGTH:
             raise AuthError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
+        # Checked here and not only in the browser: a password change made
+        # because the old one was exposed has to actually change it, and the
+        # UI is not a control.
+        if new == current:
+            raise AuthError("new password must differ from the current one")
         users = self._read_users()
         users[username]["password_hash"] = self.hasher.hash(new)
         users[username]["session_epoch"] = self._epoch_of(users[username]) + 1

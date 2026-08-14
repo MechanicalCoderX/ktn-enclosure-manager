@@ -4,6 +4,52 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-08-14
+
+### Added
+- **You can change your password from the application.** The endpoint and its
+  API client existed from the first release but nothing ever rendered them, so
+  the only way to change a password was to call the API by hand. Anyone who
+  suspected their credentials were exposed could not act on it from the app -
+  which is the one moment the feature exists for. The dialog says plainly that
+  every session is signed out, because the epoch bump means that is what
+  happens, and the login screen confirms the change rather than showing a
+  confusing 401.
+
+  The server now also refuses a "new" password identical to the current one. A
+  change made because the old password leaked has to actually change it, and
+  the browser is not a control.
+
+- **Authentication is optional: `KTN_AUTH_REQUIRED`, default `true`.** Setting
+  it `false` runs the app as an open, read-only dashboard.
+
+  This follows the category, measured rather than assumed: only **28 of 395**
+  TrueNAS community apps configure any app-level login, and scrutiny - the
+  closest peer - serves the same class of data this app does (serial, WWN,
+  SMART) from an API that answers an anonymous `GET` with no credentials at
+  all. Verified live, not inferred. Glances, homepage and speedtest-tracker are
+  the same. Requiring an account to look at drive temperatures is the unusual
+  choice here.
+
+  Be clear about what it opens: **everything readable**, including
+  `/api/diagnostics`, the audit log and raw `sg_ses` output.
+
+- **`KTN_ALLOW_ANONYMOUS_IDENT`, default `false` - and it stays false when
+  authentication is off.** Every comparable open dashboard is strictly
+  read-only; this one actuates hardware. An anonymous Identify is refused with
+  `403` naming the setting, and the UI explains it instead of offering a button
+  that fails. The LED is non-destructive - no code path can power a drive off,
+  reset a PHY or set a fault LED, and a test asserts the argv cannot express
+  one - but a write reachable by anyone on the network should be a deliberate
+  decision, never a side effect of opening the dashboard.
+
+  Audit entries for an unauthenticated write record the actor as `anonymous`,
+  so the log never implies a named person approved something nobody signed in
+  for.
+
+  Both settings are exposed as TrueNAS install questions in the catalog
+  package, following the 8 community apps that already offer an auth toggle.
+
 ## [1.2.10] — 2026-08-14
 
 ### Fixed

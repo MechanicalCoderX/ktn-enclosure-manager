@@ -39,6 +39,10 @@
 {% do c.environment.add_env("KTN_TRUENAS_VERIFY_TLS", values.truenas.verify_tls) %}
 
 {% do c.environment.add_env("KTN_IDENT_HELPER_SOCKET", values.consts.ident_socket) %}
+{# Access control. The LED write is gated separately from the read surface, so
+   opening the dashboard never opens the write as a side effect. #}
+{% do c.environment.add_env("KTN_AUTH_REQUIRED", values.access.auth_required) %}
+{% do c.environment.add_env("KTN_ALLOW_ANONYMOUS_IDENT", values.access.allow_anonymous_ident) %}
 
 {# ------------------------------------------------------------------- ports #}
 {% if values.network.web_port.bind_mode %}

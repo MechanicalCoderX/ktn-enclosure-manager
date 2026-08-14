@@ -53,7 +53,12 @@ const post = <T>(path: string, body?: unknown): Promise<T> =>
 
 export const api = {
   authStatus: () =>
-    request<{ needs_bootstrap: boolean; user: string | null }>("/api/auth/status"),
+    request<{
+      auth_required: boolean;
+      anonymous_ident_allowed: boolean;
+      needs_bootstrap: boolean;
+      user: string | null;
+    }>("/api/auth/status"),
   bootstrap: (username: string, password: string) =>
     post<{ ok: boolean }>("/api/auth/bootstrap", { username, password }),
   login: (username: string, password: string) =>

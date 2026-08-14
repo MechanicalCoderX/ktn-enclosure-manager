@@ -3,6 +3,8 @@ groups:
     description: Which disk shelf to manage
   - name: TrueNAS Integration
     description: Optional — adds pool, vdev, ZFS error and SMART data
+  - name: Access Control
+    description: Whether a login is required to view the dashboard
   - name: Network Configuration
     description: Where the web interface listens
   - name: Storage Configuration
@@ -41,6 +43,43 @@ questions:
           schema:
             type: string
             default: ""
+
+  # ----------------------------------------------------- access control
+  - variable: access
+    label: ""
+    group: Access Control
+    schema:
+      type: dict
+      attrs:
+        - variable: auth_required
+          label: Require a login
+          description: |
+            On (default): you create an administrator account on first run and
+            sign in to view anything.
+
+            Off: the app is an open, read-only dashboard reachable by anyone
+            who can reach the port, which is how most monitoring apps here
+            work. This exposes everything readable, including the audit log and
+            raw sg_ses diagnostic output. Only turn it off on a network you
+            would already let read those.
+          schema:
+            type: boolean
+            default: true
+
+        - variable: allow_anonymous_ident
+          label: Allow Identify without a login
+          description: |
+            Only applies when "Require a login" is off, and stays off unless
+            you turn it on.
+
+            The Identify LED is the one write this app can perform. It is
+            non-destructive - it cannot power a drive off, reset a PHY or set a
+            fault LED - but with a login not required, turning this on lets
+            anyone who can reach the port light a drive LED.
+          schema:
+            type: boolean
+            default: false
+            show_if: [["auth_required", "=", false]]
 
   # ----------------------------------------------------- truenas api
   - variable: truenas

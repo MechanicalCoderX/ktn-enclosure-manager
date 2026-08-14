@@ -22,7 +22,7 @@
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.10
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.3.0
     build:
       context: .
       dockerfile: Dockerfile
@@ -65,6 +65,10 @@ services:
       KTN_TRUENAS_VERIFY_TLS: ${KTN_TRUENAS_VERIFY_TLS:-true}
       KTN_TRUENAS_CA_BUNDLE: ${KTN_TRUENAS_CA_BUNDLE:-}
       KTN_ENCLOSURE_ALLOWLIST: ${KTN_ENCLOSURE_ALLOWLIST:-}
+      # Authentication. Default on; see .env.example for what turning it off
+      # exposes, and why the LED write is gated separately.
+      KTN_AUTH_REQUIRED: ${KTN_AUTH_REQUIRED:-true}
+      KTN_ALLOW_ANONYMOUS_IDENT: ${KTN_ALLOW_ANONYMOUS_IDENT:-false}
       KTN_ALERT_WEBHOOK_URL: ${KTN_ALERT_WEBHOOK_URL:-}
       KTN_ALERT_STYLE: ${KTN_ALERT_STYLE:-ntfy}
       KTN_ALERT_ON_RECOVERY: ${KTN_ALERT_ON_RECOVERY:-true}

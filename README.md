@@ -73,6 +73,11 @@ docker compose up -d
 Then open `http://<truenas>:8420` and **create the administrator account** — the
 first run has no account and no default password.
 
+Prefer an open dashboard with no login, the way scrutiny and most TrueNAS
+monitoring apps work? Set `KTN_AUTH_REQUIRED=false`. The Identify LED write
+stays refused without an account even then — see
+[SECURITY.md](SECURITY.md#running-it-open-and-why-the-led-write-is-gated-separately).
+
 Find your SES device and enclosure id:
 
 ```bash
@@ -110,6 +115,8 @@ annotated list. The essentials:
 | `KTN_POLL_*_SECONDS` | polling intervals (5 / 20 / 30 / 120 by default) |
 | `KTN_ALERT_WEBHOOK_URL` | ntfy topic or webhook for health-change alerts; empty disables |
 | `KTN_ALERT_STYLE` | `ntfy` (plain text + headers) or `json` |
+| `KTN_AUTH_REQUIRED` | defaults to `true`. `false` runs it as an open read-only dashboard, like scrutiny |
+| `KTN_ALLOW_ANONYMOUS_IDENT` | defaults to `false`, and stays false when auth is off. Permits the LED write with no account |
 
 One backend poll serves every connected browser; expensive `sg_ses` and SMART
 reads are cached and never run per client.
@@ -187,7 +194,7 @@ git pull && docker compose build && docker compose up -d
 tar czf ktn-backup.tgz data/
 
 # uninstall (removes the app; touches nothing on the host)
-docker compose down && docker rmi ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.10
+docker compose down && docker rmi ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.3.0
 ```
 
 State lives entirely in `/data`. The application creates no host files, no
@@ -197,7 +204,7 @@ systemd units, and no TrueNAS configuration.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e 'backend[dev]'
-PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q      # 269 tests, no hardware needed
+PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q      # 290 tests, no hardware needed
 
 cd frontend && npm install && npm run build
 npx playwright test                                          # E2E against the real backend

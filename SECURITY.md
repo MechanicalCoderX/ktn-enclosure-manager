@@ -125,6 +125,9 @@ Dependabot keeps all four current.
 
 ## Authentication
 
+Required by default. It can be turned off, and what that does is spelled out
+below rather than left implicit.
+
 - Argon2id password hashing; no default password is ever generated or printed.
 - First run has **no account**: only the bootstrap endpoint works until an
   administrator is created in the browser. Bootstrap refuses once any account
@@ -148,6 +151,36 @@ Dependabot keeps all four current.
   administrator account, then overwrite the real one. A corrupt file, a
   permissions mistake, or a half-finished restore would otherwise hand the
   application away.
+
+### Running it open, and why the LED write is gated separately
+
+`KTN_AUTH_REQUIRED=false` turns the app into an open, unauthenticated
+read-only dashboard.
+
+That is the norm for this category on TrueNAS, not a shortcut. Scrutiny,
+glances, homepage and speedtest-tracker all serve disk telemetry with no
+credentials at all, and scrutiny publishes the same class of data this app
+does — serial, WWN, SMART — from an API that answers an anonymous `GET`.
+Only 28 of 395 community apps configure any app-level login. Requiring an
+account to look at drive temperatures is the unusual choice here, so the
+option exists.
+
+Be clear about what it opens: **everything readable**, including
+`/api/diagnostics`, the audit log, and raw `sg_ses` page output. Enable it only
+on a network you would already let read those.
+
+**It does not open the write.** `KTN_ALLOW_ANONYMOUS_IDENT` is separate and
+stays `false` even when authentication is disabled; an anonymous Identify
+request is refused with `403` and a message naming the setting. The reason is
+that every comparable open dashboard is strictly *read-only*, and this one
+actuates hardware. The LED is non-destructive — there is no code path to power
+a drive off, reset a PHY, or touch a fault LED, and a test asserts the argv
+cannot express one — but a write reachable by anyone on the network should be
+a decision someone made deliberately, never a side effect of opening the
+dashboard.
+
+Audit entries for an unauthenticated write record the actor as `anonymous`, so
+the log never implies a named person approved something nobody signed in for.
 
 ### Known limitation: logout is client-side
 

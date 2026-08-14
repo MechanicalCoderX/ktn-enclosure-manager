@@ -49,12 +49,26 @@ def get_state(request: Request) -> Any:
     return request.app.state.service
 
 
+#: Recorded as the actor when authentication is switched off, so an audit
+#: entry never implies a named person approved something nobody signed in for.
+ANONYMOUS = "anonymous"
+
+
 def current_user(request: Request) -> str:
+    """Resolve the caller, or refuse.
+
+    When ``auth_required`` is off the app is an open read-only dashboard, in
+    line with how comparable TrueNAS apps ship. A real session is still
+    honoured if one exists, so turning authentication off does not throw away
+    the identity of someone who did sign in - it only stops requiring one.
+    """
     auth: AuthService = request.app.state.auth
     username = auth.read_session(request.cookies.get(SESSION_COOKIE))
-    if username is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication required")
-    return username
+    if username is not None:
+        return username
+    if not request.app.state.settings.auth_required:
+        return ANONYMOUS
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "authentication required")
 
 
 def require_csrf(x_ktn_request: Annotated[str | None, Header()] = None) -> None:
@@ -96,8 +110,13 @@ class IdentifyBody(BaseModel):
 
 @router.get("/auth/status")
 def auth_status(request: Request, auth: Annotated[AuthService, Depends(get_auth)]) -> dict:
+    settings = request.app.state.settings
     return {
-        "needs_bootstrap": auth.needs_bootstrap,
+        # False means the UI goes straight to the dashboard instead of
+        # demanding an account that would gate nothing.
+        "auth_required": settings.auth_required,
+        "anonymous_ident_allowed": settings.allow_anonymous_ident,
+        "needs_bootstrap": auth.needs_bootstrap and settings.auth_required,
         "user": auth.read_session(request.cookies.get(SESSION_COOKIE)),
     }
 
@@ -151,6 +170,13 @@ def logout(response: Response) -> dict:
 def change_password(
     body: PasswordBody, user: CurrentUser, auth: Annotated[AuthService, Depends(get_auth)]
 ) -> dict:
+    if user == ANONYMOUS:
+        # There is no account to change. Refusing beats calling change_password
+        # with a username that does not exist and returning its generic error.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "no account is signed in; authentication is disabled on this deployment",
+        )
     try:
         auth.change_password(user, body.current_password, body.new_password)
     except AuthError as exc:
@@ -215,10 +241,27 @@ async def identify(
     enclosure_id: str,
     ses_slot: int,
     body: IdentifyBody,
+    request: Request,
     user: CurrentUser,
     service: Annotated[Any, Depends(get_state)],
 ) -> dict:
-    """The only write this application exposes (§15, §43)."""
+    """The only write this application exposes (§15, §43).
+
+    Gated separately from the read surface. Opening the dashboard does not
+    open this: an anonymous caller is refused unless the operator has also
+    set ``allow_anonymous_ident``, because a write that actuates hardware
+    should never become reachable as a side effect of another setting.
+    """
+    settings = request.app.state.settings
+    if user == ANONYMOUS and not settings.allow_anonymous_ident:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Identify requires an account. Authentication is disabled on this "
+            "deployment, so the LED write is refused; set "
+            "KTN_ALLOW_ANONYMOUS_IDENT=true to permit it, or re-enable "
+            "authentication.",
+        )
+
     if body.on and body.duration_seconds not in ALLOWED_DURATIONS:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
