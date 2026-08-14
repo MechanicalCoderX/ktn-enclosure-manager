@@ -4,11 +4,27 @@ updates:
     directory: /backend
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+        update-types: [minor, patch]
 
   - package-ecosystem: npm
     directory: /frontend
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
+    groups:
+      # vite and its plugin declare a peer relationship, so a lone bump of
+      # either produces an uninstallable tree. Same for the react/react-dom and
+      # type packages.
+      build-toolchain:
+        patterns: ["vite", "@vitejs/*", "typescript"]
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      everything-else:
+        patterns: ["*"]
+        exclude-patterns: ["vite", "@vitejs/*", "typescript", "react", "react-dom", "@types/react*"]
+        update-types: [minor, patch]
 
   # Keeps the digest-pinned base images current. Pinning without this trades a
   # supply-chain risk for a staleness one.
@@ -19,3 +35,6 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    groups:
+      actions:
+        patterns: ["*"]
