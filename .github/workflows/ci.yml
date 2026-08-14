@@ -33,9 +33,11 @@ jobs:
         run: PYTHONPATH=backend pytest tests/ -q
 
       - name: Audit dependencies
+        # --skip-editable: the project itself is installed editable for tests
+        # and is not on PyPI, which pip-audit otherwise treats as a hard error.
         run: |
           pip install pip-audit
-          pip-audit --strict --desc
+          pip-audit --strict --desc --skip-editable
 
   frontend:
     runs-on: ubuntu-latest

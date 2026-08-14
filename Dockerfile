@@ -37,7 +37,13 @@ WORKDIR /app
 # Dependencies come from pyproject.toml, which is the single source of truth.
 # A hand-maintained duplicate list here silently drifts out of sync with it.
 COPY backend/ /app/backend/
-RUN pip install --no-cache-dir /app/backend
+# Install, then remove pip itself. Nothing needs it at runtime - the image is
+# immutable and rebuilt from source - and it is not dead weight but live
+# attack surface: pip vendors its own copies of libraries (msgpack, setuptools)
+# which show up as HIGH findings in an image scan and would be usable by
+# anyone who got code execution in the container.
+RUN pip install --no-cache-dir /app/backend \
+ && pip uninstall -y pip 2>/dev/null || true
 COPY helper/ /app/helper/
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY --from=frontend /build/dist /app/frontend/dist
