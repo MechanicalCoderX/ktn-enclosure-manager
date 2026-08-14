@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.4] — 2026-08-14
+
+### Fixed
+- **The frontend build broke on any clean checkout.** `npm run typecheck` and
+  the Docker image build both failed with
+  `TS2882: Cannot find module or type declarations for side-effect import of
+  './styles.css'`. Adding `src/vite-env.d.ts` with
+  `/// <reference types="vite/client" />` - the declaration Vite's own template
+  ships - makes the CSS import legal to TypeScript.
+
+  Worth recording *why* it was not caught: it passes on a machine that has
+  built before, and it passed on a pristine local clone too. The developer
+  environment runs npm 9, which resolves a larger dependency tree than the npm
+  10+ on the runners, and something in that extra tree supplied the
+  declaration. The build is now independent of which packages a given npm
+  version happens to install.
+
 ## [1.3.3] — 2026-08-14
 
 ### Fixed
