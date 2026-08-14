@@ -203,3 +203,22 @@ async def test_state_survives_manager_restart(tmp_path: Path) -> None:
 
 def test_describe_reports_nothing_when_dark(manager: IdentManager) -> None:
     assert manager.describe(LOGICAL_ID, 0, locate_on=False) == (None, None)
+
+
+def test_audit_log_rotates_instead_of_growing_forever(tmp_path: Path) -> None:
+    """A homelab app dataset is small; an append-only log must not fill it."""
+    audit = AuditLog(tmp_path / "audit.log", max_bytes=2048)
+    for _ in range(200):
+        audit.record(user="u", enclosure="0x1", operation="IDENT_ON", verification="success")
+    assert (tmp_path / "audit.log").stat().st_size < 2048 * 3
+    assert (tmp_path / "audit.log.1").exists(), "previous generation should be kept"
+
+
+def test_rate_limiter_prunes_stale_addresses() -> None:
+    """Otherwise the dict grows one entry per source address, forever."""
+    from ktnmgr.services.auth import RateLimiter
+
+    limiter = RateLimiter(limit=5, window_seconds=0)
+    for i in range(500):
+        limiter.check(f"10.0.0.{i}")
+    assert len(limiter._hits) < 50, "stale addresses should have been pruned"

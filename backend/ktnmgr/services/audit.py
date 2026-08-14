@@ -23,10 +23,26 @@ _FORBIDDEN = ("api_key", "apikey", "password", "passwd", "secret", "token", "ses
 class AuditLog:
     """JSON-lines audit log. Appends are serialised across threads."""
 
-    def __init__(self, path: Path, max_tail: int = 500) -> None:
+    def __init__(
+        self, path: Path, max_tail: int = 500, max_bytes: int = 5 * 1024 * 1024
+    ) -> None:
         self.path = Path(path)
         self.max_tail = max_tail
+        self.max_bytes = max_bytes
         self._lock = threading.Lock()
+
+    def _rotate_if_needed(self) -> None:
+        """Keep one previous generation, so the log cannot grow without bound.
+
+        An append-only file on a small app dataset will otherwise grow forever.
+        Rotation is best-effort: failing to rotate must never prevent an
+        operation from being recorded.
+        """
+        try:
+            if self.path.exists() and self.path.stat().st_size >= self.max_bytes:
+                self.path.replace(self.path.with_suffix(self.path.suffix + ".1"))
+        except OSError as exc:
+            log.warning("could not rotate audit log: %s", exc)
 
     def _scrub(self, detail: str | None) -> str | None:
         if not detail:
@@ -67,6 +83,7 @@ class AuditLog:
         with self._lock:
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
+                self._rotate_if_needed()
                 with self.path.open("a", encoding="utf-8") as handle:
                     handle.write(line + "\n")
             except OSError as exc:  # never let auditing failure break the operation

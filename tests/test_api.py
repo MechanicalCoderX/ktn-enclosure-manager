@@ -22,6 +22,8 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     sysfs = tmp_path / "sys"
     shutil.copytree(FIXTURE_ROOT, sysfs)
     settings = Settings(
+        # Never read the repo's .env: tests describe their own world.
+        _env_file=None,
         sysfs_root=sysfs,
         dev_root=tmp_path / "dev",
         data_dir=tmp_path / "data",
@@ -258,8 +260,12 @@ def test_diagnostics_has_no_secrets(auth_client: TestClient) -> None:
 
 
 def test_diagnostics_reports_discovery(auth_client: TestClient) -> None:
+    from ktnmgr import __version__
+
     body = auth_client.get("/api/diagnostics").json()
-    assert body["app_version"] == "1.0.0"
+    # Asserted against the package version, not a literal, so the reported
+    # version cannot drift away from the release again.
+    assert body["app_version"] == __version__
     enclosure = body["enclosures"][0]
     assert enclosure["logical_id"] == LOGICAL_ID
     assert enclosure["slots_discovered"] == 16

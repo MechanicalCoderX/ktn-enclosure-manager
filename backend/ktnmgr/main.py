@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from ktnmgr import __version__
 from ktnmgr.api.routes import router
 from ktnmgr.config import Settings, get_settings
 from ktnmgr.enclosure.disks import DiskInfoReader
@@ -94,7 +95,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="KTN Enclosure Manager",
-        version="1.0.0",
+        version=__version__,
         description="Local enclosure management for SES disk shelves on TrueNAS SCALE.",
         lifespan=lifespan,
     )
@@ -113,12 +114,36 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             "/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets"
         )
 
+        # Resolved once; every request is checked against this real path.
+        frontend_root = FRONTEND_DIR.resolve()
+        index_html = frontend_root / "index.html"
+
         @app.get("/{path:path}")
         def spa(path: str) -> FileResponse:
-            candidate = FRONTEND_DIR / path
-            if path and candidate.is_file():
+            """Serve the SPA, refusing to serve anything outside the bundle.
+
+            The containment check below is essential and was missing.
+            ``Path / path`` does NOT confine the result: an absolute ``path``
+            replaces the base entirely (``Path("/a/b") / "/etc/passwd"`` is
+            ``/etc/passwd``) and ``..`` segments walk out of it. This route is
+            unauthenticated, so that was an arbitrary file read - including
+            /data/session-secret, which signs session cookies, and
+            /data/users.json.
+
+            Resolve first, then require the result to be inside the bundle.
+            Resolving also collapses symlinks, so a link planted inside the
+            bundle cannot point outside it either.
+            """
+            if not path:
+                return FileResponse(index_html)
+            try:
+                candidate = (frontend_root / path).resolve()
+            except (OSError, RuntimeError, ValueError):
+                # RuntimeError: symlink loop. ValueError: embedded NUL byte.
+                return FileResponse(index_html)
+            if candidate.is_relative_to(frontend_root) and candidate.is_file():
                 return FileResponse(candidate)
-            return FileResponse(FRONTEND_DIR / "index.html")
+            return FileResponse(index_html)
     else:
         log.warning("frontend bundle not found at %s; API only", FRONTEND_DIR)
 

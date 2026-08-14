@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
+from ktnmgr import __version__
 from ktnmgr.config import Settings
 from ktnmgr.enclosure.disks import DiskInfoReader
 from ktnmgr.enclosure.ses import SesError, SesRunner
@@ -286,7 +287,7 @@ class StateService:
         """Copyable, sanitised diagnostics (§35). Contains no secrets."""
         refs = self.enclosures.value
         return {
-            "app_version": "1.0.0",
+            "app_version": __version__,
             "started_at": self._started_at.isoformat(),
             "truenas_version": self.system_info.value.get("version"),
             "truenas_configured": self.truenas is not None,

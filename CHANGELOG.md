@@ -4,6 +4,50 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-08-14
+
+### Security
+- **Fixed an unauthenticated arbitrary file read in the SPA fallback route.**
+  The handler resolved a request path with `FRONTEND_DIR / path` and served the
+  result if it existed. `pathlib` does not confine that: an absolute path
+  replaces the base entirely (`Path("/a/b") / "/etc/passwd"` is `/etc/passwd`)
+  and `..` segments walk out of it. The route requires no authentication, so
+  anyone able to reach the port could read any file the process could.
+
+  Confirmed against a live instance: `/etc/passwd`, application source,
+  `/data/users.json` (Argon2 password hashes) and `/data/session-secret` — the
+  key that signs session cookies, and therefore a full authentication bypass.
+
+  The handler now resolves the path first and serves it only if the result is
+  inside the bundle. Resolution also collapses symlinks, so a link planted in
+  the bundle cannot point out of it. 15 regression tests cover absolute paths,
+  `..`, percent-encoded and doubled encodings, backslashes, and symlinks.
+
+  **If you ran 1.0.0 or 1.1.0 on a network you do not fully trust, rotate the
+  session secret** (delete `/data/session-secret` and restart, which signs out
+  everyone) **and change any account password.**
+
+### Fixed
+- The app reported version `1.0.0` in `/api/diagnostics` and its OpenAPI
+  document regardless of the release. Version is now single-sourced from
+  `ktnmgr.__version__`.
+- The login rate limiter never pruned its per-address table, growing one entry
+  per distinct source address for the lifetime of the process.
+- The audit log grew without bound; it now rotates at 5 MB keeping one previous
+  generation.
+
+### Changed
+- The container image installs dependencies from `pyproject.toml` rather than a
+  duplicated list in the Dockerfile that could silently drift out of sync.
+- Tests no longer read the developer's `.env` or ambient `KTN_*` environment.
+  This had already caused a real divergence where the suite passed locally and
+  failed in CI.
+
+### Known limitations (not changed)
+- Changing a password does not invalidate existing sessions.
+- The TrueNAS client opens a new WebSocket and re-authenticates on every call,
+  three times per poll cycle.
+
 ## [1.1.0] — 2026-08-13
 
 Removes the AppArmor relaxation entirely. The container now runs under Docker's

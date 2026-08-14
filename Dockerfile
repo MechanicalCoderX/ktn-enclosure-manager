@@ -32,13 +32,10 @@ RUN groupadd -g 1000 ktn && useradd -u 1000 -g 1000 -M -s /usr/sbin/nologin ktn
 
 WORKDIR /app
 
-COPY backend/pyproject.toml backend/pyproject.toml
-RUN pip install --no-cache-dir \
-      "fastapi>=0.115" "uvicorn[standard]>=0.32" "pydantic>=2.9" \
-      "pydantic-settings>=2.6" "httpx>=0.27" "websockets>=13.0" \
-      "argon2-cffi>=23.1" "itsdangerous>=2.2"
-
+# Dependencies come from pyproject.toml, which is the single source of truth.
+# A hand-maintained duplicate list here silently drifts out of sync with it.
 COPY backend/ /app/backend/
+RUN pip install --no-cache-dir /app/backend
 COPY helper/ /app/helper/
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY --from=frontend /build/dist /app/frontend/dist

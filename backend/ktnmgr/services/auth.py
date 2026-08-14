@@ -40,14 +40,38 @@ class RateLimiter:
     limit: int
     window_seconds: int
     _hits: dict[str, list[float]] = field(default_factory=dict)
+    _last_prune: float = 0.0
 
     def check(self, key: str) -> None:
+        """Record an attempt for ``key``, refusing once the window is full.
+
+        Note on deployment: ``key`` is the peer address. Behind a reverse proxy
+        every client shares one address, so one attacker would lock out all
+        users. This app is meant to be reached directly; if you front it with a
+        proxy, rate limit there instead.
+        """
         now = time.monotonic()
+        self._prune(now)
         recent = [t for t in self._hits.get(key, []) if now - t < self.window_seconds]
         if len(recent) >= self.limit:
             raise AuthError("too many login attempts; try again shortly")
         recent.append(now)
         self._hits[key] = recent
+
+    def _prune(self, now: float) -> None:
+        """Drop addresses whose attempts have all aged out.
+
+        Without this the dict grows one entry per distinct source address for
+        the process lifetime - a slow memory leak that a scanner could drive.
+        """
+        if now - self._last_prune < self.window_seconds:
+            return
+        self._last_prune = now
+        self._hits = {
+            key: hits
+            for key, hits in self._hits.items()
+            if any(now - t < self.window_seconds for t in hits)
+        }
 
     def reset(self, key: str) -> None:
         self._hits.pop(key, None)
