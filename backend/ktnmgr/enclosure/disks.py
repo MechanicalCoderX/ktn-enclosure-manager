@@ -29,6 +29,9 @@ class DiskInfoReader:
 
     def __init__(self, sysfs_root: Path = Path("/sys")) -> None:
         self.sysfs_root = Path(sysfs_root)
+        # name -> (wwid seen when cached, identity). See read() for why the
+        # wwid is part of the key rather than the name alone.
+        self._cache: dict[str, tuple[str | None, DiskIdentity]] = {}
 
     def _block_dir(self, name: str) -> Path:
         return self.sysfs_root / "block" / name
@@ -74,16 +77,35 @@ class DiskInfoReader:
         return f"0x{value}" if value else None
 
     def read(self, name: str | None) -> DiskIdentity:
-        """Return identity for a block device name, or an empty identity."""
+        """Return identity for a block device name, or an empty identity.
+
+        Cached, because none of these attributes change while a disk sits in a
+        bay, and composing a 15-bay map re-read all of them for every caller.
+
+        The cache is keyed on ``(name, wwid)``, never on the name alone.
+        ``/dev/sdX`` is not identity and is provably reused: on the validation
+        system a replacement drive was assigned the same ``sdf`` the removed
+        drive had held. A name-keyed cache would then have shown the previous
+        drive's serial against the new disk - the exact confusion this
+        application exists to prevent. Re-reading the one wwid attribute to
+        confirm the disk is still the same one costs a single file read and
+        saves the other six.
+        """
         if not name:
             return DiskIdentity()
 
         block_dir = self._block_dir(name)
         if not block_dir.is_dir():
             log.debug("block device %s not present under %s", name, self.sysfs_root)
+            self._cache.pop(name, None)
             return DiskIdentity()
 
         device_dir = block_dir / "device"
+
+        raw_wwid = self._text(device_dir / "wwid")
+        cached = self._cache.get(name)
+        if cached is not None and raw_wwid is not None and cached[0] == raw_wwid:
+            return cached[1]
 
         size_bytes: int | None = None
         raw_size = self._text(block_dir / "size")
@@ -100,11 +122,20 @@ class DiskInfoReader:
         if vendor and model and not model.startswith(vendor):
             model = f"{vendor} {model}".strip()
 
-        return DiskIdentity(
+        identity = DiskIdentity(
             serial=self._serial(device_dir),
-            wwn=self._normalise_wwn(self._text(device_dir / "wwid")),
+            wwn=self._normalise_wwn(raw_wwid),
             model=model,
             firmware=self._text(device_dir / "rev"),
             size_bytes=size_bytes,
             rotational=rotational,
         )
+        # Only cacheable when the disk offers a wwid to validate against.
+        # Without one there is no cheap way to tell a re-used device name from
+        # the same disk, so it is re-read every time rather than risk showing
+        # one drive's identity for another.
+        if raw_wwid is not None:
+            self._cache[name] = (raw_wwid, identity)
+        else:
+            self._cache.pop(name, None)
+        return identity

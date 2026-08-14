@@ -17,7 +17,12 @@
 x-portals:
   - name: Web UI
     scheme: http
-    host: 0.0.0.0
+    # ### EDIT ### your TrueNAS address, e.g. 192.168.1.50 or truenas.local.
+    #
+    # TrueNAS uses this string verbatim to build the link - it does NOT
+    # substitute the node address - so leaving 0.0.0.0 here gives you a button
+    # that opens http://0.0.0.0:8420/ and fails in every browser.
+    host: YOUR-TRUENAS-ADDRESS
     port: 8420
     path: /
 
@@ -52,7 +57,7 @@ x-notes: |
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.2
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.3
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 

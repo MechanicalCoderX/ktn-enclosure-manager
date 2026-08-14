@@ -217,17 +217,28 @@ class StateService:
     async def _loop(self) -> None:
         while True:
             try:
+                polled = False
                 if self.enclosures.due(self.settings.poll_slots_seconds) or not self.slots.value:
                     await self.poll_hardware()
+                    polled = True
                 if self.zfs.due(self.settings.poll_truenas_seconds):
                     await self.poll_truenas()
+                    polled = True
                 if self.smart.due(self.settings.poll_smart_seconds):
                     await self.poll_smart()
+                    polled = True
                 if self.system_info.due(300):
                     await self.poll_system_info()
                 if self.chassis.due(self.settings.poll_ses_seconds):
                     await self.poll_chassis()
-                await self._notify_health_changes()
+                    polled = True
+                # Only when something actually changed. This used to run every
+                # loop tick - once a second - and evaluate() composes every bay,
+                # which reads ~7 sysfs attributes per disk. On a 15-bay shelf
+                # that was ~100 file reads a second, forever, purely to
+                # re-answer a question whose inputs had not moved.
+                if polled:
+                    await self._notify_health_changes()
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - polling must never die

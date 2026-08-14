@@ -4,6 +4,54 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.3] — 2026-08-14
+
+### Security
+- **An unreadable account file no longer reopens the bootstrap endpoint.**
+  `users.json` failing to read or parse was treated as "no accounts yet",
+  identical to a genuine first run. That made `needs_bootstrap` true, reopened
+  the unauthenticated `/api/auth/bootstrap` endpoint to anyone on the network,
+  and the first write then overwrote the real accounts. A corrupt file, a
+  permissions mistake or a half-finished restore was enough to hand the
+  application away. An absent file still means first run; a file that exists
+  but cannot be read now fails closed, and existing sessions are rejected
+  rather than accepted unverified.
+- **The account file and session signing key are no longer briefly
+  world-readable.** Both were written with `write_text` and `chmod`ed to `0600`
+  afterwards, which creates them under the process umask first. They are now
+  created `0600` by `os.open`. The signing key is the more serious of the two:
+  it forges any session.
+- `GET /api/audit` bounds `limit` to 1..1000. It was unbounded, so an
+  authenticated caller could ask for the entire log in one response.
+
+### Fixed
+- **The Install-via-YAML portal button was a dead link.** `x-portals` shipped
+  with `host: 0.0.0.0`, and TrueNAS builds the URL by string concatenation
+  without substituting the node address — so the **Web UI** button opened
+  `http://0.0.0.0:8420/`, which fails in every browser. It is now a marked
+  `### EDIT ###` line. The catalog-app template was never affected: it uses
+  `tpl.portals.add_portal()`, which fills the host in.
+
+### Changed
+- **Health-change evaluation no longer runs every second.** It ran on every
+  poll-loop tick regardless of whether anything had been polled, and each pass
+  composes every bay — roughly seven sysfs reads per disk. On a 15-bay shelf
+  that was ~100 file reads a second, indefinitely, to re-answer a question
+  whose inputs had not changed. It now runs only after a poll actually
+  refreshed something. No effect unless alerting is enabled.
+- **Disk identity is cached.** Serial, WWN, model, firmware, capacity and
+  rotational flag do not change while a disk sits in a bay, but every bay-map
+  composition re-read all of them. The cache is keyed on `(device name, wwid)`
+  and never on the name alone: a replacement drive on the validation system was
+  assigned the same `/dev/sdf` the removed drive had held, so a name-keyed
+  cache would have shown the previous drive's serial against the new disk. One
+  wwid read confirms the disk is the same one and saves the other six; a disk
+  with no wwid is never cached.
+- CI builds on Node 22; Node 20 is deprecated on GitHub runners.
+- `SECURITY.md` documents that logout is client-side — sessions are stateless
+  signed cookies, so a captured cookie stays valid until expiry. Changing the
+  password is what revokes them.
+
 ## [1.2.2] — 2026-08-14
 
 ### Fixed

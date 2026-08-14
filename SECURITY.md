@@ -94,9 +94,9 @@ Docker's default AppArmor profile (`docker-default`) denies every write under
 `CAP_DAC_OVERRIDE` and `/sys` mounted `rw`.
 
 Version 1.0.0 therefore asked for `apparmor=unconfined` to use the sysfs path.
-**1.1.0 does not.** `SG_IO` is not restricted by that profile, so the same LED is
-driven by a SCSI command on a device the container already has, under full
-default confinement. Verified on real hardware: the LED lights and clears with
+**1.1.0 onwards do not.** `SG_IO` is not restricted by that profile, so the same
+LED is driven by a SCSI command on a device the container already has, under
+full default confinement. Verified on real hardware: the LED lights and clears with
 `--cap-drop ALL` and `docker-default` active.
 
 The sysfs path still exists as `KTN_IDENT_METHOD=sysfs` for enclosures where the
@@ -135,6 +135,32 @@ Dependabot keeps all four current.
 - Mutating requests require a custom header, which a cross-site form post cannot
   set — combined with `SameSite=Strict`, that is the CSRF defence.
 - A missing user and a wrong password cost the same time.
+- Changing a password bumps a per-account session epoch carried in the cookie,
+  so every existing session for that account stops being accepted. That is the
+  action a user takes when they suspect compromise, so it has to be the action
+  that ends the attacker's access.
+- The account file and the session signing key are created `0600` by `os.open`,
+  not written and then `chmod`ed — the latter leaves them world-readable for
+  the width of that window.
+- An account file that exists but cannot be read or parsed **fails closed**. It
+  is deliberately not treated as "no accounts": that would reopen the
+  unauthenticated bootstrap endpoint and let anyone on the network claim an
+  administrator account, then overwrite the real one. A corrupt file, a
+  permissions mistake, or a half-finished restore would otherwise hand the
+  application away.
+
+### Known limitation: logout is client-side
+
+`POST /api/auth/logout` clears the cookie in the browser. It does **not**
+invalidate the token server-side — sessions are stateless signed cookies, so a
+copy of the cookie captured beforehand stays valid until it expires
+(`KTN_SESSION_MAX_AGE_SECONDS`, 8 hours by default).
+
+This is a deliberate trade: the app is single-administrator, and the
+alternative — bumping the session epoch on logout — would sign the same
+account out of every other device, which is surprising behaviour for a normal
+logout. If you need every session gone right now, change the password; that
+does revoke them all.
 
 ## Secrets
 

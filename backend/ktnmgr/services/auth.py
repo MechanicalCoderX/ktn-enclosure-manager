@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -27,6 +28,24 @@ log = logging.getLogger(__name__)
 
 SESSION_COOKIE = "ktn_session"
 MIN_PASSWORD_LENGTH = 12
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Write a file that is 0600 from the moment it exists.
+
+    ``write_text`` then ``chmod`` is not equivalent: it creates the file with
+    the process umask - usually world-readable - and only narrows it
+    afterwards. For the session signing key and the password-hash file that
+    window is enough to lose both.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, text.encode("utf-8"))
+    finally:
+        os.close(fd)
+    # Explicit, in case the file already existed with looser permissions:
+    # O_CREAT's mode applies only when creating.
+    os.chmod(path, 0o600)
 
 
 class AuthError(Exception):
@@ -114,8 +133,7 @@ class AuthService:
         generated = secrets.token_urlsafe(48)
         try:
             self.secret_path.parent.mkdir(parents=True, exist_ok=True)
-            self.secret_path.write_text(generated, encoding="utf-8")
-            self.secret_path.chmod(0o600)
+            _write_private(self.secret_path, generated)
         except OSError as exc:
             log.warning("could not persist session secret (%s); sessions reset on restart", exc)
         return generated
@@ -123,22 +141,54 @@ class AuthService:
     # ------------------------------------------------------------------ users
 
     def _read_users(self) -> dict[str, dict[str, str]]:
+        """Load the account file.
+
+        An absent file means "no accounts yet" and is the normal first-run
+        state. A file that exists but cannot be read or parsed is NOT the same
+        thing and must never be reported as such: treating it as empty makes
+        ``needs_bootstrap`` true, which reopens the unauthenticated bootstrap
+        endpoint and lets anyone on the network claim an administrator account -
+        and the first write then overwrites the real accounts. A corrupt file,
+        a permissions mistake or a half-finished restore would all hand the app
+        away. So it fails closed instead.
+        """
+        if not self.users_path.exists():
+            return {}
         try:
             data = json.loads(self.users_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        return data if isinstance(data, dict) else {}
+        except (OSError, ValueError) as exc:
+            raise AuthError(
+                f"account file {self.users_path} exists but could not be read; "
+                "refusing to treat this as an empty account list"
+            ) from exc
+        if not isinstance(data, dict):
+            raise AuthError(f"account file {self.users_path} is not a JSON object")
+        return data
 
     def _write_users(self, users: dict[str, dict[str, str]]) -> None:
+        """Replace the account file atomically, never world-readable.
+
+        The mode is set by os.open rather than a chmod after the fact: writing
+        first and tightening afterwards leaves the password hashes readable to
+        every local user for the width of that window.
+        """
         self.users_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.users_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(users, indent=1), encoding="utf-8")
-        tmp.chmod(0o600)
+        _write_private(tmp, json.dumps(users, indent=1))
         tmp.replace(self.users_path)
 
     @property
     def needs_bootstrap(self) -> bool:
-        return not self._read_users()
+        """True only when there are demonstrably no accounts.
+
+        An unreadable account file is not "no accounts": it is an error, and
+        the safe answer is that bootstrap is closed.
+        """
+        try:
+            return not self._read_users()
+        except AuthError:
+            log.error("account file unreadable; bootstrap stays closed")
+            return False
 
     def bootstrap(self, username: str, password: str) -> None:
         """Create the first administrator. Refuses once any account exists."""
@@ -236,7 +286,12 @@ class AuthService:
         username = payload.get("u")
         if not username:
             return None
-        record = self._read_users().get(str(username))
+        try:
+            record = self._read_users().get(str(username))
+        except AuthError:
+            # Cannot confirm the account still exists, so do not accept the
+            # session. Fails closed, consistent with needs_bootstrap.
+            return None
         if record is None:
             return None
         # A cookie issued before this field existed carries no epoch; treat it
