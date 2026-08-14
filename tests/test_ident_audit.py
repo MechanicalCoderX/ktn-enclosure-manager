@@ -119,3 +119,70 @@ async def test_ident_state_file_is_not_world_readable(tmp_path: Path) -> None:
     state = tmp_path / "ident-state.json"
     assert state.exists()
     assert stat.S_IMODE(state.stat().st_mode) == 0o600
+
+
+def test_helper_binds_the_socket_with_the_requested_group(tmp_path: Path) -> None:
+    """The socket must carry the web process's group.
+
+    A unix socket takes the creating process's effective gid. Relying on a
+    setgid directory instead was fragile: the catalog library cannot express a
+    setgid mode at all, and an attempt to add the bit with chmod silently
+    cleared it (no CAP_FSETID), after which the socket was created root:root
+    and the web process could not connect.
+    """
+    import os
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "helper"))
+    import ktn_ident_helper  # type: ignore[import-not-found]
+
+    seen: list[int] = []
+    real_setegid = os.setegid
+
+    def spy_setegid(gid: int) -> None:
+        seen.append(gid)
+        real_setegid(gid)
+
+    class FakeServer:
+        def __init__(self, path: str, handler: object) -> None:
+            self.path = path
+
+    original_server = ktn_ident_helper.IdentServer
+    ktn_ident_helper.IdentServer = FakeServer  # type: ignore[misc]
+    ktn_ident_helper.os.setegid = spy_setegid  # type: ignore[assignment]
+    try:
+        ktn_ident_helper._bind_with_group(tmp_path / "s.sock", os.getegid())
+    finally:
+        ktn_ident_helper.IdentServer = original_server  # type: ignore[misc]
+        ktn_ident_helper.os.setegid = real_setegid  # type: ignore[assignment]
+
+    # Assumed the group to bind, then restored it.
+    assert len(seen) == 2, f"expected assume-then-restore, got {seen}"
+    assert seen[0] == seen[1] == os.getegid()
+
+
+def test_helper_still_binds_when_the_group_cannot_be_assumed(tmp_path: Path) -> None:
+    """A running app with a warning beats no app at all."""
+    import os
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "helper"))
+    import ktn_ident_helper  # type: ignore[import-not-found]
+
+    class FakeServer:
+        def __init__(self, path: str, handler: object) -> None:
+            self.path = path
+
+    def refusing_setegid(gid: int) -> None:
+        raise PermissionError("no CAP_SETGID")
+
+    original_server = ktn_ident_helper.IdentServer
+    real_setegid = os.setegid
+    ktn_ident_helper.IdentServer = FakeServer  # type: ignore[misc]
+    ktn_ident_helper.os.setegid = refusing_setegid  # type: ignore[assignment]
+    try:
+        server = ktn_ident_helper._bind_with_group(tmp_path / "s.sock", 1234)
+        assert server is not None
+    finally:
+        ktn_ident_helper.IdentServer = original_server  # type: ignore[misc]
+        ktn_ident_helper.os.setegid = real_setegid  # type: ignore[assignment]

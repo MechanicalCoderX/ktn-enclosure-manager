@@ -40,17 +40,18 @@ if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
     SOCK_DIR="$(dirname "$KTN_IDENT_HELPER_SOCKET")"
     mkdir -p "$SOCK_DIR"
 
-    # setgid, so the helper's socket inherits the directory's group (1000)
-    # rather than root's. The web process runs as uid 1000 and could not open
-    # a root:root socket, and chgrp'ing it would need CAP_DAC_OVERRIDE/CAP_CHOWN
-    # which this container deliberately does not have.
+    # Deliberately NOT chmod'ing this directory.
     #
-    # Done here rather than left to the deployment: the TrueNAS catalog library
-    # validates tmpfs modes against ^0[0-7]{3}$ and cannot express setgid at
-    # all, so an app installed from the catalog would otherwise arrive without
-    # it and IDENT would fail with a permission error.
-    chmod 2770 "$SOCK_DIR" 2>/dev/null || \
-        echo "warning: could not set the setgid bit on $SOCK_DIR" >&2
+    # A previous version ran `chmod 2770` here to guarantee the setgid bit.
+    # It did the opposite: the container has no CAP_FSETID, and when a process
+    # without it chmods a directory whose group it is not a member of, Linux
+    # strips S_ISGID from the mode. The tmpfs is mounted 2770 with gid 1000
+    # and root is not in group 1000, so the call "succeeded", returned 0, and
+    # silently turned 2770 into 0770 - after which the helper's socket was
+    # created root:root and the web process could not connect to it at all.
+    #
+    # The helper now sets the socket's group itself when it binds, so nothing
+    # here depends on the directory's setgid bit.
 
     echo "starting privileged IDENT helper on ${KTN_IDENT_HELPER_SOCKET}"
     python /app/helper/ktn_ident_helper.py \

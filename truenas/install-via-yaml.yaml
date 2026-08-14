@@ -60,7 +60,7 @@ x-notes: |
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.3.2
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.3.3
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 

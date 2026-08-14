@@ -4,6 +4,31 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.3] — 2026-08-14
+
+### Fixed
+- **1.3.1 broke the helper socket, and the chmod that was meant to fix it did
+  the opposite.** Chassis telemetry and the drive map showed
+  `helper unreachable: [Errno 13] Permission denied`.
+
+  1.3.1 added `chmod 2770` to the entrypoint to guarantee the setgid bit on
+  `/run/ktn`. The container has no `CAP_FSETID`, and when a process without it
+  chmods a directory whose group it is not a member of, Linux **strips**
+  `S_ISGID` from the mode. The tmpfs is mounted `2770` with gid 1000 and root
+  is not in group 1000, so the call returned success and silently turned
+  `2770` into `0770`. The helper's socket was then created `root:root` and the
+  uid-1000 web process could not connect to it at all.
+
+  The chmod is gone. The helper now sets the socket's group itself: a unix
+  socket inherits the creating process's effective gid, so it binds with
+  `setegid(gid)` and restores afterwards. That needs `CAP_SETGID`, which this
+  container does hold - it is one of the two capabilities kept. Nothing now
+  depends on the directory's setgid bit, which also settles the catalog case,
+  where the library cannot express a setgid mode at all.
+
+  If the group cannot be assumed the helper still binds and warns, because a
+  running app with a warning beats no app.
+
 ## [1.3.2] — 2026-08-14
 
 ### Security

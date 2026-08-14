@@ -135,6 +135,38 @@ class IdentServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
 
 
+def _bind_with_group(socket_path: Path, gid: int | None) -> IdentServer:
+    """Create the listening socket so it carries ``gid``.
+
+    A unix socket takes the creating process's effective gid, so the group is
+    set by binding under it rather than by chown'ing afterwards - which would
+    need CAP_CHOWN, a capability this container deliberately does not have.
+
+    If the egid cannot be changed the socket is still created; the caller then
+    reports the mismatch rather than the helper refusing to start, because a
+    running app with a warning beats no app at all.
+    """
+    if gid is None:
+        return IdentServer(str(socket_path), IdentHandler)
+
+    previous = os.getegid()
+    changed = False
+    try:
+        os.setegid(gid)
+        changed = True
+    except OSError as exc:
+        log.warning("could not assume gid %s for the socket (%s)", gid, exc)
+
+    try:
+        return IdentServer(str(socket_path), IdentHandler)
+    finally:
+        if changed:
+            try:
+                os.setegid(previous)
+            except OSError:  # pragma: no cover - would mean losing CAP_SETGID
+                log.error("could not restore gid %s after binding", previous)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Privileged IDENT helper")
     parser.add_argument("--socket", required=True, type=Path)
@@ -171,18 +203,27 @@ def main() -> int:
     if args.socket.exists():
         args.socket.unlink()
 
-    server = IdentServer(str(args.socket), IdentHandler)
-
-    # Socket is group-accessible only: no world access, no ambient reachability.
-    #
-    # chown is best-effort on purpose. Under a hardened container the socket
-    # directory is a setgid tmpfs, so the socket already inherits the right
-    # group and no CAP_CHOWN is needed; failing here would otherwise force the
-    # deployment to hold a capability it does not actually require.
+    gid: int | None = None
     if args.socket_group is not None:
         gid = int(args.socket_group) if str(args.socket_group).isdigit() else grp.getgrnam(
             str(args.socket_group)
         ).gr_gid
+
+    # Bind with the socket's group as our effective gid, so the socket is
+    # created carrying it. A unix socket inherits the creating process's egid
+    # unless the directory is setgid.
+    #
+    # Doing it here rather than relying on a setgid directory is what makes
+    # this work everywhere: the TrueNAS catalog library validates tmpfs modes
+    # against ^0[0-7]{3}$ and cannot express setgid at all, and an earlier
+    # attempt to add the bit with chmod silently cleared it instead (no
+    # CAP_FSETID). Changing egid needs CAP_SETGID, which this container does
+    # hold - it is one of the two capabilities kept, for setpriv.
+    server = _bind_with_group(args.socket, gid)
+
+    # Belt and braces for a deployment that does grant CAP_CHOWN, and a clear
+    # warning if the group still is not right rather than a silent failure.
+    if gid is not None:
         try:
             if os.stat(args.socket).st_gid != gid:
                 os.chown(args.socket, 0, gid)
