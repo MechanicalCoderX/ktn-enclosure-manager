@@ -32,6 +32,7 @@ from ktnmgr.models import (
     ZfsState,
 )
 from ktnmgr.services.ident import IdentManager
+from ktnmgr.services.notify import HealthNotifier
 from ktnmgr.truenas.client import TrueNASClient, TrueNASError
 from ktnmgr.truenas.correlate import (
     build_disk_index,
@@ -102,6 +103,7 @@ class StateService:
         ses: SesRunner,
         ident: IdentManager,
         truenas: TrueNASClient | None,
+        notifier: HealthNotifier | None = None,
     ) -> None:
         self.settings = settings
         self.backend = backend
@@ -109,6 +111,7 @@ class StateService:
         self.ses = ses
         self.ident = ident
         self.truenas = truenas
+        self.notifier = notifier
 
         self.enclosures: Cached[list[EnclosureRef]] = Cached(value=[])
         self.slots: Cached[dict[str, list[Any]]] = Cached(value={})
@@ -201,6 +204,16 @@ class StateService:
             if error:
                 self.chassis.last_error = error
 
+    async def _notify_health_changes(self) -> None:
+        """Announce bay health transitions. Never allowed to break polling."""
+        if self.notifier is None or not self.notifier.enabled:
+            return
+        try:
+            for ref in self.enclosures.value:
+                await self.notifier.evaluate(self.bays(ref.logical_id))
+        except Exception:  # noqa: BLE001 - notification is best-effort
+            log.exception("health notification failed")
+
     async def _loop(self) -> None:
         while True:
             try:
@@ -214,6 +227,7 @@ class StateService:
                     await self.poll_system_info()
                 if self.chassis.due(self.settings.poll_ses_seconds):
                     await self.poll_chassis()
+                await self._notify_health_changes()
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - polling must never die
@@ -254,14 +268,34 @@ class StateService:
                 return ref
         raise EnclosureNotFoundError(f"enclosure {logical_id} is not attached")
 
+    def _sas_addresses(self, logical_id: str) -> dict[int, str]:
+        """SES-reported SAS port address per slot, from cached telemetry.
+
+        Deliberately not used to correlate slots to disks - it is the port
+        address and differs from the block layer's node WWN - but it is worth
+        displaying, and it is the only place the drive's SAS identity appears.
+        """
+        telemetry = self.chassis.value.get(logical_id)
+        if telemetry is None:
+            return {}
+        return {
+            element.element_index: element.fields["SAS address"]
+            for element in telemetry.elements
+            if element.element_type == "Array device slot"
+            and not element.is_overall
+            and "SAS address" in element.fields
+        }
+
     def bays(self, logical_id: str) -> list[Bay]:
         ref = self.enclosure(logical_id)
         composed: list[Bay] = []
+        sas_addresses = self._sas_addresses(ref.logical_id)
 
         for slot in self.slots.value.get(ref.logical_id, []):
             device = slot.block_device
             local = self.disk_reader.read(device)
             identity = merge_identity(local, self.remote_disks.value.get(device or ""))
+            identity.sas_address = sas_addresses.get(slot.ses_slot)
             zfs = self.zfs.value.get(device or "", ZfsInfo())
             smart = self.smart.value.get(device or "", SmartInfo())
             origin, expires = self.ident.describe(ref.logical_id, slot.ses_slot, slot.locate)

@@ -21,9 +21,38 @@ x-portals:
     port: 8420
     path: /
 
+# Shown on the app's page in the TrueNAS Apps UI, the same way catalog apps
+# present their notes. Read back out of the rendered compose config.
+x-notes: |
+  # KTN Enclosure Manager
+
+  ## First run
+
+  There is **no account and no default password**. Open the Web UI and create
+  the administrator immediately.
+
+  ## What this app can touch
+
+  - Reads the Linux enclosure sysfs tree and the TrueNAS API.
+  - Runs read-only `sg_ses` telemetry pages.
+  - The only write it can perform is a drive bay's **IDENT LED**.
+
+  It is not privileged, mounts no host path other than its own data directory,
+  keeps Docker's default AppArmor profile, and drops every capability except
+  the two used to drop the web process to uid 1000.
+
+  ## Requirements
+
+  The data storage must be writable by uid 1000. If you chose a Host Path:
+
+      chown -R 1000:1000 <path>
+
+  The app refuses to start otherwise, because accounts and the audit log
+  would not persist.
+
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.1.2
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.0
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 
@@ -80,6 +109,11 @@ services:
       # Optional: restrict management to one enclosure.
       # Find yours with:  cat /sys/class/enclosure/*/id
       KTN_ENCLOSURE_ALLOWLIST: ""
+
+      # Optional: get told when a bay degrades. An ntfy topic URL, or any
+      # endpoint accepting a POST. Empty disables alerting.
+      KTN_ALERT_WEBHOOK_URL: ""
+      KTN_ALERT_STYLE: "ntfy"
 
       KTN_POLL_SLOTS_SECONDS: "5"
       KTN_POLL_TRUENAS_SECONDS: "20"

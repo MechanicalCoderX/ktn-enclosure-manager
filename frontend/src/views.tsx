@@ -208,6 +208,7 @@ export function BayDetail({
             <dt>Firmware</dt><dd>{bay.disk.firmware ?? "—"}</dd>
             <dt>Capacity</dt><dd>{formatBytes(bay.disk.size_bytes)}</dd>
             <dt>WWN</dt><dd>{bay.disk.wwn ?? "—"}</dd>
+            <dt>SAS addr</dt><dd>{bay.disk.sas_address ?? "—"}</dd>
             <dt>Transport</dt><dd>{bay.disk.transport ?? "—"}</dd>
           </dl>
         </section>
@@ -236,9 +237,16 @@ export function BayDetail({
                 ? `${bay.smart.temperature_c} °C`
                 : "unavailable"}
             </dd>
-            <dt>Overall</dt><dd>{bay.smart.overall ?? "—"}</dd>
-            <dt>Hours</dt><dd>{bay.smart.power_on_hours ?? "—"}</dd>
           </dl>
+          {/* Stated rather than left as a bare "—", which reads as broken.
+              TrueNAS 25.10 exposes disk temperatures but no SMART attribute
+              endpoint, and reading them directly would mean handing this
+              container every disk device. */}
+          <p className="sub" style={{ marginTop: 8 }}>
+            Overall status and power-on hours are not exposed by the TrueNAS
+            API. Reading them directly would require giving this container
+            access to every disk device, which it deliberately does not have.
+          </p>
         </section>
       </div>
 

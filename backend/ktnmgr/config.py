@@ -59,6 +59,23 @@ class Settings(BaseSettings):
     truenas_verify_tls: bool = True
     truenas_ca_bundle: str | None = None
 
+    # --- notifications ----------------------------------------------------
+    alert_webhook_url: str = Field(
+        default="",
+        description=(
+            "Where to send a message when a bay's health changes. An ntfy topic "
+            "URL, or any endpoint that accepts a POST. Empty disables alerting."
+        ),
+    )
+    alert_style: str = Field(
+        default="ntfy",
+        description=(
+            "'ntfy' posts a plain-text body with Title/Priority/Tags headers; "
+            "'json' posts a JSON object."
+        ),
+    )
+    alert_on_recovery: bool = True
+
     # --- polling (§29) ----------------------------------------------------
     poll_slots_seconds: float = 5.0
     poll_truenas_seconds: float = 20.0
@@ -76,6 +93,10 @@ class Settings(BaseSettings):
     @property
     def users_path(self) -> Path:
         return self.data_dir / "users.json"
+
+    @property
+    def notify_state_path(self) -> Path:
+        return self.data_dir / "notify-state.json"
 
     @property
     def ident_state_path(self) -> Path:

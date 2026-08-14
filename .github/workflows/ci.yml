@@ -32,6 +32,11 @@ jobs:
         # TrueNAS instance is required.
         run: PYTHONPATH=backend pytest tests/ -q
 
+      - name: Audit dependencies
+        run: |
+          pip install pip-audit
+          pip-audit --strict --desc
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -49,6 +54,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+
+      - name: Audit dependencies
+        # Production dependencies only: a dev-only advisory in the build chain
+        # is not shipped to anyone and should not block a release.
+        run: npm audit --omit=dev --audit-level=high
 
   e2e:
     runs-on: ubuntu-latest
@@ -98,5 +108,16 @@ jobs:
         with:
           context: .
           push: false
+          load: true
+          tags: ktn-enclosure-manager:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan image for known vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ktn-enclosure-manager:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL

@@ -48,7 +48,10 @@ class TrueNASClient:
             "disk.query",
             "disk.temperatures",
             "pool.query",
-            "smart.test.results",
+            # Present on 25.10.5. NOTE: there is no SMART attribute method -
+            # `smart.test.results` was in this list but does not exist on the
+            # appliance at all, so it could only ever have failed.
+            "disk.temperature_alerts",
         }
     )
 
@@ -251,6 +254,17 @@ class TrueNASClient:
 
     async def pools(self) -> list[dict[str, Any]]:
         result = await self.call("pool.query")
+        return result if isinstance(result, list) else []
+
+    async def temperature_alerts(self) -> list[dict[str, Any]]:
+        """Disks TrueNAS has raised a temperature alert for.
+
+        This is the only disk-health signal the 25.10 API exposes beyond raw
+        temperature; there is no endpoint for SMART overall status or power-on
+        hours. See SmartInfo in models.py for why this app does not shell out
+        to smartctl instead.
+        """
+        result = await self.call("disk.temperature_alerts")
         return result if isinstance(result, list) else []
 
     async def temperatures(self) -> dict[str, float | None]:

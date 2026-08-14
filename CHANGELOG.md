@@ -4,6 +4,59 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-08-14
+
+### Added
+- **Health notifications.** The app already knew the moment a bay degraded but
+  only showed it if you happened to be looking. It now posts to an ntfy topic
+  or any webhook when a bay's health changes, with a message that names the
+  bay, SES slot, serial, device, pool/vdev and error counters - enough to walk
+  to the shelf and pull the right drive.
+
+  Fires on *transitions* only, so a permanently degraded pool does not message
+  every poll, and the last observed health is persisted so a restart does not
+  re-announce what you have already been told. A failure present at startup
+  does notify, because that is exactly what an operator needs to hear. A
+  broken notification endpoint can never disturb polling.
+
+  Configure with `KTN_ALERT_WEBHOOK_URL`, `KTN_ALERT_STYLE` (`ntfy` or `json`)
+  and `KTN_ALERT_ON_RECOVERY`. Empty URL disables it.
+- **Security response headers** on every response: a strict `Content-Security-
+  Policy` (the bundle is entirely self-hosted, so nothing legitimate needs
+  relaxing), `frame-ancestors 'none'` and `X-Frame-Options: DENY` so another
+  page cannot frame the UI and trick a click onto Identify, plus `nosniff`,
+  `Referrer-Policy` and a restrictive `Permissions-Policy`.
+- **CodeQL, dependency auditing and image scanning in CI.** CodeQL runs
+  `security-extended` on Python and TypeScript weekly and per PR; it flags
+  precisely the `Path / user_input -> FileResponse` shape that produced the
+  1.1.1 traversal and survived the whole test suite, ruff and mypy. `pip-audit`
+  and `npm audit` cover dependencies, Trivy scans the built image, and
+  Dependabot keeps pip, npm, Actions and the base image digests current.
+- **The drive's SAS address** is now shown in the bay detail panel, parsed from
+  the SES additional element status. It was defined in the model and never
+  populated.
+- An application **icon**, used by the TrueNAS app card and as the web UI
+  favicon.
+- `x-notes` on the TrueNAS app, so the first-run warning and the app's
+  privileges appear on its page in the Apps UI.
+
+### Changed
+- Base images are **pinned by digest**. Floating tags made builds
+  irreproducible and an upstream change invisible; Dependabot bumps them.
+- The SMART panel now says *why* overall status and power-on hours are absent
+  instead of showing a bare "—" that reads as broken.
+
+### Fixed
+- `smart.test.results` was in the client's allow-list but **does not exist on
+  TrueNAS 25.10.5**, so it could only ever have failed. Removed, and
+  `disk.temperature_alerts` - which does exist - added in its place.
+
+### Not done, and why
+- Overall SMART status and power-on hours are still unavailable: TrueNAS 25.10
+  exposes no SMART attribute endpoint at all, and reading them directly would
+  mean passing every disk device into the container. That would undo the
+  minimal-privilege model this app is built around, for two cosmetic fields.
+
 ## [1.1.2] — 2026-08-14
 
 Closes the two limitations 1.1.1 documented but did not fix.

@@ -1,4 +1,4 @@
-# KTN Enclosure Manager
+# ![icon](docs/images/icon-64.png) KTN Enclosure Manager
 
 A local, zero-cost, web-based enclosure manager for SAS disk shelves attached to
 **TrueNAS SCALE Community Edition** — validated end to end against an
@@ -25,6 +25,9 @@ hardware identity, or touching the TrueNAS WebUI.
   sensor.
 - **Identify** — light a bay's LED for 10s, 30s, 60s, 5 minutes, or until
   cleared. Timers are server-side, so closing the browser cannot strand a lit LED.
+- **Alerts** — posts to ntfy or any webhook when a bay's health changes, naming
+  the bay, serial and pool so you know which drive to pull. Transitions only, so
+  a degraded pool does not message every poll.
 - **Diagnostics and audit** — sanitised, copyable diagnostics; every write logged.
 
 | | |
@@ -105,6 +108,8 @@ annotated list. The essentials:
 | `KTN_SG_DEVICE` | SES device node to expose to the container |
 | `KTN_ENCLOSURE_ALLOWLIST` | restrict management to specific enclosure ids |
 | `KTN_POLL_*_SECONDS` | polling intervals (5 / 20 / 30 / 120 by default) |
+| `KTN_ALERT_WEBHOOK_URL` | ntfy topic or webhook for health-change alerts; empty disables |
+| `KTN_ALERT_STYLE` | `ntfy` (plain text + headers) or `json` |
 
 One backend poll serves every connected browser; expensive `sg_ses` and SMART
 reads are cached and never run per client.

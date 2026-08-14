@@ -6,6 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
@@ -21,6 +22,7 @@ from ktnmgr.enclosure.sysfs import SysfsEnclosureBackend
 from ktnmgr.services.audit import AuditLog
 from ktnmgr.services.auth import AuthService
 from ktnmgr.services.ident import IdentManager
+from ktnmgr.services.notify import HealthNotifier
 from ktnmgr.services.state import StateService
 from ktnmgr.truenas.client import TrueNASClient
 
@@ -64,8 +66,18 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     else:
         log.warning("TrueNAS not configured; pool, vdev and SMART data will be unavailable")
 
+    notifier = HealthNotifier(
+        url=settings.alert_webhook_url,
+        style=settings.alert_style,
+        state_path=settings.notify_state_path,
+        notify_recovery=settings.alert_on_recovery,
+    )
+    if notifier.enabled:
+        log.info("health notifications enabled (%s)", settings.alert_style)
+
     service = StateService(
-        settings=settings, backend=backend, disks=disks, ses=ses, ident=ident, truenas=truenas
+        settings=settings, backend=backend, disks=disks, ses=ses, ident=ident,
+        truenas=truenas, notifier=notifier,
     )
     auth = AuthService(
         users_path=settings.users_path,
@@ -99,6 +111,40 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         description="Local enclosure management for SES disk shelves on TrueNAS SCALE.",
         lifespan=lifespan,
     )
+    @app.middleware("http")
+    async def security_headers(request: Any, call_next: Any) -> Any:
+        """Defence-in-depth headers on every response.
+
+        The one that matters here is frame-ancestors: without it another page
+        could frame this UI and trick a click onto Identify. The CSP is strict
+        because the bundle is entirely self-hosted - no CDN, no inline script,
+        no external fonts - so nothing legitimate needs relaxing.
+        """
+        response = await call_next(request)
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "   # Vite emits a style attribute or two
+            "img-src 'self' data:; "
+            "connect-src 'self'; "
+            "font-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'none'; "
+            "form-action 'self'; "
+            "frame-ancestors 'none'",
+        )
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault(
+            "Permissions-Policy", "geolocation=(), microphone=(), camera=(), usb=()"
+        )
+        # Only meaningful over TLS, and harmless otherwise; omitted deliberately
+        # because this app is normally served over plain HTTP on a LAN and a
+        # stray HSTS header would pin a hostname the user cannot serve over TLS.
+        return response
+
     app.state.settings = settings
     app.state.service = service
     app.state.auth = auth

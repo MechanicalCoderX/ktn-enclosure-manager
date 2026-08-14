@@ -104,6 +104,25 @@ SES command is unavailable. Choosing it reintroduces the need for a writable
 `/sys`, `CAP_DAC_OVERRIDE` and `apparmor=unconfined`; `auto` (the default)
 prefers the SCSI path and only falls back if `sg_ses` is missing.
 
+## Response headers
+
+Every response carries a strict `Content-Security-Policy` (the bundle is
+entirely self-hosted — no CDN, no inline script, no external fonts — so nothing
+legitimate needs relaxing), `frame-ancestors 'none'` and `X-Frame-Options: DENY`
+so another page cannot frame the UI and trick a click onto Identify, plus
+`nosniff`, `Referrer-Policy: no-referrer` and a restrictive `Permissions-Policy`.
+
+HSTS is deliberately omitted: this app is normally served over plain HTTP on a
+LAN, and a stray HSTS header would pin a hostname the operator cannot serve over
+TLS.
+
+## Supply chain
+
+Base images are pinned by digest. CodeQL (`security-extended`) runs on Python
+and TypeScript weekly and on every pull request, `pip-audit` and `npm audit`
+cover dependencies, Trivy scans the built image for HIGH/CRITICAL issues, and
+Dependabot keeps all four current.
+
 ## Authentication
 
 - Argon2id password hashing; no default password is ever generated or printed.

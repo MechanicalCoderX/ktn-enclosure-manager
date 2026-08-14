@@ -22,7 +22,7 @@
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.1.2
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.0
     build:
       context: .
       dockerfile: Dockerfile
@@ -65,6 +65,9 @@ services:
       KTN_TRUENAS_VERIFY_TLS: ${KTN_TRUENAS_VERIFY_TLS:-true}
       KTN_TRUENAS_CA_BUNDLE: ${KTN_TRUENAS_CA_BUNDLE:-}
       KTN_ENCLOSURE_ALLOWLIST: ${KTN_ENCLOSURE_ALLOWLIST:-}
+      KTN_ALERT_WEBHOOK_URL: ${KTN_ALERT_WEBHOOK_URL:-}
+      KTN_ALERT_STYLE: ${KTN_ALERT_STYLE:-ntfy}
+      KTN_ALERT_ON_RECOVERY: ${KTN_ALERT_ON_RECOVERY:-true}
       KTN_POLL_SLOTS_SECONDS: ${KTN_POLL_SLOTS_SECONDS:-5}
       KTN_POLL_TRUENAS_SECONDS: ${KTN_POLL_TRUENAS_SECONDS:-20}
       KTN_POLL_SES_SECONDS: ${KTN_POLL_SES_SECONDS:-30}

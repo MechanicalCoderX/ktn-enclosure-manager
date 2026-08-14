@@ -198,9 +198,15 @@ def _finalise(element: ChassisElement, body: list[str]) -> None:
         element.speed_rpm = int(rpm.group(1))
 
     for line in body:
-        # Only parse the flag lines, not the phy/connector tables, which are
-        # free-form and handled separately by the SAS advanced view.
-        if line.strip().startswith(("[", "phy index", "attached", "SAS ", "Transport")):
+        stripped = line.strip()
+        # The element's own SAS address is worth keeping; the attached address
+        # belongs to the expander, not the drive, so it is skipped.
+        if stripped.startswith("SAS address:"):
+            element.fields.setdefault("SAS address", stripped.split(":", 1)[1].strip())
+            continue
+        # Otherwise skip the phy/connector tables, which are free-form and
+        # handled separately by the SAS advanced view.
+        if stripped.startswith(("[", "phy index", "attached", "SAS ", "Transport")):
             continue
         for key, value in _KV_RE.findall(line):
             cleaned = value.strip().rstrip(",")

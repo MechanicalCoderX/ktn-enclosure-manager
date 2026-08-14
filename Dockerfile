@@ -7,7 +7,9 @@
 # TrueNAS WebUI is touched.
 
 # ---------------------------------------------------------------- frontend
-FROM node:20-slim AS frontend
+# Pinned by digest: a floating tag makes today's build and next month's differ
+# silently, and hides a tampered upstream. Dependabot bumps these.
+FROM node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
 # Neither --omit=optional nor --ignore-scripts here: rollup resolves its native
@@ -18,7 +20,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ----------------------------------------------------------------- runtime
-FROM python:3.13-slim AS runtime
+FROM python:3.13-slim@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a AS runtime
 
 # sg3-utils: read-only chassis telemetry.
 # util-linux: setpriv, used to drop privileges for the web process.

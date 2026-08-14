@@ -1,0 +1,38 @@
+name: CodeQL
+
+# Static analysis for the class of bug this project actually shipped: v1.1.1
+# fixed an unauthenticated path traversal that looked like
+# `FRONTEND_DIR / user_input` -> FileResponse. CodeQL flags exactly that shape,
+# and it survived a full test suite, ruff and mypy without complaint.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so newly-published query packs get applied to unchanged code.
+    - cron: "27 4 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
