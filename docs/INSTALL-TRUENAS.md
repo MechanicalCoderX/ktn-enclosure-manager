@@ -54,6 +54,16 @@ you create the administrator in the browser.
 > The portal is recorded when the app is **installed**. Adding `x-portals` to an
 > app that already exists does not backfill it — edit the YAML and reinstall, or
 > just browse to the port directly.
+>
+> **The app card icon cannot be set.** Every custom app shows the generic
+> TrueNAS cube and the title "Custom App". This is not something the YAML can
+> influence: TrueNAS builds a custom app's metadata from a hardcoded stub
+> (`catalog_reader.custom_app.get_version_details`) that contains no `icon`
+> key at all, and writing one into the stored metadata is ignored — both
+> verified on 25.10.5. Unlike the portal, there is no `x-` extension for it.
+> The app's own icon does appear as the browser tab favicon, and the card icon
+> would work if this app were ever accepted into the official catalog, where
+> `app.yaml` carries an `icon:` URL.
 
 ### Privileges this asks for
 
