@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import stat
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,6 +38,22 @@ class AuditLog:
         self.max_tail = max_tail
         self.max_bytes = max_bytes
         self._lock = threading.Lock()
+        self._tighten_existing()
+
+    def _tighten_existing(self) -> None:
+        """Narrow a log created before these permissions were enforced.
+
+        The O_CREAT mode only applies when the file is created, so an upgraded
+        deployment would otherwise keep a world-readable audit log - carrying
+        usernames and drive serials - indefinitely.
+        """
+        for candidate in (self.path, self.path.with_suffix(self.path.suffix + ".1")):
+            try:
+                if candidate.exists() and stat.S_IMODE(candidate.stat().st_mode) != 0o600:
+                    candidate.chmod(0o600)
+                    log.info("tightened permissions on %s", candidate)
+            except OSError as exc:
+                log.warning("could not tighten permissions on %s: %s", candidate, exc)
 
     def _rotate_if_needed(self) -> None:
         """Keep one previous generation, so the log cannot grow without bound.

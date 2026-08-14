@@ -9,6 +9,55 @@ type Theme = "system" | "light" | "dark";
 const POLL_BAYS_MS = 5000;
 const POLL_CHASSIS_MS = 30000;
 
+/**
+ * Poll on an interval, but only while the tab is actually being looked at,
+ * and refresh immediately when it becomes visible again.
+ *
+ * Without the visibility check a tab left open overnight kept asking every
+ * five seconds - about 17,000 requests a day, each one composing all fifteen
+ * bays server-side - to redraw a page nobody was watching. Resuming with an
+ * immediate call means the first thing you see on returning is current, not
+ * up to one interval stale.
+ */
+function usePolling(callback: () => void, intervalMs: number, active: boolean): void {
+  useEffect(() => {
+    if (!active) return;
+
+    let timer: number | undefined;
+
+    const stop = () => {
+      if (timer !== undefined) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+    };
+
+    const start = () => {
+      if (timer !== undefined) return;
+      timer = window.setInterval(callback, intervalMs);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stop();
+      } else {
+        callback();
+        start();
+      }
+    };
+
+    if (!document.hidden) {
+      callback();
+      start();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [callback, intervalMs, active]);
+}
+
 function useTheme(): [Theme, (t: Theme) => void] {
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem("ktn-theme") as Theme) ?? "system",
@@ -144,21 +193,22 @@ export function App() {
     }
   }, [selectedEnclosure]);
 
-  useEffect(() => {
-    if (!user || !selectedEnclosure) return;
-    void refreshBays();
-    const timer = setInterval(refreshBays, POLL_BAYS_MS);
-    return () => clearInterval(timer);
-  }, [user, selectedEnclosure, refreshBays]);
+  usePolling(
+    refreshBays,
+    POLL_BAYS_MS,
+    Boolean(user && selectedEnclosure),
+  );
 
-  useEffect(() => {
-    if (!user || !selectedEnclosure || tab !== "chassis") return;
-    const load = () =>
-      api.chassis(selectedEnclosure).then(setChassis).catch(() => undefined);
-    void load();
-    const timer = setInterval(load, POLL_CHASSIS_MS);
-    return () => clearInterval(timer);
-  }, [user, selectedEnclosure, tab]);
+  const loadChassis = useCallback(() => {
+    if (!selectedEnclosure) return;
+    void api.chassis(selectedEnclosure).then(setChassis).catch(() => undefined);
+  }, [selectedEnclosure]);
+
+  usePolling(
+    loadChassis,
+    POLL_CHASSIS_MS,
+    Boolean(user && selectedEnclosure && tab === "chassis"),
+  );
 
   const identify = async (slot: number, on: boolean, duration: IdentDuration) => {
     if (!selectedEnclosure) return;

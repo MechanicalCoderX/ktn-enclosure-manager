@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.5] — 2026-08-14
+
+### Security
+- **Permissions are repaired on upgrade, not just on creation.** 1.2.4 created
+  the account file, session key, audit log and IDENT state `0600` — but
+  `O_CREAT`'s mode applies only when the file is created, so a deployment
+  upgraded from an earlier version kept its world-readable audit log (and, if
+  it predated the fix, its signing key) indefinitely. Verified on the live
+  system: `audit.log` was still `0644` after 1.2.4 shipped. Existing files are
+  now narrowed at startup.
+
+### Changed
+- **The UI stops polling while the tab is hidden.** It asked for the bay map
+  every five seconds whether or not anyone was looking — about 17,000 requests
+  a day from a tab left open overnight, each composing all fifteen bays
+  server-side. Polling now pauses on `visibilitychange` and resumes with an
+  immediate refresh, so what you see on returning to the tab is current rather
+  than up to one interval stale.
+- API path segments are encoded rather than interpolated raw.
+- The catalog-app package (for submission to `truenas/apps`) was pinned at
+  1.2.0, four releases behind. Its version and image tag now track the release.
+
 ## [1.2.4] — 2026-08-14
 
 ### Corrected

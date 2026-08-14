@@ -42,6 +42,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+const enc = encodeURIComponent;
+
 const post = <T>(path: string, body?: unknown): Promise<T> =>
   request<T>(path, {
     method: "POST",
@@ -61,11 +63,15 @@ export const api = {
     post<{ ok: boolean }>("/api/auth/password", { current_password, new_password }),
 
   enclosures: () => request<Enclosure[]>("/api/enclosures"),
-  bays: (id: string) => request<BaysResponse>(`/api/enclosures/${id}/bays`),
-  chassis: (id: string) => request<Chassis>(`/api/enclosures/${id}/chassis`),
+  // Path segments are encoded rather than interpolated raw. Enclosure ids are
+  // hex today, so nothing needs escaping - but the values come from a server
+  // response, and a path built by concatenation is one odd id away from
+  // addressing a different route than intended.
+  bays: (id: string) => request<BaysResponse>(`/api/enclosures/${enc(id)}/bays`),
+  chassis: (id: string) => request<Chassis>(`/api/enclosures/${enc(id)}/chassis`),
   identify: (id: string, slot: number, on: boolean, duration_seconds: IdentDuration) =>
     post<{ ok: boolean; locate: boolean; expires_at: string | null; origin: string | null }>(
-      `/api/enclosures/${id}/slots/${slot}/identify`,
+      `/api/enclosures/${enc(id)}/slots/${slot}/identify`,
       { on, duration_seconds },
     ),
 
@@ -73,5 +79,5 @@ export const api = {
   audit: (limit = 100) => request<AuditEntry[]>(`/api/audit?limit=${limit}`),
   rawPages: () => request<string[]>("/api/raw/pages"),
   rawPage: (id: string, page: string) =>
-    request<{ page: string; output: string }>(`/api/raw/${id}/${page}`),
+    request<{ page: string; output: string }>(`/api/raw/${enc(id)}/${enc(page)}`),
 };

@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import secrets
+import stat
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -28,6 +29,16 @@ log = logging.getLogger(__name__)
 
 SESSION_COOKIE = "ktn_session"
 MIN_PASSWORD_LENGTH = 12
+
+
+def _tighten(path: Path) -> None:
+    """Best-effort narrowing of a file created before 0600 was enforced."""
+    try:
+        if path.exists() and stat.S_IMODE(path.stat().st_mode) != 0o600:
+            path.chmod(0o600)
+            log.info("tightened permissions on %s", path)
+    except OSError as exc:
+        log.warning("could not tighten permissions on %s: %s", path, exc)
 
 
 def _write_private(path: Path, text: str) -> None:
@@ -127,6 +138,12 @@ class AuthService:
         try:
             existing = self.secret_path.read_text(encoding="utf-8").strip()
             if existing:
+                # Narrow a key written before this was enforced: the O_CREAT
+                # mode applies only at creation, so an upgraded deployment
+                # would otherwise keep a world-readable signing key - which
+                # forges any session - for as long as it runs.
+                _tighten(self.secret_path)
+                _tighten(self.users_path)
                 return existing
         except OSError:
             pass

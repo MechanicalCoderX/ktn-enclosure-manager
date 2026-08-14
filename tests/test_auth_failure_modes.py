@@ -83,3 +83,19 @@ def test_temp_file_left_behind_is_also_private(tmp_path: Path) -> None:
     leftovers = list(tmp_path.glob("*.tmp"))
     for leftover in leftovers:
         assert stat.S_IMODE(leftover.stat().st_mode) == 0o600
+
+
+def test_permissions_are_tightened_on_an_upgraded_deployment(tmp_path: Path) -> None:
+    """O_CREAT's mode applies only at creation, so files written by an earlier
+    version would otherwise stay world-readable for as long as the app runs."""
+    users = tmp_path / "users.json"
+    secret = tmp_path / "session-secret"
+    users.write_text('{"admin": {"password_hash": "x"}}')
+    secret.write_text("an-old-signing-key")
+    users.chmod(0o644)
+    secret.chmod(0o644)
+
+    make_auth(tmp_path)  # constructing the service loads the secret
+
+    assert stat.S_IMODE(secret.stat().st_mode) == 0o600
+    assert stat.S_IMODE(users.stat().st_mode) == 0o600

@@ -78,3 +78,26 @@ def test_audit_log_is_not_world_readable(tmp_path: Path) -> None:
 
     mode = stat.S_IMODE(path.stat().st_mode)
     assert mode == 0o600, f"audit log mode is {mode:o}"
+
+
+def test_an_existing_log_has_its_permissions_tightened(tmp_path: Path) -> None:
+    """A log written by an earlier version must not stay world-readable."""
+    path = tmp_path / "audit.log"
+    path.write_text("")
+    path.chmod(0o644)
+
+    AuditLog(path)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_a_rotated_log_is_tightened_too(tmp_path: Path) -> None:
+    path = tmp_path / "audit.log"
+    rotated = tmp_path / "audit.log.1"
+    path.write_text("")
+    rotated.write_text("")
+    rotated.chmod(0o644)
+
+    AuditLog(path)
+
+    assert stat.S_IMODE(rotated.stat().st_mode) == 0o600
