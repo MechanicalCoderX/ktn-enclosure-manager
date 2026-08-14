@@ -4,6 +4,44 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-08-14
+
+### Fixed
+- **The application was making the HBA abort SCSI commands, thousands of times
+  a day.** On the validation system the kernel log filled with
+
+  ```
+  mpt2sas_cm0: log_info(0x31120434): originator(PL), code(0x12), sub_code(0x0434)
+  ```
+
+  — `PL_LOGINFO_CODE_ABORT` — at roughly 5,700 messages a day, two every poll
+  cycle. Pausing the container stopped it completely (0 events in 95s paused,
+  6 in the next 65s running), which is how it was pinned down.
+
+  The cause is concurrent access to the enclosure. Reading a slot attribute
+  under `/sys/class/enclosure` is not a passive file read: it makes the kernel
+  `ses` driver issue a diagnostic to the shelf. The 5-second slot poll and the
+  30-second `sg_ses` poll therefore both talk to the enclosure processor, and
+  the KTN-STL3 will not service two SES requests at once — so one gets
+  aborted. The read succeeds on retry, which is why nothing ever looked
+  broken; the only symptom was log noise, and it kept the kernel ring buffer
+  permanently saturated with its own messages, hiding real `mpt3sas` history.
+
+  All enclosure access — sysfs slot sweeps, `sg_ses` page reads, and IDENT
+  writes — is now serialised through a single lock. It is an `flock`, not a
+  `threading.Lock`, because in the hardened deployment the two readers are in
+  *different processes*: the web process reads sysfs as uid 1000 while
+  `sg_ses` is executed by the privileged helper, so an in-process lock would
+  exclude nothing. Failing to take the lock is never fatal — it degrades to
+  unsynchronised access and warns once, since the lock only suppresses log
+  noise and must never take enclosure reporting down.
+
+  The IDENT write and its settle poll are now covered by the same lock, so a
+  concurrent read can no longer observe a half-applied locate state.
+
+  The lock file is `enclosure.lock` in the data directory (override with
+  `KTN_ENCLOSURE_LOCK`). No configuration change is needed to get the fix.
+
 ## [1.2.0] — 2026-08-14
 
 ### Added

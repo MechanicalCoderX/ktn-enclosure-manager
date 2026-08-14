@@ -161,6 +161,15 @@ Confirm with `docker exec ktn-enclosure-manager sg_ses -p cf /dev/sgN`.
 wrong. The banner names the error, and the drive map keeps working — bay state
 is read directly from the enclosure.
 
+**`log_info(0x31120434) ... code(0x12)` in the kernel log.** That is
+`PL_LOGINFO_CODE_ABORT` — the shelf was asked for two SES things at once and
+the HBA aborted one. Reads succeed on retry, so nothing breaks, but it is
+noisy. Fixed in 1.2.1, which serialises all enclosure access; upgrade if you
+see it. If it persists, something outside this app is also polling the
+enclosure. Check the lock is usable: `KTN_ENCLOSURE_LOCK` (default
+`<data dir>/enclosure.lock`) must be writable by both uid 1000 and root — the
+app warns once at startup if it is not.
+
 **Everything logs out on restart.** `/data` is not writable by uid 1000. The
 container refuses to start in this state and prints the fix.
 

@@ -106,6 +106,16 @@ class Settings(BaseSettings):
     def secret_path(self) -> Path:
         return self.data_dir / "session-secret"
 
+    @property
+    def enclosure_lock_path(self) -> Path:
+        """Cross-process lock serialising all access to the enclosure.
+
+        Lives in the data directory because it is the one place both the
+        unprivileged web process and the root helper can always open. See
+        enclosure/access.py for why the lock is needed at all.
+        """
+        return self.data_dir / "enclosure.lock"
+
     def allowed_enclosures(self) -> set[str]:
         return {e.strip().lower() for e in self.enclosure_allowlist.split(",") if e.strip()}
 

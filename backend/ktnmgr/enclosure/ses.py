@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ktnmgr.enclosure.access import enclosure_access
+
 log = logging.getLogger(__name__)
 
 # The only sg_ses invocations this application is capable of making.
@@ -54,9 +56,17 @@ class SesResult:
 class SesRunner:
     """Runs allow-listed read-only sg_ses pages against a resolved device."""
 
-    def __init__(self, binary: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self,
+        binary: str | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        lock_path: Path | str | None = None,
+    ) -> None:
         self._binary = binary or shutil.which("sg_ses") or "/usr/bin/sg_ses"
         self.timeout = timeout
+        # Serialised against the sysfs reader in the web process; see
+        # enclosure/access.py. --version needs no lock: it touches no device.
+        self.lock_path = lock_path
 
     @property
     def binary(self) -> str:
@@ -95,14 +105,15 @@ class SesRunner:
         argv = [self._binary, *READ_ONLY_PAGES[page], str(device_path)]
         log.debug("running %s", argv)
         try:
-            proc = subprocess.run(  # noqa: S603 - argv built from allow-list only
-                argv,
-                shell=False,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                check=False,
-            )
+            with enclosure_access(self.lock_path):
+                proc = subprocess.run(  # noqa: S603 - argv built from allow-list only
+                    argv,
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout,
+                    check=False,
+                )
         except subprocess.TimeoutExpired as exc:
             raise SesError(f"sg_ses timed out after {self.timeout}s reading {page}") from exc
         except OSError as exc:
@@ -149,10 +160,11 @@ class SesRunner:
             str(device_path),
         ]
         try:
-            proc = subprocess.run(  # noqa: S603 - argv from validated ints + fixed literals
-                argv, shell=False, capture_output=True, text=True,
-                timeout=self.timeout, check=False,
-            )
+            with enclosure_access(self.lock_path):
+                proc = subprocess.run(  # noqa: S603 - argv from validated ints + fixed literals
+                    argv, shell=False, capture_output=True, text=True,
+                    timeout=self.timeout, check=False,
+                )
         except subprocess.TimeoutExpired as exc:
             raise SesError(f"sg_ses ident timed out after {self.timeout}s") from exc
         except OSError as exc:

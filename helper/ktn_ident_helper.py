@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
+from ktnmgr.enclosure.access import default_lock_path
 from ktnmgr.enclosure.locate import (
     LocateError,
     build_local_locate_writer,
@@ -144,6 +145,10 @@ def main() -> int:
                         help="comma-separated enclosure logical ids; empty means any")
     parser.add_argument("--ident-method", default="auto", choices=("auto", "ses", "sysfs"),
                         help="how to drive the LED; 'ses' avoids needing a writable /sys")
+    # Must be the same file the web process uses, or the two processes will
+    # not exclude each other and the shelf will abort colliding commands.
+    parser.add_argument("--enclosure-lock", default=None, type=Path,
+                        help="cross-process lock file serialising enclosure access")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -152,9 +157,12 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
-    IdentHandler.backend = SysfsEnclosureBackend(sysfs_root=args.sysfs_root)
+    lock_path = args.enclosure_lock or default_lock_path()
+    IdentHandler.backend = SysfsEnclosureBackend(
+        sysfs_root=args.sysfs_root, lock_path=lock_path
+    )
     IdentHandler.allowlist = {e.strip().lower() for e in args.allow.split(",") if e.strip()}
-    IdentHandler.ses = SesRunner()
+    IdentHandler.ses = SesRunner(lock_path=lock_path)
     IdentHandler.writer = build_local_locate_writer(
         IdentHandler.backend, IdentHandler.ses, args.ident_method
     )

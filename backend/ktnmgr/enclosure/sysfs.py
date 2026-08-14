@@ -17,6 +17,7 @@ import re
 import time
 from pathlib import Path
 
+from ktnmgr.enclosure.access import enclosure_access
 from ktnmgr.models import EnclosureRef, SlotState
 
 log = logging.getLogger(__name__)
@@ -72,9 +73,14 @@ class SysfsEnclosureBackend:
         self,
         sysfs_root: Path = DEFAULT_SYSFS_ROOT,
         dev_root: Path = DEFAULT_DEV_ROOT,
+        lock_path: Path | str | None = None,
     ) -> None:
         self.sysfs_root = Path(sysfs_root)
         self.dev_root = Path(dev_root)
+        # Reading a slot attribute is not a passive file read: it makes the
+        # kernel ses driver issue a diagnostic to the shelf, which collides
+        # with sg_ses. See enclosure/access.py.
+        self.lock_path = lock_path
 
     # ------------------------------------------------------------------
     # Discovery (§18)
@@ -177,29 +183,33 @@ class SysfsEnclosureBackend:
         enclosure_path = Path(ref.sysfs_path)
         states: list[SlotState] = []
 
-        for slot_dir in self._slot_dirs(enclosure_path):
-            raw_slot = _read_text(slot_dir / _SLOT_ATTR)
-            try:
-                ses_slot = int(raw_slot) if raw_slot is not None else int(slot_dir.name)
-            except ValueError:
-                log.warning("slot %s has unparseable slot attribute %r", slot_dir, raw_slot)
-                continue
+        # One lock for the whole sweep, not one per slot: 15 bays x 6
+        # attributes is 90 diagnostics, and releasing between them just hands
+        # sg_ses a window to collide in.
+        with enclosure_access(self.lock_path):
+            for slot_dir in self._slot_dirs(enclosure_path):
+                raw_slot = _read_text(slot_dir / _SLOT_ATTR)
+                try:
+                    ses_slot = int(raw_slot) if raw_slot is not None else int(slot_dir.name)
+                except ValueError:
+                    log.warning("slot %s has unparseable slot attribute %r", slot_dir, raw_slot)
+                    continue
 
-            states.append(
-                SlotState(
-                    ses_slot=ses_slot,
-                    display_bay=ses_slot + 1,
-                    status=_read_text(slot_dir / "status") or "unknown",
-                    power_status=_read_text(slot_dir / "power_status"),
-                    locate=_read_bool(slot_dir / "locate"),
-                    fault=_read_bool(slot_dir / "fault"),
-                    active=_read_bool(slot_dir / "active")
-                    if (slot_dir / "active").exists()
-                    else None,
-                    block_device=self._block_device(slot_dir),
-                    sysfs_path=str(slot_dir),
+                states.append(
+                    SlotState(
+                        ses_slot=ses_slot,
+                        display_bay=ses_slot + 1,
+                        status=_read_text(slot_dir / "status") or "unknown",
+                        power_status=_read_text(slot_dir / "power_status"),
+                        locate=_read_bool(slot_dir / "locate"),
+                        fault=_read_bool(slot_dir / "fault"),
+                        active=_read_bool(slot_dir / "active")
+                        if (slot_dir / "active").exists()
+                        else None,
+                        block_device=self._block_device(slot_dir),
+                        sysfs_path=str(slot_dir),
+                    )
                 )
-            )
 
         states.sort(key=lambda s: s.ses_slot)
         return states
@@ -234,7 +244,8 @@ class SysfsEnclosureBackend:
     # ------------------------------------------------------------------
 
     def read_locate(self, ref: EnclosureRef, ses_slot: int) -> bool:
-        return _read_bool(self.slot_dir(ref, ses_slot) / "locate")
+        with enclosure_access(self.lock_path):
+            return _read_bool(self.slot_dir(ref, ses_slot) / "locate")
 
     def _read_locate_at(self, path: Path) -> bool:
         """Indirection point so tests can simulate a slow-settling attribute."""
@@ -262,16 +273,21 @@ class SysfsEnclosureBackend:
         settled within ``settle_timeout`` - which the caller then reports as a
         genuine verification failure.
         """
-        target = self.slot_dir(ref, ses_slot) / "locate"
-        payload = "1" if on else "0"
-        with target.open("w") as handle:
-            handle.write(payload)
+        # The write and its settle poll are one atomic operation: a concurrent
+        # sg_ses read landing between them is exactly the collision that makes
+        # the shelf abort a command, and it would also let a reader observe a
+        # half-applied state.
+        with enclosure_access(self.lock_path):
+            target = self.slot_dir(ref, ses_slot) / "locate"
+            payload = "1" if on else "0"
+            with target.open("w") as handle:
+                handle.write(payload)
 
-        deadline = time.monotonic() + settle_timeout
-        observed = self._read_locate_at(target)
-        while observed is not on and time.monotonic() < deadline:
-            time.sleep(poll_interval)
+            deadline = time.monotonic() + settle_timeout
             observed = self._read_locate_at(target)
+            while observed is not on and time.monotonic() < deadline:
+                time.sleep(poll_interval)
+                observed = self._read_locate_at(target)
 
         if observed is not on:
             log.warning(

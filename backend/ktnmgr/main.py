@@ -37,20 +37,23 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
 
-    backend = SysfsEnclosureBackend(sysfs_root=settings.sysfs_root, dev_root=settings.dev_root)
+    lock_path = settings.enclosure_lock_path
+    backend = SysfsEnclosureBackend(
+        sysfs_root=settings.sysfs_root, dev_root=settings.dev_root, lock_path=lock_path
+    )
     disks = DiskInfoReader(sysfs_root=settings.sysfs_root)
     # When a helper socket is configured the web process reads SES pages
     # through it, so it needs no access to /dev/sg* at all.
     ses = (
         HelperSesRunner(settings.ident_helper_socket)
         if settings.ident_helper_socket
-        else SesRunner(binary=settings.sg_ses_binary)
+        else SesRunner(binary=settings.sg_ses_binary, lock_path=lock_path)
     )
     audit = AuditLog(settings.audit_path)
     writer = build_locate_writer(
         backend,
         settings.ident_helper_socket,
-        ses=SesRunner(binary=settings.sg_ses_binary),
+        ses=SesRunner(binary=settings.sg_ses_binary, lock_path=lock_path),
         method=settings.ident_method,
     )
     ident = IdentManager(writer=writer, audit=audit, state_path=settings.ident_state_path)
