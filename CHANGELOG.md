@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.10] — 2026-08-14
+
+### Fixed
+- **Every process in the container now resolves the same enclosure lock.**
+  The path was only exported by the entrypoint, so anything started later -
+  a `docker exec` diagnostic, a future sidecar - fell back to the data
+  directory instead, failed to create it there, and carried on believing it
+  had synchronised. It is now set as an image `ENV` and its directory is
+  created unconditionally, so the value is the same however a process is
+  started. Found by a diagnostic script that logged the warning written for
+  exactly this case.
+
 ## [1.2.9] — 2026-08-14
 
 ### Security

@@ -13,6 +13,13 @@ HOST="${KTN_HOST:-0.0.0.0}"
 
 mkdir -p "$DATA_DIR"
 
+# The enclosure lock lives here, not in the data dataset - see access.py. The
+# directory is created unconditionally so the path is valid even when no
+# privileged helper is configured and nothing else creates /run/ktn.
+KTN_ENCLOSURE_LOCK="${KTN_ENCLOSURE_LOCK:-/run/ktn/enclosure.lock}"
+export KTN_ENCLOSURE_LOCK
+mkdir -p "$(dirname "$KTN_ENCLOSURE_LOCK")"
+
 # Best-effort: succeeds only if the deployment granted CAP_CHOWN, which the
 # hardened compose file deliberately does not.
 chown -R ktn:ktn "$DATA_DIR" 2>/dev/null || true
@@ -33,16 +40,6 @@ if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
     SOCK_DIR="$(dirname "$KTN_IDENT_HELPER_SOCKET")"
     mkdir -p "$SOCK_DIR"
 
-    # Put the enclosure lock on the same private tmpfs as the socket rather
-    # than in the user's data dataset.
-    #
-    # It has to be mode 0666: the helper (root) and the web process (uid 1000)
-    # both open it, either may create it first, and the container drops
-    # CAP_DAC_OVERRIDE - so root is subject to the mode just like uid 1000 and
-    # a tighter file locks one of them out. A world-writable file is fine on a
-    # tmpfs nobody else can see; in /data it would also land in backups.
-    KTN_ENCLOSURE_LOCK="${KTN_ENCLOSURE_LOCK:-$SOCK_DIR/enclosure.lock}"
-    export KTN_ENCLOSURE_LOCK
     echo "starting privileged IDENT helper on ${KTN_IDENT_HELPER_SOCKET}"
     python /app/helper/ktn_ident_helper.py \
         --socket "$KTN_IDENT_HELPER_SOCKET" \

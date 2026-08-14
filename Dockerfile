@@ -50,10 +50,15 @@ COPY --from=frontend /build/dist /app/frontend/dist
 
 RUN chmod +x /app/docker-entrypoint.sh
 
+# Set in the image, not only exported by the entrypoint, so every process in
+# the container agrees on it - including one started later with `docker exec`.
+# A process that resolves a different lock path does not merely fail to
+# synchronise, it silently believes it has.
 ENV PYTHONPATH=/app/backend \
     PYTHONUNBUFFERED=1 \
     KTN_DATA_DIR=/data \
-    KTN_PORT=8420
+    KTN_PORT=8420 \
+    KTN_ENCLOSURE_LOCK=/run/ktn/enclosure.lock
 
 EXPOSE 8420
 VOLUME ["/data"]
