@@ -34,10 +34,13 @@ jobs:
 
       - name: Audit dependencies
         # --skip-editable: the project itself is installed editable for tests
-        # and is not on PyPI, which pip-audit otherwise treats as a hard error.
+        # and is not on PyPI. --strict is deliberately NOT used: it promotes any
+        # skipped distribution to a hard error, which would fail on our own
+        # package forever. pip-audit still exits non-zero when it finds an
+        # actual vulnerability, which is the behaviour we want.
         run: |
           pip install pip-audit
-          pip-audit --strict --desc --skip-editable
+          pip-audit --desc --skip-editable
 
   frontend:
     runs-on: ubuntu-latest
