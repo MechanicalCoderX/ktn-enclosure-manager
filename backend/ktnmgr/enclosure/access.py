@@ -94,12 +94,14 @@ def enclosure_access(
     path = Path(lock_path) if lock_path is not None else default_lock_path()
     fd: int | None = None
     try:
-        # 0o666 so the root helper and uid 1000 can both open it regardless of
-        # which one created it first. umask may trim this; chmod fixes it up
-        # when we are the creator and are allowed to.
-        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666)
+        # 0600, not 0666. Both processes still reach it: the helper runs as
+        # root and bypasses the mode check, and the web process owns the file
+        # because the entrypoint creates it as uid 1000 before the helper
+        # starts. A world-writable file in the user's data dataset is not
+        # something to ship for the sake of a lock.
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
         try:
-            os.fchmod(fd, 0o666)
+            os.fchmod(fd, 0o600)
         except OSError:
             pass  # not the owner; whoever created it already set the mode
     except OSError as exc:

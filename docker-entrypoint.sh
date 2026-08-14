@@ -29,6 +29,17 @@ if ! su -s /bin/sh -c "test -w '$DATA_DIR'" ktn 2>/dev/null; then
     exit 1
 fi
 
+# Create the enclosure lock as the app user, before the root helper can.
+#
+# Both processes must be able to open it read-write: the helper runs sg_ses,
+# the web process reads the sysfs slot tree, and they must not do so at the
+# same time. Root bypasses the mode check, so the file only has to be openable
+# by uid 1000 - which means uid 1000 has to own it. If the helper created it
+# first it would be root-owned 0600 and the web process would silently fall
+# back to unsynchronised access.
+su -s /bin/sh -c "umask 077; : >> '$DATA_DIR/enclosure.lock'" ktn 2>/dev/null \
+    || echo "warning: could not pre-create $DATA_DIR/enclosure.lock" >&2
+
 if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
     SOCK_DIR="$(dirname "$KTN_IDENT_HELPER_SOCKET")"
     mkdir -p "$SOCK_DIR"

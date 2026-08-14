@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.6] — 2026-08-14
+
+### Changed
+- **The enclosure lock file is no longer world-writable.** It was created
+  `0666` so the root helper and the web process could both open it whichever
+  started first. That put a world-writable file in the user's data dataset for
+  the sake of a lock. The entrypoint now pre-creates it as uid 1000 with mode
+  `0600` before the helper starts: the web process owns it, and root bypasses
+  the mode check anyway.
+- **The version is asserted to be consistent across all seven files that state
+  it.** Keeping `__init__.py`, `pyproject.toml`, `package.json`, both compose
+  files and the catalog-app package in step by hand is exactly the kind of
+  thing that rots quietly — the catalog-app package sat four releases behind
+  before this pass caught it, and a compose file pinning an old tag would ship
+  users a stale container while the release notes described a fix they were not
+  getting. A test now fails the build instead, and it also requires a CHANGELOG
+  entry for the current version.
+
 ## [1.2.5] — 2026-08-14
 
 ### Security
