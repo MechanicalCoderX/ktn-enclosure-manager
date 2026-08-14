@@ -28,59 +28,77 @@ genuinely contentious requirement.
 If it is rejected, nothing is lost — **Install via YAML works today** and is
 documented in [`../../docs/INSTALL-TRUENAS.md`](../../docs/INSTALL-TRUENAS.md).
 
-## Before opening a PR
+## Status: rendered and validated against library 2.3.11
 
-1. **Replace the remaining placeholders** in `app.yaml`:
-   `REPLACE@example.com` (maintainer contact) and
-   `REPLACE_WITH_HASH_FROM_TRUENAS_APPS_AT_SUBMISSION_TIME` (library hash).
+This package has been rendered against the real catalog library, so the
+placeholders are filled in and the template API mismatches this file used to
+warn about are fixed.
 
-2. **Publish the image first.** `ix_values.yaml` points at
-   `ghcr.io/mechanicalcoderx/ktn-enclosure-manager`. It must be public and pullable
-   anonymously, or nothing can install.
+| Item | Value |
+|---|---|
+| `lib_version` | `2.3.11` (current at time of writing) |
+| `lib_version_hash` | from `library/hashes.yaml` in truenas/apps |
+| Render result | valid YAML, one service, portal and notes emitted |
 
-3. **Add an icon.** `docs/images/icon.png`, square, at least 256×256.
+### How to re-validate after changing anything
 
-4. **Vendor the current base library.** Copy
-   `ix-dev/community/<any-app>/templates/library/base_vX_Y_Z/` from a fresh
-   checkout of truenas/apps into `templates/library/`, then set `lib_version`
-   and `lib_version_hash` in `app.yaml` to match. Their CI verifies the hash.
+Their CI script pulls a container image and runs the render inside it:
 
-5. **Validate the template against that library version.**
-   `templates/docker-compose.yaml` here is written in their idiom but has *not*
-   been rendered against a pinned library, because vendoring it into this repo
-   would mean shipping thousands of lines of someone else's code. Expect to fix
-   API details — particularly the `add_tmpfs` and `devices.add_device`
-   signatures, which vary between library versions.
+```bash
+./.github/scripts/ci.py --app ktn-enclosure-manager --train community \
+    --test-file basic-values.yaml --render-only=true
+```
 
-   From a truenas/apps checkout:
+**Do not run that on a TrueNAS box.** The library decides how to reach
+middleware with `is_truenas_system()`, which is literally
+`"truenas" in os.uname().release`. On the appliance that is true, so it tries
+to open the middleware unix socket - which is not mounted into the validation
+container - and every render fails with `FileNotFoundError` that has nothing to
+do with your app. Their GitHub runners are Ubuntu, where the check is false and
+a mock client is used. Run it on any non-TrueNAS Linux host.
 
-   ```bash
-   cp -r /path/to/this/truenas/catalog-app ix-dev/community/ktn-enclosure-manager
-   make render app=ktn-enclosure-manager train=community
-   ```
+### Fixes that were needed, for reference
 
-6. **Add test values.** Their CI renders `templates/test_values/*.yaml`. At
-   minimum add `basic-values.yaml`, plus one exercising a Host Path data volume
-   rather than an ixVolume.
+The template was written in the right idiom but against a guessed API. Against
+2.3.11 the real ones are:
 
-7. **Run their checks** (`make test`, cspell, etc.) before opening the PR.
+| Used | Correct |
+|---|---|
+| `c.remove_all_caps()` | `c.clear_caps()` |
+| `c.security_opt.add_no_new_privileges()` | not needed - the library sets it for every container |
+| `c.add_tmpfs(path, {...})` | `c.add_storage(path, {"type": "tmpfs", "tmpfs_config": {...}})` |
+| `c.ports.add_port(host, container, {...})` | `c.add_port(values.network.web_port, {"container_port": ...})` |
+| `tpl.portals.add_portal({...})` | `tpl.portals.add(values.network.web_port, {"name": "Web UI"})` |
+| `c.resources.set_profile(values.resources)` | omit - resources are applied from `values.resources` |
 
-## Opening the PR
+`ix_values.yaml` was also missing `consts.app_name`, which the template
+references on its first line.
 
-Fork truenas/apps, add the app under `ix-dev/community/ktn-enclosure-manager/`,
-and open the PR. Lead with what a reviewer needs in order to decide:
+### One real constraint worth knowing
 
-- what the app does and why TrueNAS cannot already do it
-  (`truenas.is_ix_hardware` is False on community hardware, so `enclosure2`
-  returns nothing and *View Enclosure* shows "Enclosure Unavailable");
-- the exact privileges required and why each is the minimum — link
-  [`../../SECURITY.md`](../../SECURITY.md), which documents that
-  `CAP_SYS_RAWIO` was tested and deliberately **not** taken, and that
-  `--privileged` is never used;
-- that the only write the app can perform is the IDENT LED, enforced by an
-  allow-list with no mutating `sg_ses` option reachable, and covered by tests.
+**The catalog library cannot express a setgid tmpfs.** Its mode validator is
+`^0[0-7]{3}$`, so `2770` is rejected outright. This app needs the setgid bit on
+`/run/ktn` so the helper's socket inherits gid 1000 - the web process runs as
+uid 1000 and cannot open a `root:root` socket, and chgrp'ing it would need
+`CAP_CHOWN`, which the container deliberately drops.
 
-## If it is rejected
+The entrypoint therefore applies `chmod 2770` to the socket directory itself at
+startup. That is why an app installed from the catalog still gets a working
+IDENT path, and it makes the plain compose deployment independent of the
+`mode=` tmpfs option too.
 
-Keep shipping via Install via YAML, which works today and needs no approval
-from anyone.
+## Still to do before opening the PR
+
+1. **Confirm the image tag in `ix_values.yaml`** matches the release you want
+   published, and that it is publicly pullable.
+
+2. **Re-render if you bump `lib_version`.** Their CI recomputes
+   `lib_version_hash` and rewrites `templates/library/`, so a stale hash fails.
+
+3. **Expect review discussion about the device.** `/dev/sg*` at `rw` is the one
+   unusual ask. It addresses the enclosure processor, not disk data, and `:r`
+   genuinely does not work because `SG_IO` counts as a write - that is worth
+   saying in the PR description rather than leaving them to wonder.
+
+If it is rejected, nothing is lost - **Install via YAML works today** and is
+documented in [`../../docs/INSTALL-TRUENAS.md`](../../docs/INSTALL-TRUENAS.md).

@@ -4,6 +4,34 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] — 2026-08-14
+
+### Fixed
+- **The catalog-app package could not have rendered.** It was written in the
+  right idiom but against a guessed library API, and had never been run. Fixed
+  against the real library (2.3.11) by rendering it: `remove_all_caps` is
+  `clear_caps`, `add_tmpfs` is `add_storage` with a `tmpfs_config`, `add_port`
+  and `portals.add` take different arguments, `resources.set_profile` should
+  not be called at all, and `ix_values.yaml` was missing `consts.app_name`,
+  which the template references on its very first line. It now renders to valid
+  YAML with the portal and notes intact.
+- **The setgid bit on the helper socket directory is applied by the
+  entrypoint.** The TrueNAS catalog library validates tmpfs modes against
+  `^0[0-7]{3}$` and so cannot express `2770` at all - an app installed from the
+  catalog would have arrived without it, the helper socket would have been
+  `root:root`, and IDENT would have failed with a permission error for the
+  uid-1000 web process. Doing it in the entrypoint also makes the plain compose
+  deployment independent of the `mode=` tmpfs option.
+
+### Changed
+- The catalog package carries a `basic-values.yaml`, the current library
+  version and hash, and a real maintainer contact. `SUBMITTING.md` records the
+  API corrections, and warns not to run their CI script on a TrueNAS box: the
+  library's `is_truenas_system()` is `"truenas" in os.uname().release`, so on
+  the appliance every render fails trying to reach a middleware socket that is
+  not mounted into the validation container - an error with nothing to do with
+  the app being tested.
+
 ## [1.3.0] — 2026-08-14
 
 ### Added

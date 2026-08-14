@@ -1,9 +1,12 @@
 images:
   image:
     repository: ghcr.io/mechanicalcoderx/ktn-enclosure-manager
-    tag: 1.3.0
+    tag: 1.3.1
 
 consts:
+  # Referenced by the template as values.consts.app_name; without it the
+  # render fails with "'dict object' has no attribute 'app_name'".
+  app_name: ktn-enclosure-manager
   app_user_id: 1000
   app_group_id: 1000
   internal_port: 8420

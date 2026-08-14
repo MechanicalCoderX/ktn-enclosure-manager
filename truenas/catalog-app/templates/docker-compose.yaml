@@ -13,9 +13,9 @@
 {% do c.healthcheck.set_test("curl", {"port": values.consts.internal_port, "path": "/healthz"}) %}
 
 {# ------------------------------------------------------------- privileges #}
-{% do c.remove_all_caps() %}
+{% do c.clear_caps() %}
 {% do c.add_caps(["SETUID", "SETGID"]) %}
-{% do c.security_opt.add_no_new_privileges() %}
+{# no-new-privileges is set by the library for every container. #}
 
 {# ------------------------------------------------------------------ device #}
 {#
@@ -27,7 +27,13 @@
 
 {# ------------------------------------------------------------------- mounts #}
 {% do c.add_storage("/data", values.storage.data) %}
-{% do c.add_tmpfs("/run/ktn", {"mode": "2770", "uid": 0, "gid": values.consts.app_group_id}) %}
+{#
+  Plain 0770 here: the catalog library validates the mode against
+  ^0[0-7]{3}$, so a setgid mode cannot be expressed. The entrypoint applies
+  the setgid bit itself at startup, which is more robust anyway - it no longer
+  depends on the deployment getting the mode right.
+#}
+{% do c.add_storage("/run/ktn", {"type": "tmpfs", "tmpfs_config": {"mode": "0770", "uid": 0, "gid": values.consts.app_group_id}}) %}
 
 {# -------------------------------------------------------------- environment #}
 {% do c.environment.add_env("KTN_DATA_DIR", "/data") %}
@@ -46,12 +52,12 @@
 
 {# ------------------------------------------------------------------- ports #}
 {% if values.network.web_port.bind_mode %}
-{% do c.ports.add_port(values.network.web_port.port_number, values.consts.internal_port, {"bind_mode": values.network.web_port.bind_mode, "host_ips": values.network.web_port.host_ips}) %}
+{% do c.add_port(values.network.web_port, {"container_port": values.consts.internal_port}) %}
 {% endif %}
 
-{% do c.resources.set_profile(values.resources) %}
+{# Resources come from values.resources; the library applies them. #}
 
-{% do tpl.portals.add_portal({"port": values.network.web_port.port_number, "scheme": "http", "name": "Web UI"}) %}
+{% do tpl.portals.add(values.network.web_port, {"name": "Web UI"}) %}
 
 {% do tpl.notes.add_warning(
   "First run has no account and no default password. Open the Web UI and create
