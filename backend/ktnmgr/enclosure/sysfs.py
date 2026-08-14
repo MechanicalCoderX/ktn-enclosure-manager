@@ -78,8 +78,10 @@ class SysfsEnclosureBackend:
         self.sysfs_root = Path(sysfs_root)
         self.dev_root = Path(dev_root)
         # Reading a slot attribute is not a passive file read: it makes the
-        # kernel ses driver issue a diagnostic to the shelf, which collides
-        # with sg_ses. See enclosure/access.py.
+        # kernel ses driver issue a diagnostic to the shelf. That is why these
+        # reads take the same lock an IDENT write does - so a sweep cannot
+        # sample a bay between a write and its settle read-back. See
+        # enclosure/access.py.
         self.lock_path = lock_path
 
     # ------------------------------------------------------------------
@@ -278,10 +280,10 @@ class SysfsEnclosureBackend:
         settled within ``settle_timeout`` - which the caller then reports as a
         genuine verification failure.
         """
-        # The write and its settle poll are one atomic operation: a concurrent
-        # sg_ses read landing between them is exactly the collision that makes
-        # the shelf abort a command, and it would also let a reader observe a
-        # half-applied state.
+        # The write and its settle poll are one atomic operation. The
+        # attribute does not update until the enclosure processor answers, so
+        # without the lock a concurrent slot sweep can read the bay mid-flight
+        # and cache a half-applied locate state for the UI to render.
         with enclosure_access(self.lock_path):
             target = self.slot_dir(ref, ses_slot) / "locate"
             payload = "1" if on else "0"

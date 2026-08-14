@@ -1,7 +1,7 @@
 images:
   image:
     repository: ghcr.io/mechanicalcoderx/ktn-enclosure-manager
-    tag: 1.2.7
+    tag: 1.2.8
 
 consts:
   app_user_id: 1000

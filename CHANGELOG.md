@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.8] — 2026-08-14
+
+### Changed
+- Documentation accuracy pass. Three comments still explained the enclosure
+  lock as preventing the SCSI abort messages - the theory 1.2.2 disproved.
+  The lock exists for IDENT write atomicity; `--no-time` is what stopped the
+  aborts. `.env.example` also still described the old data-directory default.
+  No behaviour change.
+
 ## [1.2.7] — 2026-08-14
 
 ### Fixed
