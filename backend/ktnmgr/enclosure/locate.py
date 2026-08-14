@@ -19,10 +19,12 @@ parameter through which a path, a command, or an sg_ses argument could travel.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from ktnmgr.enclosure.access import enclosure_access
 from ktnmgr.enclosure.helper_client import HelperUnavailableError, send
 from ktnmgr.enclosure.ses import SesError, SesRunner
 from ktnmgr.enclosure.ses_parser import array_slot_type_index, parse_configuration
@@ -38,8 +40,6 @@ VALID_OPS = ("identify_on", "identify_off", "identify_read")
 
 #: An enclosure logical id as exposed by /sys/class/enclosure/<x>/id.
 #: Anchored and hex-only so no traversal or shell metacharacter can survive.
-import re  # noqa: E402
-
 ENCLOSURE_ID_RE = re.compile(r"^0x[0-9a-f]{4,32}$")
 MAX_SLOT = 1023
 
@@ -145,17 +145,23 @@ class SesLocateWriter:
         ref = self.backend.resolve(enclosure_id)
         type_index = self._array_type_index(ref)
 
-        try:
-            self.ses.set_ident(ref.sg_device, type_index, slot, on)
-        except SesError as exc:
-            raise LocateError(f"IDENT command failed: {exc}") from exc
+        # Held across the command AND its settle poll, exactly as the sysfs
+        # writer does. This is the default IDENT path, so without it the
+        # write-atomicity guarantee applied only to the path almost nobody
+        # uses: a concurrent slot sweep could sample the bay mid-flight and
+        # cache a half-applied locate state for the UI to render.
+        with enclosure_access(self.backend.lock_path):
+            try:
+                self.ses.set_ident(ref.sg_device, type_index, slot, on)
+            except SesError as exc:
+                raise LocateError(f"IDENT command failed: {exc}") from exc
 
-        target = self.backend.slot_dir(ref, slot) / "locate"
-        deadline = time.monotonic() + DEFAULT_SETTLE_TIMEOUT
-        observed = self.backend._read_locate_at(target)
-        while observed is not on and time.monotonic() < deadline:
-            time.sleep(DEFAULT_SETTLE_POLL)
-            observed = self.backend._read_locate_at(target)
+            target = self.backend.slot_dir(ref, slot) / "locate"
+            deadline = time.monotonic() + DEFAULT_SETTLE_TIMEOUT
+            observed = self.backend.read_locate_at(target)
+            while observed is not on and time.monotonic() < deadline:
+                time.sleep(DEFAULT_SETTLE_POLL)
+                observed = self.backend.read_locate_at(target)
         return observed
 
 

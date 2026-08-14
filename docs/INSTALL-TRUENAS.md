@@ -36,7 +36,6 @@ lines marked `### EDIT ###`:
 
 | Edit | What |
 |---|---|
-| `YOUR-TRUENAS-ADDRESS` in `x-portals` | your TrueNAS IP or hostname, for the **Web UI** button |
 | `/mnt/YOURPOOL/...` | the dataset from step 1 |
 | `/dev/sg16` | your SES device from step 2 |
 | `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | optional, for pool/vdev/SMART data |
@@ -52,11 +51,13 @@ you create the administrator in the browser.
 > nothing in the Install-via-YAML dialog mentions it. If you change the port,
 > change it in `x-portals` too.
 >
-> **You must put your real address in `host:`.** TrueNAS builds the link by
-> string concatenation and does not substitute the node address, so a `host:`
-> of `0.0.0.0` produces a button that opens `http://0.0.0.0:8420/` and fails in
-> every browser. (A catalog app does not need this — the ix template library
-> fills the host in for you. Only the paste-in path is literal.)
+> **Leave `host: 0.0.0.0` alone.** It looks like a placeholder and is not one.
+> The stored portal really is `http://0.0.0.0:8420/` — `midclt call app.query`
+> shows it that way — but the WebUI rewrites it on click: `openPortalLink()`
+> replaces a `0.0.0.0` hostname with `window.location.hostname`, bracketing it
+> if it is IPv6. The button therefore follows whatever address you browsed to,
+> including a hostname or a VPN address, which a hardcoded value cannot do.
+> Catalog apps show the same `0.0.0.0` in the API for the same reason.
 >
 > The portal is recorded when the app is **installed**. Adding or correcting
 > `x-portals` on an app that already exists does not backfill it: `app.update`

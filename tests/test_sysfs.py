@@ -156,11 +156,11 @@ class _SlowSettlingBackend(SysfsEnclosureBackend):
         self._remaining = self.stale_reads
         return super().set_locate(ref, ses_slot, on, **kwargs)
 
-    def _read_locate_at(self, path: Path) -> bool:
+    def read_locate_at(self, path: Path) -> bool:
         if self._remaining > 0:
             self._remaining -= 1
-            return not super()._read_locate_at(path)  # stale: the previous value
-        return super()._read_locate_at(path)
+            return not super().read_locate_at(path)  # stale: the previous value
+        return super().read_locate_at(path)
 
 
 def test_locate_readback_polls_until_the_value_settles(tmp_path: Path) -> None:

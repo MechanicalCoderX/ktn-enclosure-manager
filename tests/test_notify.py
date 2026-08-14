@@ -24,6 +24,13 @@ def make_bay(slot: int, health: SlotHealth, **kwargs: Any) -> Bay:
     )
 
 
+class FakeResponse:
+    """Minimal stand-in. Delivery is judged by status code, so it needs one."""
+
+    def __init__(self, status_code: int = 200) -> None:
+        self.status_code = status_code
+
+
 @pytest.fixture
 def captured(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     sent: list[dict[str, Any]] = []
@@ -32,8 +39,9 @@ def captured(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         def __init__(self, **kwargs: Any) -> None: ...
         async def __aenter__(self) -> Self: return self
         async def __aexit__(self, *exc: object) -> None: ...
-        async def post(self, url: str, **kwargs: Any) -> None:
+        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
             sent.append({"url": url, **kwargs})
+            return FakeResponse(200)
 
     monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", FakeClient)
     return sent
@@ -137,3 +145,61 @@ async def test_message_is_actionable(captured: list, tmp_path: Path) -> None:
     assert "Bay 8" in body and "SES slot 7" in body
     assert "K1A00008" in body
     assert "tank/raidz3-0" in body
+
+
+async def test_a_rejected_post_is_not_reported_as_delivered(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A mistyped ntfy topic answers 404. Logging "notified" in that case is
+    the worst failure mode an alerting path can have: it looks healthy."""
+
+    class RejectingClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, *a: Any, **k: Any) -> FakeResponse:
+            return FakeResponse(404)
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", RejectingClient)
+    notifier = HealthNotifier("http://ntfy/wrong-topic", state_path=tmp_path / "n.json")
+
+    with caplog.at_level("INFO", logger="ktnmgr.services.notify"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any(m.startswith("notified:") for m in messages), messages
+    assert any("rejected" in m and "404" in m for m in messages), messages
+
+
+async def test_many_simultaneous_changes_are_sent_concurrently(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Losing TrueNAS changes every bay at once. Serial delivery against a slow
+    endpoint stalled the poll loop for bays x timeout."""
+    import asyncio
+
+    concurrent = 0
+    peak = 0
+
+    class SlowClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, *a: Any, **k: Any) -> FakeResponse:
+            nonlocal concurrent, peak
+            concurrent += 1
+            peak = max(peak, concurrent)
+            await asyncio.sleep(0.05)
+            concurrent -= 1
+            return FakeResponse(200)
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", SlowClient)
+    notifier = HealthNotifier("http://ntfy/topic", state_path=tmp_path / "n.json")
+
+    bays = [make_bay(i, SlotHealth.FAILED) for i in range(15)]
+    started = asyncio.get_running_loop().time()
+    await notifier.evaluate(bays)
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert peak > 1, "notifications were delivered one at a time"
+    assert elapsed < 15 * 0.05, f"delivery was serialised ({elapsed:.2f}s)"

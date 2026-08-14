@@ -72,8 +72,19 @@ class Cached(Generic[T]):
         self._monotonic = time.monotonic()
 
 
-def classify(status: str, fault: bool, has_device: bool, zfs: ZfsInfo) -> SlotHealth:
-    """Derive a bay's health. Text and icons carry this in the UI, not colour (§24)."""
+def classify(
+    status: str,
+    fault: bool,
+    has_device: bool,
+    zfs: ZfsInfo,
+    smart: SmartInfo | None = None,
+) -> SlotHealth:
+    """Derive a bay's health. Text and icons carry this in the UI, not colour (§24).
+
+    A TrueNAS temperature alert is a warning, not a failure: the disk is still
+    serving data, but it is the one to look at. It ranks below any ZFS fault so
+    a hot *and* faulted disk still reads as failed.
+    """
     normalised = (status or "").strip().lower()
     if not has_device:
         return SlotHealth.EMPTY
@@ -84,6 +95,8 @@ def classify(status: str, fault: bool, has_device: bool, zfs: ZfsInfo) -> SlotHe
     if zfs.state is ZfsState.DEGRADED or zfs.resilvering:
         return SlotHealth.WARNING
     if any((zfs.read_errors, zfs.write_errors, zfs.checksum_errors)):
+        return SlotHealth.WARNING
+    if smart is not None and smart.over_temperature:
         return SlotHealth.WARNING
     if normalised in ("noncritical", "non-critical", "warning"):
         return SlotHealth.WARNING
@@ -157,7 +170,19 @@ class StateService:
             return
         try:
             temperatures = await self.truenas.temperatures()
-            self.smart.succeed(build_smart_index(temperatures))
+            # Ask only about disks actually in a bay. The appliance requires an
+            # explicit name list, and there is no reason to ask about the boot
+            # device or anything outside the shelf.
+            names = sorted(
+                {
+                    slot.block_device
+                    for slots in self.slots.value.values()
+                    for slot in slots
+                    if slot.block_device
+                }
+            )
+            alerts = await self.truenas.temperature_alerts(names)
+            self.smart.succeed(build_smart_index(temperatures, alerts=alerts))
         except (TrueNASError, OSError) as exc:
             self.smart.fail(str(exc))
 
@@ -317,7 +342,7 @@ class StateService:
                     ses_slot=slot.ses_slot,
                     enclosure_id=ref.logical_id,
                     device=f"/dev/{device}" if device else None,
-                    health=classify(slot.status, slot.fault, bool(device), zfs),
+                    health=classify(slot.status, slot.fault, bool(device), zfs, smart),
                     status=slot.status,
                     power_status=slot.power_status,
                     locate=slot.locate,

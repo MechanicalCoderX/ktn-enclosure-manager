@@ -169,11 +169,29 @@ class TrueNASClient:
     async def _ws_request(
         self, socket: Any, request_id: int, method: str, params: list[Any]
     ) -> Any:
-        await socket.send(
-            json.dumps({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
+        """Send one request and wait for the reply with that id.
+
+        The whole exchange is time-boxed. ``recv()`` has no timeout of its own,
+        so a connection that is open but never answers - a half-open socket
+        after a network partition, or an appliance mid-restart - would block
+        here forever. That call holds the client lock, so it would stall every
+        TrueNAS poll for the life of the process and leave the UI showing
+        indefinitely stale pool data with no error to explain it.
+        """
+        deadline = time.monotonic() + self.timeout
+        await asyncio.wait_for(
+            socket.send(
+                json.dumps(
+                    {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+                )
+            ),
+            timeout=self.timeout,
         )
         while True:
-            raw = await socket.recv()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"{method} did not answer within {self.timeout}s")
+            raw = await asyncio.wait_for(socket.recv(), timeout=remaining)
             message = json.loads(raw)
             if message.get("id") != request_id:
                 continue  # collected notification/event; not our reply
@@ -256,15 +274,31 @@ class TrueNASClient:
         result = await self.call("pool.query")
         return result if isinstance(result, list) else []
 
-    async def temperature_alerts(self) -> list[dict[str, Any]]:
+    async def temperature_alerts(self, names: list[str]) -> list[dict[str, Any]]:
         """Disks TrueNAS has raised a temperature alert for.
+
+        ``names`` is required by the appliance - calling this with no argument
+        returns ``[EINVAL] names: Field required``, so the previous no-argument
+        wrapper could never have succeeded. It went unnoticed because nothing
+        called it.
+
+        Each entry is an ``alert.list`` record of class ``DiskTemperatureTooHot``
+        whose ``args.device`` is ``/dev/<name>``.
 
         This is the only disk-health signal the 25.10 API exposes beyond raw
         temperature; there is no endpoint for SMART overall status or power-on
-        hours. See SmartInfo in models.py for why this app does not shell out
-        to smartctl instead.
+        hours. See SmartInfo in models.py.
         """
-        result = await self.call("disk.temperature_alerts")
+        if not names:
+            return []
+        try:
+            result = await self.call("disk.temperature_alerts", [list(names)])
+        except TrueNASError as exc:
+            # No REST equivalent exists, so this is expected while the client
+            # is in its WebSocket cooldown. Temperature alerting is
+            # supplementary - losing it must not take the SMART poll down.
+            log.debug("temperature alerts unavailable: %s", exc)
+            return []
         return result if isinstance(result, list) else []
 
     async def temperatures(self) -> dict[str, float | None]:

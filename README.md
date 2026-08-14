@@ -48,7 +48,7 @@ Nothing is installed on the host. `sg3-utils` ships inside the image.
 
 **On TrueNAS SCALE — no shell required.** Apps → Discover Apps → **⋮** →
 **Install via YAML**, paste [`truenas/install-via-yaml.yaml`](truenas/install-via-yaml.yaml),
-edit the five `### EDIT ###` lines, install. Full walkthrough:
+edit the four `### EDIT ###` lines, install. Full walkthrough:
 **[docs/INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md)**.
 
 A prebuilt image is published for every release, so there is nothing to build:
@@ -187,7 +187,7 @@ git pull && docker compose build && docker compose up -d
 tar czf ktn-backup.tgz data/
 
 # uninstall (removes the app; touches nothing on the host)
-docker compose down && docker rmi ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.3
+docker compose down && docker rmi ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.4
 ```
 
 State lives entirely in `/data`. The application creates no host files, no
@@ -197,7 +197,7 @@ systemd units, and no TrueNAS configuration.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e 'backend[dev]'
-PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q      # 229 tests, no hardware needed
+PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q      # 256 tests, no hardware needed
 
 cd frontend && npm install && npm run build
 npx playwright test                                          # E2E against the real backend

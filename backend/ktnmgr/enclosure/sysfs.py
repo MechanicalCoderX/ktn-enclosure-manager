@@ -252,7 +252,7 @@ class SysfsEnclosureBackend:
         with enclosure_access(self.lock_path):
             return _read_bool(self.slot_dir(ref, ses_slot) / "locate")
 
-    def _read_locate_at(self, path: Path) -> bool:
+    def read_locate_at(self, path: Path) -> bool:
         """Indirection point so tests can simulate a slow-settling attribute."""
         return _read_bool(path)
 
@@ -289,10 +289,10 @@ class SysfsEnclosureBackend:
                 handle.write(payload)
 
             deadline = time.monotonic() + settle_timeout
-            observed = self._read_locate_at(target)
+            observed = self.read_locate_at(target)
             while observed is not on and time.monotonic() < deadline:
                 time.sleep(poll_interval)
-                observed = self._read_locate_at(target)
+                observed = self.read_locate_at(target)
 
         if observed is not on:
             log.warning(

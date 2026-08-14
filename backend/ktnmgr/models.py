@@ -100,10 +100,23 @@ class ZfsInfo(BaseModel):
 
 
 class SmartInfo(BaseModel):
-    overall: str | None = None
+    """Disk health as far as the TrueNAS API can actually report it.
+
+    There is deliberately no ``overall`` or ``power_on_hours`` field. Both used
+    to exist and were permanently ``None``: the 25.10 API exposes no SMART
+    overall status and no power-on hours, so nothing could ever fill them, and
+    the UI rendered two blanks that read as missing data rather than as absent
+    capability. Populating them would mean shelling out to smartctl against
+    every disk, which this application deliberately does not do.
+
+    What the API *does* expose is TrueNAS' own temperature alerting, which is a
+    real health signal, so that is carried here instead.
+    """
+
     temperature_c: float | None = None
-    power_on_hours: int | None = None
     available: bool = False
+    over_temperature: bool = False
+    alert: str | None = None
 
 
 class Bay(BaseModel):

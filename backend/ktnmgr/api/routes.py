@@ -271,10 +271,10 @@ def diagnostics(user: CurrentUser, service: Annotated[Any, Depends(get_state)]) 
 def audit(
     user: CurrentUser,
     request: Request,
-    # Bounded: tail() materialises the requested number of entries, so an
-    # unbounded limit lets an authenticated caller ask for the whole log at
-    # once and turn a browser refresh into a memory spike.
-    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    # Bounded, and bounded to the same ceiling AuditLog.tail() clamps to, so
+    # the documented maximum is the real one rather than a number the service
+    # silently reduces.
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[dict]:
     return [e.model_dump(mode="json") for e in request.app.state.audit.tail(limit)]
 

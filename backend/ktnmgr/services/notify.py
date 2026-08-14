@@ -12,6 +12,7 @@ operator has already been told about.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -132,13 +133,13 @@ class HealthNotifier:
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 if self.style == "ntfy":
-                    await client.post(
+                    response = await client.post(
                         self.url,
                         content=body.encode("utf-8"),
                         headers={"Title": title, "Priority": priority, "Tags": tag},
                     )
                 else:
-                    await client.post(
+                    response = await client.post(
                         self.url,
                         json={
                             "title": title,
@@ -159,6 +160,17 @@ class HealthNotifier:
             # A failing notification endpoint must never disturb polling.
             log.warning("could not deliver health notification: %s", exc)
             return
+
+        # A 404 from a mistyped ntfy topic, or a 401 from a webhook that wants
+        # auth, is not delivery. Without this the log said "notified" forever
+        # while nothing ever arrived - the worst possible failure mode for an
+        # alerting path, because it looks healthy.
+        if response.status_code >= 400:
+            log.warning(
+                "health notification rejected: HTTP %s from %s",
+                response.status_code, self.url,
+            )
+            return
         log.info("notified: %s", title)
 
     # ------------------------------------------------------------- evaluate
@@ -170,6 +182,9 @@ class HealthNotifier:
         self._load()
 
         changed = False
+        pending: list[tuple[Bay, str | None]] = []
+        bad_values = {h.value for h in BAD}
+
         for bay in bays:
             key = f"{bay.enclosure_id}:{bay.ses_slot}"
             health = SlotHealth(bay.health)
@@ -184,10 +199,19 @@ class HealthNotifier:
             if health in BAD:
                 # Fires on first observation too: a drive already failed when
                 # the app starts is exactly what an operator needs told.
-                await self._send(bay, previous)
-            elif previous is not None and previous in {h.value for h in BAD}:
-                if self.notify_recovery:
-                    await self._send(bay, previous)
+                pending.append((bay, previous))
+            elif previous is not None and previous in bad_values and self.notify_recovery:
+                pending.append((bay, previous))
+
+        # Sent concurrently, not one after another. Losing the TrueNAS
+        # connection changes every bay at once, and serial delivery against a
+        # dead endpoint meant 15 bays x the 10s timeout - two and a half
+        # minutes of stalled polling caused by the notifier, which is supposed
+        # to be incapable of disturbing it.
+        if pending:
+            await asyncio.gather(
+                *(self._send(bay, previous) for bay, previous in pending)
+            )
 
         if changed:
             self._save()

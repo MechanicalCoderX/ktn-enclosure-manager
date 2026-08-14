@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -91,7 +92,12 @@ class IdentManager:
         try:
             self.state_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.state_path.with_suffix(".tmp")
-            tmp.write_text(state.model_dump_json(), encoding="utf-8")
+            # 0600: the records carry the username that raised each request.
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, state.model_dump_json().encode("utf-8"))
+            finally:
+                os.close(fd)
             tmp.replace(self.state_path)
         except OSError as exc:
             log.error("could not persist ident state: %s", exc)
@@ -143,9 +149,29 @@ class IdentManager:
             previous = await loop.run_in_executor(
                 None, self.writer.read, enclosure_id, ses_slot
             )
-            verified = await loop.run_in_executor(
-                None, self.writer.write, enclosure_id, ses_slot, on
-            )
+            try:
+                verified = await loop.run_in_executor(
+                    None, self.writer.write, enclosure_id, ses_slot, on
+                )
+            except Exception as exc:
+                # An attempt that raised is still an attempted write, and the
+                # audit log claims to record every one. Previously only writes
+                # that returned were recorded, so the cases most worth having
+                # a trail of - the helper refusing, the enclosure gone, a
+                # permission failure - were exactly the ones that left none.
+                self.audit.record(
+                    user=user,
+                    enclosure=enclosure_id,
+                    bay=ses_slot + 1,
+                    ses_slot=ses_slot,
+                    serial=serial,
+                    operation="IDENT_ON" if on else "IDENT_OFF",
+                    previous="1" if previous else "0",
+                    result=None,
+                    verification="error",
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
+                raise
 
             success = verified is on
             self.audit.record(

@@ -237,15 +237,28 @@ export function BayDetail({
                 ? `${bay.smart.temperature_c} °C`
                 : "unavailable"}
             </dd>
+            <dt>Temp alert</dt>
+            <dd>
+              {bay.smart.over_temperature ? (
+                <span className="badge warning">▲ too hot</span>
+              ) : (
+                "none"
+              )}
+            </dd>
           </dl>
+          {bay.smart.alert && (
+            <p className="sub" style={{ marginTop: 8 }}>{bay.smart.alert}</p>
+          )}
           {/* Stated rather than left as a bare "—", which reads as broken.
-              TrueNAS 25.10 exposes disk temperatures but no SMART attribute
-              endpoint, and reading them directly would mean handing this
-              container every disk device. */}
+              TrueNAS 25.10 exposes disk temperatures and its own temperature
+              alerting, but no SMART attribute endpoint; reading attributes
+              directly would mean handing this container every disk device. */}
           <p className="sub" style={{ marginTop: 8 }}>
-            Overall status and power-on hours are not exposed by the TrueNAS
-            API. Reading them directly would require giving this container
-            access to every disk device, which it deliberately does not have.
+            Overall SMART status and power-on hours are not exposed by the
+            TrueNAS API. Reading them directly would require giving this
+            container access to every disk device, which it deliberately does
+            not have. Temperature and TrueNAS' own over-temperature alert are
+            shown above.
           </p>
         </section>
       </div>

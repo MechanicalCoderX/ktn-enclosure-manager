@@ -129,11 +129,15 @@ def _normalise_lunid(lunid: Any) -> str | None:
 def build_smart_index(
     temperatures: dict[str, float | None],
     disks: list[dict[str, Any]] | None = None,
+    alerts: list[dict[str, Any]] | None = None,
 ) -> dict[str, SmartInfo]:
     """Map block device name -> SmartInfo.
 
     ``disk.temperatures`` returns ``None`` for disks it could not read, which
     is normal and must not be rendered as 0 C.
+
+    ``alerts`` are ``disk.temperature_alerts`` records - ``alert.list`` entries
+    of class ``DiskTemperatureTooHot`` whose ``args.device`` is ``/dev/<name>``.
     """
     index: dict[str, SmartInfo] = {}
     for name, temperature in temperatures.items():
@@ -145,6 +149,17 @@ def build_smart_index(
         name = str(record.get("name") or "")
         if name and name not in index:
             index[name] = SmartInfo(available=False)
+
+    for alert in alerts or []:
+        device = str(((alert or {}).get("args") or {}).get("device") or "")
+        name = device.rsplit("/", 1)[-1]
+        if not name:
+            continue
+        entry = index.setdefault(name, SmartInfo())
+        entry.over_temperature = True
+        entry.alert = str(
+            alert.get("formatted") or alert.get("text") or "temperature alert"
+        )[:200]
     return index
 
 

@@ -17,12 +17,15 @@
 x-portals:
   - name: Web UI
     scheme: http
-    # ### EDIT ### your TrueNAS address, e.g. 192.168.1.50 or truenas.local.
+    # Leave this as 0.0.0.0 - it is not a placeholder and needs no editing.
     #
-    # TrueNAS uses this string verbatim to build the link - it does NOT
-    # substitute the node address - so leaving 0.0.0.0 here gives you a button
-    # that opens http://0.0.0.0:8420/ and fails in every browser.
-    host: YOUR-TRUENAS-ADDRESS
+    # The stored URL really is http://0.0.0.0:8420/, and the API returns it
+    # that way, but the WebUI rewrites the host when you click the button:
+    # openPortalLink() replaces a 0.0.0.0 hostname with window.location
+    # .hostname (bracketing it if it is IPv6). So the button follows whatever
+    # address you browsed to - LAN IP, hostname, VPN address - which a
+    # hardcoded value cannot do.
+    host: 0.0.0.0
     port: 8420
     path: /
 
@@ -57,7 +60,7 @@ x-notes: |
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.3
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.4
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 

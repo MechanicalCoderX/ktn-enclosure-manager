@@ -4,6 +4,74 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.4] — 2026-08-14
+
+### Corrected
+- **1.2.3's portal finding was wrong, and its "fix" made things worse.** That
+  release claimed `x-portals` with `host: 0.0.0.0` produced a link that "fails
+  in every browser", and turned the host into a `### EDIT ###` line. It does
+  not fail. The WebUI rewrites it on click — `openPortalLink()` replaces a
+  `0.0.0.0` hostname with `window.location.hostname`, bracketing IPv6 — so
+  `0.0.0.0` follows whatever address you browsed to, including a hostname or a
+  VPN address, which a hardcoded value cannot do. The stored URL really is
+  `http://0.0.0.0:8420/` and the API really does return it that way; only the
+  rendered button matters. `host: 0.0.0.0` is restored as the default and
+  documented as deliberate. Catalog apps show the same thing for the same
+  reason.
+
+### Security
+- **The default IDENT path was not covered by the enclosure lock.** 1.2.1 added
+  a lock so an IDENT write and its settle read-back could not be interleaved
+  with other enclosure traffic — but wrapped only the sysfs writer. The SES
+  writer is the *default*, so in practice the guarantee applied to the path
+  almost nobody uses, and a concurrent slot sweep could sample a bay mid-write
+  and cache a half-applied locate state for the UI.
+- **A failed IDENT attempt left no audit record.** Only writes that returned
+  were audited, so the cases most worth a trail of — the helper refusing, the
+  enclosure gone, a permission failure — were exactly the ones that left none.
+- The audit log and the IDENT state file are created `0600`. They carry
+  usernames and drive serials.
+
+### Fixed
+- **A silent TrueNAS connection could stall all polling permanently.**
+  `recv()` has no timeout of its own, so a socket that was open but never
+  answered — a half-open connection after a partition, an appliance
+  mid-restart — blocked inside the client lock forever. Every TrueNAS poll
+  froze for the life of the process, and the UI showed indefinitely stale pool
+  data with no error to explain it. The whole request/reply exchange is now
+  time-boxed, including the id-mismatch loop.
+- **The notifier reported success on a rejected POST.** A 404 from a mistyped
+  ntfy topic, or a 401 from a webhook wanting auth, was logged as `notified:`.
+  For an alerting path that is the worst possible failure mode: it looks
+  healthy while nothing arrives. Status is now checked.
+- **Notifications were delivered one at a time.** Losing the TrueNAS
+  connection changes every bay at once, so 15 bays against a dead endpoint
+  meant 15 × the 10s timeout — two and a half minutes of stalled polling
+  caused by the component least entitled to stall it. They are now sent
+  concurrently.
+- `GET /api/audit`'s `limit` ceiling matches what `AuditLog.tail()` actually
+  clamps to (500), instead of advertising 1000 and silently returning fewer.
+
+### Changed
+- **`disk.temperature_alerts` is wired up, and its signature was wrong.** It
+  was allow-listed and wrapped but never called — and the wrapper omitted the
+  `names` argument the appliance requires, so it would have failed with
+  `[EINVAL] names: Field required` had anything used it. Same class of bug as
+  the `smart.test.results` entry removed earlier: a method that could only ever
+  have failed, kept alive by having no caller. TrueNAS' own over-temperature
+  alert now shows on the bay and counts as a **warning** — ranked below any ZFS
+  fault, so a hot *and* faulted disk still reads as failed.
+- **`SmartInfo.overall` and `power_on_hours` are gone.** Both were permanently
+  `None`: the 25.10 API exposes neither, so nothing could ever fill them, and
+  the UI rendered two blanks that read as missing data rather than as absent
+  capability.
+- `AuditLog.tail()` reads from the end of the file. It used to load the whole
+  log — up to the 5 MB rotation threshold — and split every line on every
+  request, to then discard all but the last hundred.
+- Documented that a corrected `x-portals` needs `midclt call
+  app.metadata.generate` to appear; `app.update` re-renders the compose but
+  leaves the cached metadata `app.query` reads.
+
 ## [1.2.3] — 2026-08-14
 
 ### Security

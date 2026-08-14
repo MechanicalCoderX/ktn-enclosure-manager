@@ -23,10 +23,12 @@ export interface ZfsInfo {
 }
 
 export interface SmartInfo {
-  overall: string | null;
   temperature_c: number | null;
-  power_on_hours: number | null;
   available: boolean;
+  /** TrueNAS has an open DiskTemperatureTooHot alert for this disk. */
+  over_temperature: boolean;
+  /** The alert text, when there is one. */
+  alert: string | null;
 }
 
 export interface Bay {
