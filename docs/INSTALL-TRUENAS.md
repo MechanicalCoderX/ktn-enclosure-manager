@@ -58,9 +58,22 @@ you create the administrator in the browser.
 > every browser. (A catalog app does not need this — the ix template library
 > fills the host in for you. Only the paste-in path is literal.)
 >
-> The portal is recorded when the app is **installed**. Adding `x-portals` to an
-> app that already exists does not backfill it — edit the YAML and reinstall, or
-> just browse to the port directly.
+> The portal is recorded when the app is **installed**. Adding or correcting
+> `x-portals` on an app that already exists does not backfill it: `app.update`
+> re-renders the compose file but leaves the cached metadata `app.query` reads,
+> so the Apps list keeps showing the old link. You do not have to reinstall —
+> refresh the cache from a shell:
+>
+> ```bash
+> midclt call app.metadata.generate
+> ```
+>
+> That rebuilds each app's entry from its own metadata, and the corrected portal
+> (and `x-notes`) appear immediately. Verified on 25.10.5.
+>
+> This is worth knowing generally: a custom app whose `x-portals` names
+> `0.0.0.0` shows a **Web UI** button that cannot work, and several published
+> Install-via-YAML recipes have exactly that.
 >
 > **The app card icon cannot be set.** Every custom app shows the generic
 > TrueNAS cube and the title "Custom App". This is not something the YAML can
