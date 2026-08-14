@@ -234,6 +234,10 @@ class StateService:
 
     async def stop(self) -> None:
         await self.ident.stop()
+        if self.truenas is not None:
+            # The client now holds a long-lived socket; close it so shutdown
+            # does not leave a connection open on the appliance.
+            await self.truenas.close()
         if self._task is not None:
             self._task.cancel()
             try:

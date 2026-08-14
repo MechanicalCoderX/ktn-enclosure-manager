@@ -23,7 +23,7 @@ x-portals:
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.1.1
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.1.2
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 

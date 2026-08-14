@@ -283,3 +283,59 @@ def test_chassis_degrades_without_sg_ses(auth_client: TestClient) -> None:
     body = auth_client.get(f"/api/enclosures/{LOGICAL_ID}/chassis").json()
     assert body["available"] is False
     assert auth_client.get(f"/api/enclosures/{LOGICAL_ID}/bays").status_code == 200
+
+
+# --------------------------------------------- session invalidation (v1.1.2)
+
+
+def test_changing_password_invalidates_existing_sessions(client: TestClient) -> None:
+    """The action a user takes when they suspect compromise must be the action
+    that ends the attacker's access."""
+    new_password = "an-even-longer-password"
+    client.post("/api/auth/bootstrap",
+                json={"username": "admin", "password": PASSWORD}, headers=CSRF)
+    client.post("/api/auth/login",
+                json={"username": "admin", "password": PASSWORD}, headers=CSRF)
+    assert client.get("/api/enclosures").status_code == 200
+
+    changed = client.post("/api/auth/password", headers=CSRF,
+                          json={"current_password": PASSWORD, "new_password": new_password})
+    assert changed.status_code == 200
+
+    # The cookie the client still holds must now be refused.
+    assert client.get("/api/enclosures").status_code == 401
+
+    client.post("/api/auth/login",
+                json={"username": "admin", "password": new_password}, headers=CSRF)
+    assert client.get("/api/enclosures").status_code == 200
+
+
+def test_pre_epoch_sessions_survive_an_upgrade(tmp_path: Path) -> None:
+    """Accounts and cookies created before the epoch field existed must keep
+    working, or upgrading would sign everyone out."""
+    from ktnmgr.services.auth import AuthService
+
+    users = tmp_path / "users.json"
+    auth = AuthService(users, tmp_path / "secret", None, 3600, 5, 60)
+    auth.create_user("admin", PASSWORD)
+
+    # Simulate a pre-upgrade account file and a pre-upgrade cookie payload.
+    import json as _json
+    record = _json.loads(users.read_text())
+    record["admin"].pop("session_epoch", None)
+    users.write_text(_json.dumps(record))
+    legacy_token = auth._serializer.dumps({"u": "admin"})
+
+    assert auth.read_session(legacy_token) == "admin"
+
+
+def test_revoke_sessions_without_password_change(tmp_path: Path) -> None:
+    from ktnmgr.services.auth import AuthService
+
+    auth = AuthService(tmp_path / "users.json", tmp_path / "secret", None, 3600, 5, 60)
+    auth.create_user("admin", PASSWORD)
+    token = auth.issue_session("admin")
+    assert auth.read_session(token) == "admin"
+
+    auth.revoke_sessions("admin")
+    assert auth.read_session(token) is None

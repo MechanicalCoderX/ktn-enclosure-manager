@@ -12,9 +12,12 @@ error, and never sent to the browser (§21).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import ssl
+import time
 from typing import Any
 
 import httpx
@@ -24,6 +27,10 @@ from pydantic import SecretStr
 log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 15.0
+
+#: How long to stay on the REST fallback after a WebSocket transport failure
+#: before trying the preferred transport again.
+WS_RETRY_COOLDOWN = 300.0
 
 
 class TrueNASError(RuntimeError):
@@ -58,7 +65,10 @@ class TrueNASClient:
         self.verify_tls = verify_tls
         self.ca_bundle = ca_bundle
         self.timeout = timeout
-        self._ws_failed = False
+        self._socket: Any | None = None
+        self._lock = asyncio.Lock()
+        self._request_id = 0
+        self._ws_retry_after = 0.0
 
     # ------------------------------------------------------------------ utils
 
@@ -85,17 +95,73 @@ class TrueNASClient:
 
     # -------------------------------------------------------------- transports
 
-    async def _call_ws(self, method: str, params: list[Any]) -> Any:
+    async def _connect(self) -> Any:
+        """Open a socket and authenticate it once."""
         ssl_context = self._ssl_context()
         connect_kwargs: dict[str, Any] = {"open_timeout": self.timeout}
         if ssl_context is not False:
             connect_kwargs["ssl"] = ssl_context
 
-        async with websockets.connect(self._ws_url, **connect_kwargs) as socket:
-            await self._ws_request(socket, 1, "auth.login_with_api_key", [
-                self._api_key.get_secret_value()
-            ])
-            return await self._ws_request(socket, 2, method, params)
+        socket = await websockets.connect(self._ws_url, **connect_kwargs)
+        try:
+            await self._ws_request(
+                socket, self._next_id(), "auth.login_with_api_key",
+                [self._api_key.get_secret_value()],
+            )
+        except BaseException:
+            await self._discard_socket(socket)
+            raise
+        log.debug("TrueNAS WebSocket connected and authenticated")
+        return socket
+
+    async def _discard_socket(self, socket: Any | None = None) -> None:
+        target = socket if socket is not None else self._socket
+        if socket is None:
+            self._socket = None
+        if target is not None:
+            with contextlib.suppress(Exception):
+                await target.close()
+
+    def _next_id(self) -> int:
+        self._request_id += 1
+        return self._request_id
+
+    async def close(self) -> None:
+        """Close the shared connection. Safe to call more than once."""
+        async with self._lock:
+            await self._discard_socket()
+
+    async def _call_ws(self, method: str, params: list[Any]) -> Any:
+        """Call over a REUSED, already-authenticated connection.
+
+        Previously every call opened a fresh socket and ran
+        auth.login_with_api_key, so a 20-second poll cycle produced three
+        connections and three logins - roughly 13,000 authentications a day,
+        each one an entry in the appliance's auth log.
+
+        One request is in flight at a time (guarded by the lock) so replies
+        cannot be mismatched across concurrent callers. A transport failure -
+        including the idle timeout that will eventually close a pooled socket -
+        drops the connection and retries once on a fresh one.
+        """
+        async with self._lock:
+            for attempt in (1, 2):
+                try:
+                    if self._socket is None:
+                        self._socket = await self._connect()
+                    return await self._ws_request(
+                        self._socket, self._next_id(), method, params
+                    )
+                except TrueNASError:
+                    # Application-level refusal (bad key, unknown method).
+                    # Retrying cannot help and would double the login attempts.
+                    raise
+                except Exception:
+                    await self._discard_socket()
+                    if attempt == 2:
+                        raise
+                    log.debug("TrueNAS WebSocket dropped; reconnecting once")
+            raise TrueNASError("unreachable")  # pragma: no cover
 
     async def _ws_request(
         self, socket: Any, request_id: int, method: str, params: list[Any]
@@ -152,17 +218,20 @@ class TrueNASClient:
             raise TrueNASError(f"method {method!r} is not allow-listed")
         params = params or []
 
-        if not self._ws_failed:
+        if time.monotonic() >= self._ws_retry_after:
             try:
                 return await self._call_ws(method, params)
             except TrueNASError:
                 raise
             except Exception as exc:  # transport-level: fall back to REST
+                # Time-boxed rather than latched forever: a WebSocket outage
+                # used to disable the preferred transport for the lifetime of
+                # the process, so a brief blip meant permanent REST.
+                self._ws_retry_after = time.monotonic() + WS_RETRY_COOLDOWN
                 log.warning(
-                    "JSON-RPC WebSocket unavailable (%s); falling back to REST v2.0",
-                    type(exc).__name__,
+                    "JSON-RPC WebSocket unavailable (%s); using REST v2.0 for %.0fs",
+                    type(exc).__name__, WS_RETRY_COOLDOWN,
                 )
-                self._ws_failed = True
 
         return await self._call_rest(method, params)
 

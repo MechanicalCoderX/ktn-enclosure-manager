@@ -4,6 +4,43 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.2] — 2026-08-14
+
+Closes the two limitations 1.1.1 documented but did not fix.
+
+### Security
+- **Changing a password now invalidates every existing session for that user.**
+  Previously a stolen session cookie kept working afterwards - which is the one
+  action a user takes when they suspect compromise, so it had to be the action
+  that ends the attacker's access. Each account carries a `session_epoch` that
+  the cookie records and every request checks; changing the password bumps it.
+  `revoke_sessions()` does the same without a password change.
+
+  Accounts and cookies created before this field existed are treated as epoch
+  0, so upgrading does not sign anyone out.
+
+### Changed
+- **The TrueNAS client reuses one authenticated WebSocket** instead of opening
+  a new connection and re-running `auth.login_with_api_key` on every call.
+  A 20-second poll cycle was producing three connections and three logins,
+  roughly 13,000 authentications a day, each an entry in the appliance's auth
+  log.
+
+  Measured against a live TrueNAS 25.10.5: the first call costs 0.377 s
+  (connect, authenticate, call); each subsequent cycle of three calls now takes
+  0.028 s. One login served 16 calls where 16 logins were needed before.
+
+  One request is in flight at a time so replies cannot be mismatched. A dropped
+  socket - including the idle timeout that eventually closes any pooled
+  connection - reconnects once transparently; an application-level refusal such
+  as a rejected key is *not* retried, because that would double the failed
+  login attempts recorded on the appliance. The connection is closed on
+  shutdown.
+- The REST fallback is now time-boxed. A WebSocket transport failure used to
+  latch the client onto REST for the lifetime of the process, so a brief blip
+  meant permanent degradation; it now retries the preferred transport after
+  five minutes.
+
 ## [1.1.1] — 2026-08-14
 
 ### Security

@@ -156,16 +156,48 @@ class AuthService:
         users[username] = {
             "password_hash": self.hasher.hash(password),
             "created_at": datetime.now(UTC).isoformat(),
+            # Bumped whenever every existing session for this user must stop
+            # being accepted. Carried in the session cookie and compared on
+            # each request.
+            "session_epoch": 0,
         }
         self._write_users(users)
         log.info("created account %s", username)
 
     def change_password(self, username: str, current: str, new: str) -> None:
+        """Change a password and invalidate every existing session for the user.
+
+        Without the epoch bump, a stolen cookie kept working after the victim
+        changed their password - which is the one action a user takes when they
+        suspect compromise, so it has to be the action that ends the attacker's
+        access.
+        """
         self.verify(username, current)
         if len(new or "") < MIN_PASSWORD_LENGTH:
             raise AuthError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
         users = self._read_users()
         users[username]["password_hash"] = self.hasher.hash(new)
+        users[username]["session_epoch"] = self._epoch_of(users[username]) + 1
+        self._write_users(users)
+
+    @staticmethod
+    def _epoch_of(record: dict[str, object]) -> int:
+        """Session epoch for a user record.
+
+        Accounts created before this field existed have no epoch; they are
+        treated as 0 so an upgrade does not sign everyone out.
+        """
+        try:
+            return int(record.get("session_epoch", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def revoke_sessions(self, username: str) -> None:
+        """End every session for a user without changing their password."""
+        users = self._read_users()
+        if username not in users:
+            raise AuthError("no such account")
+        users[username]["session_epoch"] = self._epoch_of(users[username]) + 1
         self._write_users(users)
 
     def verify(self, username: str, password: str) -> str:
@@ -189,7 +221,8 @@ class AuthService:
     # --------------------------------------------------------------- sessions
 
     def issue_session(self, username: str) -> str:
-        return self._serializer.dumps({"u": username})
+        record = self._read_users().get(username, {})
+        return self._serializer.dumps({"u": username, "e": self._epoch_of(record)})
 
     def read_session(self, token: str | None) -> str | None:
         if not token:
@@ -198,7 +231,20 @@ class AuthService:
             payload = self._serializer.loads(token, max_age=self.max_age_seconds)
         except (BadSignature, SignatureExpired):
             return None
-        username = payload.get("u") if isinstance(payload, dict) else None
-        if not username or username not in self._read_users():
+        if not isinstance(payload, dict):
+            return None
+        username = payload.get("u")
+        if not username:
+            return None
+        record = self._read_users().get(str(username))
+        if record is None:
+            return None
+        # A cookie issued before this field existed carries no epoch; treat it
+        # as 0 so upgrading does not invalidate current sessions.
+        try:
+            token_epoch = int(payload.get("e", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        if token_epoch != self._epoch_of(record):
             return None
         return str(username)
