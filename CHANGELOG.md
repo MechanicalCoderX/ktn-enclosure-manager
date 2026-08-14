@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.9] — 2026-08-14
+
+### Security
+- **The authentication gate is now proven for every endpoint, from the route
+  list rather than a hand-kept one.** Authentication on a read endpoint is a
+  `user: CurrentUser` parameter the body never references - it looks unused,
+  and deleting it silently removes the check. The list of paths the tests
+  probed had already drifted: `/api/raw/pages` was authenticated but untested.
+  The test now enumerates the app's OpenAPI paths, so a new endpoint cannot
+  be added without either requiring authentication or being named explicitly
+  as public. Verified by mutation: removing the parameter from one endpoint
+  fails the test.
+
 ## [1.2.8] — 2026-08-14
 
 ### Changed

@@ -339,3 +339,56 @@ def test_revoke_sessions_without_password_change(tmp_path: Path) -> None:
 
     auth.revoke_sessions("admin")
     assert auth.read_session(token) is None
+
+
+# Endpoints that are unauthenticated on purpose. Everything else under /api
+# must reject an anonymous caller, and the test below enumerates the app's own
+# routes so adding a new endpoint cannot quietly skip the gate.
+PUBLIC_API_ROUTES = {
+    "/api/auth/status",     # tells the UI whether to show login or bootstrap
+    "/api/auth/bootstrap",  # necessarily open: there is no account yet
+    "/api/auth/login",
+    "/api/auth/logout",     # only clears a cookie
+}
+
+
+def test_every_api_route_is_either_public_by_design_or_authenticated(
+    client: TestClient,
+) -> None:
+    """Derived from the app's own route list, not a hand-kept one.
+
+    The auth check on a read endpoint is a `user: CurrentUser` parameter that
+    the body never references. It looks unused, and deleting it removes
+    authentication silently - nothing in the signature says it is load-bearing.
+    A hand-maintained list of paths to probe had already drifted:
+    /api/raw/pages was authenticated but untested.
+
+    The OpenAPI schema is used rather than `app.routes` because an included
+    APIRouter appears there as one opaque entry, so a naive walk finds no /api
+    endpoints at all and the test passes by checking nothing.
+    """
+    paths = client.app.openapi()["paths"]
+    checked = 0
+
+    for path, operations in paths.items():
+        if not path.startswith("/api/") or path in PUBLIC_API_ROUTES:
+            continue
+
+        concrete = (
+            path.replace("{enclosure_id}", LOGICAL_ID)
+            .replace("{ses_slot}", "0")
+            .replace("{page}", "join")
+        )
+        assert "{" not in concrete, f"unsubstituted path parameter in {path}"
+
+        for method in operations:
+            if method.upper() not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                continue
+            response = client.request(method.upper(), concrete, json={}, headers=CSRF)
+            assert response.status_code == 401, (
+                f"{method.upper()} {concrete} answered {response.status_code} "
+                "without authentication"
+            )
+            checked += 1
+
+    assert checked >= 8, f"only {checked} routes probed; the walk found too little"
