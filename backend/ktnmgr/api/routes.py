@@ -122,7 +122,21 @@ def auth_status(request: Request, auth: Annotated[AuthService, Depends(get_auth)
 
 
 @router.post("/auth/bootstrap", dependencies=[Depends(require_csrf)])
-def bootstrap(body: BootstrapBody, auth: Annotated[AuthService, Depends(get_auth)]) -> dict:
+def bootstrap(
+    body: BootstrapBody, request: Request, auth: Annotated[AuthService, Depends(get_auth)]
+) -> dict:
+    if not request.app.state.settings.auth_required:
+        # Refused, and this one matters. While the app runs open, this endpoint
+        # is reachable by anyone on the network - and the account they create
+        # is inert only until the operator turns authentication on, at which
+        # point a stranger's password is the administrator credential and the
+        # operator is the one locked out. Enable authentication first, then
+        # create the account.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "authentication is disabled on this deployment, so no account can "
+            "be created; enable KTN_AUTH_REQUIRED first, then create it",
+        )
     try:
         auth.bootstrap(body.username, body.password)
     except AuthError as exc:

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import stat
 import time
@@ -29,6 +30,24 @@ log = logging.getLogger(__name__)
 
 SESSION_COOKIE = "ktn_session"
 MIN_PASSWORD_LENGTH = 12
+
+#: Names an account may not take.
+#:
+#: ``anonymous`` is the string the API layer uses to mean "no session", and it
+#: compares against it to decide whether to refuse the IDENT write and the
+#: password change. An account actually called ``anonymous`` therefore collided
+#: with the sentinel and was refused both - measured, not theorised. It fails
+#: closed, so it denied a legitimate user rather than admitting an illegitimate
+#: one, but reserving the name removes the ambiguity entirely.
+RESERVED_USERNAMES = frozenset({"anonymous"})
+
+#: Characters an account name may contain.
+#:
+#: Deliberately an allow-list. Usernames are written into the application log
+#: and into every audit line, so a name containing a newline can forge log
+#: entries - and the audit log is the record that is meant to establish what
+#: actually happened.
+USERNAME_RE = re.compile(r"[A-Za-z0-9._@-]{1,64}")
 
 
 def _tighten(path: Path) -> None:
@@ -215,8 +234,22 @@ class AuthService:
 
     def create_user(self, username: str, password: str) -> None:
         username = (username or "").strip()
-        if not username or not username.isascii() or len(username) > 64:
-            raise AuthError("invalid username")
+        if not USERNAME_RE.fullmatch(username or ""):
+            # An allow-list, not a length-and-isascii check. The previous test
+            # accepted control characters - "ad\nmin" passed - and the username
+            # is written straight into the application log and the audit line
+            # (`audit user=%s ...`). A newline there lets an account name forge
+            # whole log entries, which undermines the one record that is
+            # supposed to say what happened.
+            raise AuthError(
+                "invalid username: use 1-64 characters from a-z, A-Z, 0-9, "
+                "dot, underscore, hyphen or @"
+            )
+        if username.lower() in RESERVED_USERNAMES:
+            # See RESERVED_USERNAMES: this name is the sentinel the API layer
+            # uses for an unauthenticated caller, so an account holding it
+            # would be refused the very operations it is entitled to.
+            raise AuthError(f"the username {username!r} is reserved")
         if len(password or "") < MIN_PASSWORD_LENGTH:
             raise AuthError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
         users = self._read_users()

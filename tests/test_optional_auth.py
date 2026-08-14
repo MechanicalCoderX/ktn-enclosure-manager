@@ -144,3 +144,61 @@ def test_password_change_is_refused_with_no_account(open_client: TestClient) -> 
         headers=CSRF,
     )
     assert response.status_code == 403
+
+
+# --------------------------------------------- bootstrap while running open
+
+
+def test_no_account_can_be_created_while_the_app_runs_open(
+    open_client: TestClient,
+) -> None:
+    """The trap this closes: while authentication is off, this endpoint is
+    reachable by anyone on the network. The account they create is inert only
+    until the operator turns authentication on - at which point a stranger's
+    password is the administrator credential, and the operator is the one
+    locked out."""
+    response = open_client.post(
+        "/api/auth/bootstrap",
+        json={"username": "attacker", "password": "attacker-password"},
+        headers=CSRF,
+    )
+    assert response.status_code == 403
+    assert "KTN_AUTH_REQUIRED" in response.json()["detail"]
+
+    # And nothing was created.
+    assert open_client.get("/api/auth/status").json()["user"] is None
+
+
+def test_bootstrap_still_works_when_auth_is_required(closed_client: TestClient) -> None:
+    response = closed_client.post(
+        "/api/auth/bootstrap",
+        json={"username": "admin", "password": "a-real-password"},
+        headers=CSRF,
+    )
+    assert response.status_code == 200
+
+
+# ------------------------------------------------- the sentinel is reserved
+
+
+def test_the_anonymous_username_is_reserved(closed_client: TestClient) -> None:
+    """`anonymous` is the sentinel for "no session", and the API compares
+    against it to gate IDENT and the password change. An account holding that
+    name was refused both - it failed closed, denying a legitimate user."""
+    response = closed_client.post(
+        "/api/auth/bootstrap",
+        json={"username": "anonymous", "password": "a-real-password"},
+        headers=CSRF,
+    )
+    assert response.status_code == 400
+    assert "reserved" in response.json()["detail"]
+
+
+def test_the_reservation_is_case_insensitive(closed_client: TestClient) -> None:
+    for name in ("Anonymous", "ANONYMOUS", "AnOnYmOuS"):
+        response = closed_client.post(
+            "/api/auth/bootstrap",
+            json={"username": name, "password": "a-real-password"},
+            headers=CSRF,
+        )
+        assert response.status_code == 400, f"{name} was accepted"

@@ -99,3 +99,32 @@ def test_permissions_are_tightened_on_an_upgraded_deployment(tmp_path: Path) -> 
 
     assert stat.S_IMODE(secret.stat().st_mode) == 0o600
     assert stat.S_IMODE(users.stat().st_mode) == 0o600
+
+
+def test_usernames_cannot_contain_control_characters(tmp_path: Path) -> None:
+    """Usernames land in the application log and in every audit line, so a
+    newline in one lets an account name forge log entries - and the audit log
+    is the record meant to establish what actually happened."""
+    auth = make_auth(tmp_path)
+    for evil in ("ad\nmin", "ad\rmin", "a\x00b", "ad min", "", "x" * 65):
+        with pytest.raises(AuthError):
+            auth.create_user(evil, "a-long-enough-password")
+
+
+def test_ordinary_usernames_are_still_accepted(tmp_path: Path) -> None:
+    auth = make_auth(tmp_path)
+    auth.create_user("ops.user-1@nas", "a-long-enough-password")
+    assert auth.verify("ops.user-1@nas", "a-long-enough-password") == "ops.user-1@nas"
+
+
+def test_an_existing_odd_username_can_still_sign_in(tmp_path: Path) -> None:
+    """The restriction is on creation only. Tightening it must not lock out an
+    account that already exists from before the rule."""
+    import json
+
+    auth = make_auth(tmp_path)
+    hashed = auth.hasher.hash("a-long-enough-password")
+    (tmp_path / "users.json").write_text(
+        json.dumps({"legacy user": {"password_hash": hashed, "session_epoch": 0}})
+    )
+    assert auth.verify("legacy user", "a-long-enough-password") == "legacy user"

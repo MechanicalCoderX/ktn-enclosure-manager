@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.2] — 2026-08-14
+
+### Security
+- **An account could be created by anyone while the app ran open.** With
+  `KTN_AUTH_REQUIRED=false`, `/api/auth/bootstrap` was still reachable and
+  still worked. The account it created was inert only until the operator
+  turned authentication on - at which point a stranger's password was the
+  administrator credential and the operator was the one locked out. Bootstrap
+  is now refused while authentication is disabled, naming the setting to
+  enable first. Introduced by 1.3.0 and found by probing it rather than
+  reading it.
+- **Usernames no longer accept control characters.** The check was
+  `isascii()` and a length bound, which passes `"ad\nmin"`. Usernames are
+  written into the application log and into every audit line
+  (`audit user=%s ...`), so a newline in one lets an account name forge whole
+  log entries - undermining the record that is supposed to establish what
+  happened. Now an allow-list: 1-64 of `A-Za-z0-9._@-`. Creation only, so an
+  existing account with an unusual name can still sign in.
+
+### Fixed
+- **An account named `anonymous` was refused the things it was entitled to.**
+  That string is the sentinel the API uses for "no session", and it is compared
+  against to gate the IDENT write and the password change, so a real signed-in
+  user holding that name got `403` from both. It failed closed - denying a
+  legitimate user rather than admitting an illegitimate one - and the name is
+  now reserved at account creation.
+
 ## [1.3.1] — 2026-08-14
 
 ### Fixed
