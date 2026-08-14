@@ -101,11 +101,16 @@ class SysfsEnclosureBackend:
             log.warning("no %s - kernel enclosure support absent or not mounted", self._class_dir)
             return []
 
-        found: list[EnclosureRef] = []
-        for entry in sorted(self._class_dir.iterdir()):
-            ref = self._describe(entry)
-            if ref is not None:
-                found.append(ref)
+        # Locked so a discovery cannot land between an IDENT write and its
+        # settle read-back. This runs far more often than it looks: resolve()
+        # calls it, so the helper does a full discovery before every sg_ses
+        # read.
+        with enclosure_access(self.lock_path):
+            found: list[EnclosureRef] = []
+            for entry in sorted(self._class_dir.iterdir()):
+                ref = self._describe(entry)
+                if ref is not None:
+                    found.append(ref)
         found.sort(key=lambda e: e.logical_id)
         return found
 
@@ -183,9 +188,9 @@ class SysfsEnclosureBackend:
         enclosure_path = Path(ref.sysfs_path)
         states: list[SlotState] = []
 
-        # One lock for the whole sweep, not one per slot: 15 bays x 6
-        # attributes is 90 diagnostics, and releasing between them just hands
-        # sg_ses a window to collide in.
+        # One lock for the whole sweep, not one per slot, so the map the UI
+        # renders is a single consistent picture of the shelf rather than 15
+        # bays sampled at 15 different moments.
         with enclosure_access(self.lock_path):
             for slot_dir in self._slot_dirs(enclosure_path):
                 raw_slot = _read_text(slot_dir / _SLOT_ATTR)

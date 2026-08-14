@@ -1,10 +1,9 @@
 """Enclosure access serialisation.
 
-These guard a bug that only real hardware exposed: the KTN-STL3 aborts a SCSI
-command when the kernel ses driver and sg_ses touch it at once, which produced
-thousands of mpt3sas log_info(0x31120434) messages a day. Nothing failed
-visibly, so only a test that asserts on *exclusion itself* can catch a
-regression.
+The lock keeps an IDENT write and its settle read-back from being interleaved
+with other enclosure traffic, so a reader cannot observe a half-applied locate
+state. A regression here has no visible symptom, so these tests assert on
+*exclusion itself* rather than on any output.
 """
 
 from __future__ import annotations

@@ -162,13 +162,17 @@ wrong. The banner names the error, and the drive map keeps working — bay state
 is read directly from the enclosure.
 
 **`log_info(0x31120434) ... code(0x12)` in the kernel log.** That is
-`PL_LOGINFO_CODE_ABORT` — the shelf was asked for two SES things at once and
-the HBA aborted one. Reads succeed on retry, so nothing breaks, but it is
-noisy. Fixed in 1.2.1, which serialises all enclosure access; upgrade if you
-see it. If it persists, something outside this app is also polling the
-enclosure. Check the lock is usable: `KTN_ENCLOSURE_LOCK` (default
-`<data dir>/enclosure.lock`) must be writable by both uid 1000 and root — the
-app warns once at startup if it is not.
+`PL_LOGINFO_CODE_ABORT`. sg_ses issues a `REPORT TIMESTAMP` command on every
+run; shelves that don't support it return `DID_SOFT_ERROR` and the HBA logs an
+abort — one per invocation, which at a 30-second poll is thousands a day.
+Nothing breaks, but it saturates the kernel ring buffer with noise and hides
+real `mpt3sas` history. Fixed in **1.2.2**, which passes `--no-time`; upgrade
+if you see it. To confirm the cause on your own shelf:
+
+```bash
+sg_ses --join /dev/sgN 2>&1 >/dev/null    # prints the DID_SOFT_ERROR line
+sg_ses --no-time --join /dev/sgN 2>&1 >/dev/null   # silent
+```
 
 **Everything logs out on restart.** `/data` is not writable by uid 1000. The
 container refuses to start in this state and prints the fix.

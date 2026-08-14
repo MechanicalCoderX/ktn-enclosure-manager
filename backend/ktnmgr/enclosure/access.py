@@ -1,26 +1,28 @@
 """Serialised access to the enclosure processor.
 
-The KTN-STL3 does not service two SES requests at once. When the kernel
-``ses`` driver (woken by a sysfs attribute read) and ``sg_ses`` touch the
-shelf concurrently, the HBA aborts one of them and mpt3sas logs::
+This exists so an IDENT write and its settle read-back cannot be interleaved
+with other enclosure traffic. ``set_locate()`` writes the attribute and then
+polls it for up to two seconds waiting for the enclosure processor to
+acknowledge; without the lock a concurrent reader can observe - and cache, and
+show in the UI - a half-applied locate state.
 
-    mpt2sas_cm0: log_info(0x31120434): originator(PL), code(0x12), sub_code(0x0434)
+It is an ``flock`` rather than a ``threading.Lock`` because the readers live in
+**different processes**: the web process reads sysfs as uid 1000, while
+``sg_ses`` is executed by the privileged helper. A lock inside either one
+protects nothing.
 
-``code(0x12)`` is ``PL_LOGINFO_CODE_ABORT``. The read succeeds on retry, so
-nothing breaks visibly - which is exactly why this went unnoticed. Measured on
-the validation system it produced roughly 5,700 kernel messages a day and kept
-the ring buffer permanently saturated with its own noise, hiding real mpt3sas
-history. Pausing the application stopped it dead: 0 events in 95s paused
-against 6 in 65s running.
+Historical note, because the comment here used to claim otherwise: this lock
+was introduced in 1.2.1 to stop the HBA logging thousands of
+``log_info(0x31120434) ... code(0x12)`` (``PL_LOGINFO_CODE_ABORT``) messages a
+day, on the theory that concurrent SES access was causing them. That theory
+was wrong and the lock changed nothing - the rate was identical afterwards.
+The real cause was sg_ses issuing an unsupported REPORT TIMESTAMP command on
+every invocation; see ``BASE_ARGS`` in ses.py. The lock is kept for the
+write-atomicity reason above, which is genuine and independent.
 
-Access is serialised with an ``flock`` rather than a ``threading.Lock``
-because the two readers live in **different processes**: the web process
-reads sysfs as uid 1000, while ``sg_ses`` is executed by the privileged
-helper. A lock inside either one protects nothing.
-
-Failure to take the lock is never fatal. The lock exists to suppress log
-noise, so degrading to unsynchronised access is strictly better than
-refusing to report enclosure state.
+Failure to take the lock is never fatal: it degrades to unsynchronised access
+and warns once, because losing enclosure reporting is far worse than a torn
+read of a locate flag.
 """
 
 from __future__ import annotations

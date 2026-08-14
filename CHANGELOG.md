@@ -4,11 +4,41 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] — 2026-08-14
+
+### Fixed
+- **The kernel-log flood from 1.2.1 is actually fixed now, and the 1.2.1
+  diagnosis was wrong.** Every `sg_ses` invocation is now passed `--no-time`.
+
+  sg_ses 2.86 issues a `REPORT TIMESTAMP` command before anything else, to
+  stamp its output. The KTN-STL3 does not support it, so it comes back
+  `DID_SOFT_ERROR` and the HBA logs one abort per invocation — visible in
+  sg_ses's own stderr all along:
+
+  ```
+  report timestamp: transport: Host_status=0x0b [DID_SOFT_ERROR]
+  ```
+
+  Measured on hardware: 20 invocations without the flag produced 21 abort
+  messages; 40 invocations with it produced 0.
+
+  1.2.1 blamed concurrent SES access and added a lock. That was wrong — the
+  message rate was byte-for-byte identical after it shipped. The aborts have
+  nothing to do with concurrency: they are one unsupported command per
+  `sg_ses` run. The lock is retained, with a corrected rationale, because it
+  does something genuinely useful and unrelated: it keeps an IDENT write and
+  its settle read-back from being interleaved with other enclosure traffic,
+  so a reader cannot observe a half-applied locate state.
+
 ## [1.2.1] — 2026-08-14
 
 ### Fixed
-- **The application was making the HBA abort SCSI commands, thousands of times
-  a day.** On the validation system the kernel log filled with
+- **Attempted fix for an HBA abort flood; superseded by 1.2.2, which
+  identified the real cause.** The lock this release added is still present
+  and still useful, but it did not fix what this entry claimed it fixed. The
+  original text follows for the record.
+
+  On the validation system the kernel log filled with
 
   ```
   mpt2sas_cm0: log_info(0x31120434): originator(PL), code(0x12), sub_code(0x0434)

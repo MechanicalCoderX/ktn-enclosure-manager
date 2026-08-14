@@ -22,7 +22,7 @@
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.1
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.2.2
     build:
       context: .
       dockerfile: Dockerfile

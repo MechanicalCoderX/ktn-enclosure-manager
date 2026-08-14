@@ -210,13 +210,15 @@ def test_ident_argv_is_exactly_the_expected_shape(monkeypatch: pytest.MonkeyPatc
 
     runner = SesRunner(binary="/usr/bin/sg_ses")
     runner.set_ident("/dev/sg16", 0, 7, True)
+    # --no-time suppresses sg_ses's REPORT TIMESTAMP probe, which this
+    # enclosure rejects; see BASE_ARGS in ses.py.
     assert captured["argv"] == [
-        "/usr/bin/sg_ses", "--index=0,7", "--set=ident", "/dev/sg16",
+        "/usr/bin/sg_ses", "--no-time", "--index=0,7", "--set=ident", "/dev/sg16",
     ]
     assert captured["shell"] is False
 
     runner.set_ident("/dev/sg16", 0, 7, False)
-    assert captured["argv"][2] == "--clear=ident"
+    assert captured["argv"][3] == "--clear=ident"
 
 
 def test_ident_failure_is_reported_not_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:

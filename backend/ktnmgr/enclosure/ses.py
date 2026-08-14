@@ -35,6 +35,24 @@ READ_ONLY_PAGES: dict[str, tuple[str, ...]] = {
 
 DEFAULT_TIMEOUT = 20.0
 
+#: Prepended to every sg_ses invocation.
+#:
+#: sg_ses 2.86 issues a REPORT TIMESTAMP command before doing anything else,
+#: to stamp its output. The KTN-STL3 does not support it, so the command comes
+#: back DID_SOFT_ERROR and the HBA logs an abort:
+#:
+#:     mpt2sas_cm0: log_info(0x31120434): originator(PL), code(0x12)
+#:
+#: One per invocation, regardless of which page is being read. With a 30s
+#: chassis poll issuing two reads that is ~5,700 kernel messages a day, which
+#: kept the ring buffer permanently saturated with our own noise and hid real
+#: mpt3sas history. The timestamp is worthless to us - we timestamp the
+#: snapshot ourselves - so it is switched off.
+#:
+#: Verified on hardware: 20 invocations without it produced 21 abort messages,
+#: 40 invocations with it produced 0.
+BASE_ARGS: tuple[str, ...] = ("--no-time",)
+
 #: The ONLY mutating SES operations this application can perform. Both address
 #: a single array-device-slot element's identify bit. There is no code path to
 #: any other --set/--clear target (device_off, fault, PHY reset, ...), and the
@@ -102,7 +120,7 @@ class SesRunner:
         if not device_path.is_absolute() or device_path.parent.name in ("", "."):
             raise SesError(f"refusing non-absolute device path {device!r}")
 
-        argv = [self._binary, *READ_ONLY_PAGES[page], str(device_path)]
+        argv = [self._binary, *BASE_ARGS, *READ_ONLY_PAGES[page], str(device_path)]
         log.debug("running %s", argv)
         try:
             with enclosure_access(self.lock_path):
@@ -155,6 +173,7 @@ class SesRunner:
 
         argv = [
             self._binary,
+            *BASE_ARGS,
             f"--index={type_index},{element_index}",
             IDENT_ARGS[bool(on)],
             str(device_path),
