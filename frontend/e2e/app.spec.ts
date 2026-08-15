@@ -124,10 +124,28 @@ test.describe("identify", () => {
 test.describe("chassis and diagnostics", () => {
   test.beforeEach(async ({ page }) => bootstrapAndLogin(page));
 
-  test("chassis reports unavailability rather than breaking", async ({ page }) => {
-    // sg_ses is absent in CI, which must degrade this section only (§37).
+  test("chassis renders without breaking the page", async ({ page }) => {
+    // The harness replays captured SES pages through tests/fixtures/fake-sg_ses,
+    // so this section has content. It must also survive having none - the poll
+    // runs on an interval, so early in a run it legitimately shows the
+    // not-collected-yet state, and either is acceptable here (§37).
     await page.getByRole("tab", { name: "Chassis" }).click();
     await expect(page.getByRole("heading", { name: "Chassis" })).toBeVisible();
+  });
+
+  test("chassis telemetry renders once the SES poll has run", async ({ page }, testInfo) => {
+    // One project only: the wait is bounded by the SES poll interval and there
+    // is no value in paying it twice for the same backend.
+    test.skip(testInfo.project.name !== "desktop", "one backend, one poll");
+    await page.getByRole("tab", { name: "Chassis" }).click();
+
+    // Bounded by the poll interval, not a guess.
+    await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 60_000 });
+
+    // The captured pages describe five subenclosures; if the parser regressed
+    // this section would render empty while still showing its heading.
+    await expect(page.getByText(/EMC Viper LCC/).first()).toBeVisible();
+    await expect(page.getByText(/50060480aabbcc00/).first()).toBeVisible();
   });
 
   test("drive map still works when chassis telemetry is unavailable", async ({ page }) => {

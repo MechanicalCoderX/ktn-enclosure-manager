@@ -10,6 +10,9 @@ __pycache__/
 # Node
 node_modules/
 frontend/dist/
+# TypeScript incremental build cache: a local artefact, and a stale one
+# committed to the repo can make `tsc` skip work it should redo.
+frontend/tsconfig.tsbuildinfo
 
 # Runtime state - contains the app's own secrets and session keys
 .env

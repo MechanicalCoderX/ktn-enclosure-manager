@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Replay captured KTN-STL3 SES pages in place of the real sg_ses.
+
+Point KTN_SG_SES_BINARY at this and the chassis view works with no shelf
+attached. The pages it serves are the sanitised captures in
+tests/fixtures/ktn-stl3/ - enclosure id 50060480aabbcc00, serials K1A0000N -
+so anything rendered from them, screenshots included, is safe to publish.
+
+It understands only the argument shapes the application actually emits. An
+unrecognised one exits non-zero rather than returning something plausible,
+because a stub that quietly invents output is worse than no stub.
+"""
+
+import pathlib
+import sys
+
+FIXTURES = pathlib.Path(__file__).resolve().parent / "ktn-stl3"
+
+PAGES = {
+    ("-p", "cf"): "sg_cf.txt",
+    ("-p", "es"): "sg_es.txt",
+    ("-p", "aes"): "sg_aes.txt",
+    ("--join",): "sg_join.txt",
+    ("--join", "--filter"): "sg_join.txt",
+}
+
+
+def main(argv: list[str]) -> int:
+    args = [a for a in argv[1:] if a != "--no-time"]
+
+    if "--version" in args:
+        print("version: 2.86 20230623 (fixture replay)")
+        return 0
+
+    # Drop the trailing device path; the stub serves one enclosure. Matched on
+    # "looks like a path" rather than a /dev/ prefix: under the E2E harness the
+    # device root is relocated (KTN_DEV_ROOT), so the argument arrives as
+    # something like /tmp/ktn-e2e-data/dev/sg16.
+    if args and "/" in args[-1]:
+        args = args[:-1]
+
+    key = tuple(args)
+    name = PAGES.get(key)
+    if name is None:
+        print(f"fake-sg_ses: unsupported arguments {args}", file=sys.stderr)
+        return 2
+
+    path = FIXTURES / name
+    if not path.is_file():
+        print(f"fake-sg_ses: missing fixture {path}", file=sys.stderr)
+        return 3
+
+    sys.stdout.write(path.read_text())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

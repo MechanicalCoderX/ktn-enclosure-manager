@@ -20,6 +20,10 @@ export KTN_TRUENAS_URL=""
 export KTN_POLL_SLOTS_SECONDS=0.5
 # Synthetic sysfs tree, no SES device - see tests/test_api.py.
 export KTN_IDENT_METHOD=sysfs
+# Replay the captured (sanitised) SES pages so the chassis view has real
+# content without a shelf attached. Without this it renders only its
+# "sg_ses is not installed" state.
+export KTN_SG_SES_BINARY="$ROOT/tests/fixtures/fake-sg_ses"
 export PYTHONPATH="$ROOT/backend"
 
 exec "$ROOT/.venv/bin/python" -m uvicorn ktnmgr.main:app \
