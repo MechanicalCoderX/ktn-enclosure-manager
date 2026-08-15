@@ -138,6 +138,39 @@ implementation gets both wrong:
   **node** WWN, and they differ by 2. Correlating the two by equality silently
   matches nothing.
 
+### Fan control is not available on this shelf
+
+Measured, so nobody has to repeat it. The KTN-STL3 exposes four controllable
+cooling elements — `Cooling Fan B` at type header `20` (elements `20,0`,
+`20,1`) and `Cooling Fan A` at `23` (`23,0`, `23,1`) — plus an aggregate
+`Cooling Fan M` at `17` with zero elements, which must not be written to. All
+four run at `speed_code=7`, 5300 RPM.
+
+**Requesting a lower speed does not work.** `sg_ses --index=20,0
+--set=speed_code=6` returns success and prints nothing, and the value reads
+back as `7` immediately and still `7` twelve seconds later. The firmware
+accepts the request and reverts it. No neighbouring fan moves, so this is not
+a chassis-wide request being applied elsewhere — the enclosure simply keeps
+fan policy to itself. Tested with drives at 30 °C, the condition under which a
+firmware clamping to a computed minimum would be most likely to permit a
+reduction.
+
+The failure mode matters more than the result: **`rc=0` is not confirmation.**
+Anything that checks only the exit status would report a working fan
+controller while the fans never changed. Read the value back.
+
+Two related facts from the same investigation:
+
+- The enclosure publishes **no thermal thresholds at all** — every temperature
+  sensor reports `high critical=<reserved>` and `high warning=<reserved>` on
+  the Threshold In/Out page. It will never warn that it is too hot. Any
+  thermal safety has to be built from drive SMART temperatures.
+- EMC's real fan mechanism, if it is reachable at all, is behind vendor-specific
+  pages (`0x10`, `0x11`, `0x80`, `0x82`, `0x83`, `0x91`, `0xf0`, `0xf1`).
+  Undocumented writes to an LCC carrying live drives are a different risk class
+  from a spec-defined field the firmware ignores, and this project does not go
+  there. **The only write this application performs remains the IDENT LED.**
+
 ## Health states
 
 Health is never conveyed by colour alone: every state carries a glyph, a text
