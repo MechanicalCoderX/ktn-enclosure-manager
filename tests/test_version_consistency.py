@@ -68,3 +68,25 @@ def test_changelog_has_an_entry_for_this_version() -> None:
     assert f"## [{__version__}]" in changelog, (
         f"CHANGELOG.md has no entry for {__version__}"
     )
+
+
+def test_ci_python_matches_the_shipped_runtime() -> None:
+    """The suite must run on the interpreter the image actually ships.
+
+    They drifted when Dependabot bumped the runtime base to 3.14 while CI
+    stayed on 3.13: the tests would have kept passing on an interpreter nobody
+    receives, and a version-specific failure would have reached users instead
+    of the build.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text()
+    dockerfile = (ROOT / "Dockerfile").read_text()
+
+    ci_versions = set(re.findall(r'python-version:\s*"([\d.]+)"', workflow))
+    image_versions = set(re.findall(r"FROM python:([\d.]+)-slim", dockerfile))
+
+    assert ci_versions, "no python-version pins found in verify.yml"
+    assert image_versions, "no python base image found in the Dockerfile"
+    assert ci_versions == image_versions, (
+        f"CI tests on {sorted(ci_versions)} but the image ships "
+        f"{sorted(image_versions)}"
+    )
