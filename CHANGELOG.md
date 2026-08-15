@@ -6,6 +6,20 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Security
+- **The regression suite for the v1.1.1 arbitrary file read did not test the
+  vulnerability.** Mutation-checked by restoring the vulnerable SPA route: of
+  the ten traversal vectors it covered, **all ten still passed**. The HTTP
+  client normalises `../` and `//` forms before they are ever sent, so those
+  requests never reached the server in the shape the test intended. The suite
+  written for that bug would not have caught that bug.
+
+  Three `%2f`-encoded vectors are added - including the exact form demonstrated
+  to reach the filesystem, a single leading encoded slash making the path
+  parameter absolute so `pathlib` discards the bundle root. With the guard
+  removed, those three fail; with it present, they pass. The mutation result is
+  recorded in the test file so the next person does not quietly drop them.
+
 ### Changed
 - **A release can no longer be published from a build that failed.** Tags do
   not trigger `ci.yml` - it runs on branch pushes and pull requests - so a tag

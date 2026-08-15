@@ -35,6 +35,16 @@ TRAVERSALS = [
     "//data/users.json",
     "../secret.txt",
     "..\\..\\secret.txt",
+    # A single leading *encoded* slash. This is the form that was demonstrated
+    # to reach the filesystem on the vulnerable code: the path parameter
+    # arrives as "/etc/passwd", and pathlib discards the base for an absolute
+    # right-hand side. Plain "../" probes are normalised away by HTTP clients
+    # before they are ever sent, so they can report "not vulnerable" about
+    # something that is - which is exactly what happened while investigating
+    # this.
+    "%2fetc%2fpasswd",
+    "%2fproc%2fself%2fenviron",
+    "%2fdata%2fsession-secret",
 ]
 
 
@@ -66,6 +76,12 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
         yield test_client
 
 
+# Mutation-checked: with the containment guard removed from the SPA route,
+# ONLY the %2f-encoded vectors above and the symlink test below fail. Every
+# plain "../" and "//" form still passes, because the HTTP client normalises
+# them before they are ever sent. The original regression suite for this
+# vulnerability was therefore almost entirely decorative - it would not have
+# caught the bug it was written for. Keep an encoded vector in this list.
 @pytest.mark.parametrize("path", TRAVERSALS)
 def test_traversal_never_serves_a_file_outside_the_bundle(
     client: TestClient, path: str
