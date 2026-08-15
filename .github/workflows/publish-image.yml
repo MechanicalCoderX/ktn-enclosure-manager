@@ -27,7 +27,22 @@ permissions:
   packages: write
 
 jobs:
+  # Nothing reaches the registry until the full test suite, the frontend
+  # typecheck and build, the E2E run and a clean Trivy scan have all passed on
+  # this exact ref.
+  #
+  # This is not belt and braces. Tags do not trigger ci.yml at all - that runs
+  # on branch pushes and pull requests - so before this gate existed a tag went
+  # straight to a registry push with nothing verified on that ref. On v1.3.3 it
+  # published an image while CI was failing on the same commit: the frontend
+  # layer came from the build cache, so `npm run build` never re-ran and never
+  # hit the TypeScript error. That release was correct by luck; a cache miss
+  # would have shipped a broken one.
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   publish:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

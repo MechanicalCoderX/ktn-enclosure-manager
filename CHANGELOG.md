@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+- **A release can no longer be published from a build that failed.** Tags do
+  not trigger `ci.yml` - it runs on branch pushes and pull requests - so a tag
+  went straight to a registry push with nothing verified on that ref. On
+  v1.3.3 that published an image while CI was failing on the same commit: the
+  frontend layer came from the build cache, so `npm run build` never re-ran and
+  never hit the TypeScript error. The release happened to be correct; a cache
+  miss would have shipped a broken one.
+
+  The checks now live in a reusable `verify.yml` called by both `ci.yml` and
+  `publish-image.yml`, with the publish job gated on it. One definition, so the
+  two cannot drift - which is how this hid in the first place, two workflows
+  building the same Dockerfile independently.
+
 ## [1.3.4] — 2026-08-14
 
 ### Fixed
