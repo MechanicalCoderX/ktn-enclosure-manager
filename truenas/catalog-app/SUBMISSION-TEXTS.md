@@ -1,15 +1,30 @@
-# Ready-to-paste submission texts
+# Submission status and ready-to-paste texts
 
-The PR template in truenas/apps requires **an issue opened for discussion
-first**, so the order is: open the issue, wait for a maintainer to weigh in,
-then open the PR referencing it.
+## Where this stands
 
-The branch is already pushed:
-<https://github.com/MechanicalCoderX/apps/tree/add-ktn-enclosure-manager>
+| | |
+|---|---|
+| **Discussion issue** | [truenas/apps#5599](https://github.com/truenas/apps/issues/5599) — **open, awaiting a maintainer** |
+| **PR branch** | [`MechanicalCoderX/apps:add-ktn-enclosure-manager`](https://github.com/MechanicalCoderX/apps/tree/add-ktn-enclosure-manager) — pushed, rendered against library 2.3.11 |
+| **Pull request** | **not opened yet, deliberately** |
+
+The PR template requires an issue first, and the issue asks a direct question:
+whether a community-train app may request a `/dev/sg*` device node at `rw`.
+Opening the PR before that is answered would be asking and then not waiting.
+
+**When a maintainer replies:**
+
+- *If they say yes* — open the PR from the branch above with the body in
+  section 2, and tick the issue checkbox.
+- *If they say no* — close the issue politely. Nothing is lost: Install-via-YAML
+  works today and is documented in
+  [`../../docs/INSTALL-TRUENAS.md`](../../docs/INSTALL-TRUENAS.md).
+- *If they ask for changes* — the packaging is a normal part of this repo, so
+  edit `truenas/catalog-app/`, re-render, and force-push the branch.
 
 ---
 
-## 1. The issue — <https://github.com/truenas/apps/issues/new>
+## 1. The issue — opened as [#5599](https://github.com/truenas/apps/issues/5599)
 
 **Title:** `App proposal: ktn-enclosure-manager (community train)`
 
@@ -66,7 +81,7 @@ Choose the **🚀 App Addition** template, then paste:
 
 > # App Addition
 >
-> - [x] I have opened an [issue](https://github.com/truenas/apps/issues) to discuss this app addition before submitting this pull request.
+> - [x] I have opened an [issue](https://github.com/truenas/apps/issues/5599) to discuss this app addition before submitting this pull request.
 >
 > # AI
 >
@@ -74,7 +89,7 @@ Choose the **🚀 App Addition** template, then paste:
 >
 > ## Description
 >
-> Adds **KTN Enclosure Manager** to the community train.
+> Adds **KTN Enclosure Manager** to the community train. Discussed in #5599.
 >
 > A web enclosure manager for SAS disk shelves on TrueNAS SCALE. TrueNAS gates
 > its enclosure UI behind iX hardware, so community systems with a third-party
@@ -86,7 +101,7 @@ Choose the **🚀 App Addition** template, then paste:
 >
 > - **Upstream**: https://github.com/MechanicalCoderX/ktn-enclosure-manager
 > - **Documentation**: https://github.com/MechanicalCoderX/ktn-enclosure-manager#readme
-> - **App Version**: 1.3.2
+> - **App Version**: 1.3.4
 >
 > ## Testing
 >
