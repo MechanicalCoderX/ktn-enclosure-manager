@@ -18,6 +18,9 @@ export KTN_DEV_ROOT="$DATA/dev"
 export KTN_DATA_DIR="$DATA"
 export KTN_TRUENAS_URL=""
 export KTN_POLL_SLOTS_SECONDS=0.5
+# The chassis poll defaults to 30s, which is longer than Playwright's per-test
+# timeout - a test waiting for telemetry could never see it arrive.
+export KTN_POLL_SES_SECONDS=1
 # Synthetic sysfs tree, no SES device - see tests/test_api.py.
 export KTN_IDENT_METHOD=sysfs
 # Replay the captured (sanitised) SES pages so the chassis view has real

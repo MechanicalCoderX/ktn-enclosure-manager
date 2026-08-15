@@ -139,8 +139,9 @@ test.describe("chassis and diagnostics", () => {
     test.skip(testInfo.project.name !== "desktop", "one backend, one poll");
     await page.getByRole("tab", { name: "Chassis" }).click();
 
-    // Bounded by the poll interval, not a guess.
-    await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 60_000 });
+    // The harness polls SES every second, so this resolves well inside the
+    // per-test budget. A longer wait than the test timeout is unreachable.
+    await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
 
     // The captured pages describe five subenclosures; if the parser regressed
     // this section would render empty while still showing its heading.
