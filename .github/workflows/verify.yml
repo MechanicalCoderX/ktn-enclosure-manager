@@ -62,9 +62,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Must track the frontend builder image in the Dockerfile. Building on a
+      # different Node - and therefore a different npm - resolves a different
+      # dependency tree, which is how a TypeScript error once passed here and
+      # failed the image build on the same commit.
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -87,7 +91,7 @@ jobs:
           python-version: "3.14"
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

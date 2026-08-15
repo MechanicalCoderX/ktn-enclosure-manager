@@ -70,6 +70,28 @@ def test_changelog_has_an_entry_for_this_version() -> None:
     )
 
 
+def test_ci_node_matches_the_frontend_builder() -> None:
+    """CI must build the frontend on the same Node the image uses.
+
+    A different Node means a different npm, which resolves a different
+    dependency tree. That is not theoretical: a missing CSS type declaration
+    passed `npm run typecheck` on one npm and failed the image build on
+    another, for the same commit.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text()
+    dockerfile = (ROOT / "Dockerfile").read_text()
+
+    ci_versions = set(re.findall(r'node-version:\s*"(\d+)"', workflow))
+    image_versions = set(re.findall(r"FROM node:(\d+)-slim", dockerfile))
+
+    assert ci_versions, "no node-version pins found in verify.yml"
+    assert image_versions, "no node base image found in the Dockerfile"
+    assert ci_versions == image_versions, (
+        f"CI builds on Node {sorted(ci_versions)} but the image uses "
+        f"{sorted(image_versions)}"
+    )
+
+
 def test_ci_python_matches_the_shipped_runtime() -> None:
     """The suite must run on the interpreter the image actually ships.
 
