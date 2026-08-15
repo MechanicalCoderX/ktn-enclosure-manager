@@ -237,11 +237,27 @@ systemd units, and no TrueNAS configuration.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e 'backend[dev]'
-PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q      # 299 tests, no hardware needed
+PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q      # no hardware needed
 
 cd frontend && npm install && npm run build
 npx playwright test                                          # E2E against the real backend
 ```
+
+<!-- The test count deliberately is not quoted here. It was stated as an exact
+     number three times and was wrong by the next commit each time. -->
+
+### Regenerating the screenshots
+
+```bash
+bash scripts/e2e-server.sh &          # backend on :8421, against the fixtures
+node frontend/scripts/screenshots.mjs
+```
+
+Shot against the captured fixture, never a live shelf. The fixture is already
+sanitised — serials `K1A0000N`, pool `tank` — so the images cannot carry real
+drive identifiers into a public repository. `tests/fixtures/fake-sg_ses`
+replays the captured SES pages, which is what lets the chassis view render
+with no enclosure attached.
 
 The whole suite runs against captured KTN-STL3 fixtures in
 `tests/fixtures/`, so it needs no shelf attached. Regenerate the synthetic sysfs
