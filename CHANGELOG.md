@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] — 2026-08-15
+
+### Changed
+- **Dependency and toolchain refresh.** Runtime base python 3.13 → **3.14**,
+  frontend builder node 20 → **26**, vite 5 → **8**, TypeScript 5 → **7**,
+  react 18 → **19**, and nine GitHub Actions to current majors. All
+  digest-pinned; the full suite, typecheck, E2E and Trivy scan pass on the new
+  toolchain.
+- **Four development-scope advisories resolved** — three in vite (including a
+  high-severity `server.fs.deny` bypass) and one in esbuild's dev server. They
+  were invisible until Dependabot security alerts were enabled on the
+  repository; `npm audit --omit=dev` in CI does not see them by design, since
+  they are not shipped to users, but they are real for anyone running the dev
+  server.
+
+### Fixed
+- **CI now tests on the interpreter and Node the image actually ships.** Both
+  had silently drifted: the runtime moved to python 3.14 while the suite ran on
+  3.13, and the frontend builder moved to node 26 while CI built on 22.
+
+  That drift is not cosmetic. A different Node means a different npm, which
+  resolves a different dependency tree - precisely how a missing CSS type
+  declaration passed `npm run typecheck` on one and failed the image build on
+  the other, for the same commit. Tests that run on an interpreter nobody
+  receives can pass while the released image fails.
+
+  Two tests now assert that `verify.yml` and the `Dockerfile` agree on both
+  versions, so they cannot drift again.
+
 ## Unreleased
 
 ### Security

@@ -227,7 +227,7 @@ git pull && docker compose build && docker compose up -d
 tar czf ktn-backup.tgz data/
 
 # uninstall (removes the app; touches nothing on the host)
-docker compose down && docker rmi ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.3.4
+docker compose down && docker rmi ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.4.0
 ```
 
 State lives entirely in `/data`. The application creates no host files, no
