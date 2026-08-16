@@ -195,6 +195,35 @@ account out of every other device, which is surprising behaviour for a normal
 logout. If you need every session gone right now, change the password; that
 does revoke them all.
 
+## TLS: connect by the name on the certificate
+
+`KTN_TRUENAS_VERIFY_TLS` defaults to `true` and should stay there. If
+verification fails, the usual cause is not a missing trust store — it is
+connecting by IP.
+
+A certificate is validated against its Subject Alternative Name. TrueNAS
+certificates, including the Let's Encrypt ones its ACME integration issues,
+typically carry only a DNS name:
+
+```
+subject=CN = truenas.example.com
+X509v3 Subject Alternative Name: DNS:truenas.example.com
+```
+
+`https://10.0.0.5` can never validate against that, no matter what CA bundle
+you supply, so setting `KTN_TRUENAS_VERIFY_TLS=false` "fixes" it and quietly
+gives up authentication of the endpoint your API key is sent to. Point
+`KTN_TRUENAS_URL` at the name instead, and confirm the app can resolve it —
+split-horizon DNS pointing that name at a LAN address works fine.
+
+`KTN_TRUENAS_CA_BUNDLE` is for a genuinely private CA. An appliance with a
+publicly-issued certificate needs no bundle at all.
+
+One operational consequence worth accepting deliberately: if certificate
+renewal ever fails, pool/vdev/SMART data stops rather than silently continuing
+over an unverified connection. The drive map, chassis telemetry and Identify
+are unaffected — they do not use the API — and the banner names the error.
+
 ## The TrueNAS API key: use a least-privilege one
 
 The app calls exactly five read methods. It does **not** need an

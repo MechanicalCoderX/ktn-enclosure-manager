@@ -109,7 +109,7 @@ annotated list. The essentials:
 | Variable | Meaning |
 |---|---|
 | `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | pool, vdev, ZFS error and SMART data. Leave empty to run without. Use a least-privilege key — see [SECURITY.md](SECURITY.md#the-truenas-api-key-use-a-least-privilege-one) |
-| `KTN_TRUENAS_VERIFY_TLS` | defaults to `true`; prefer `KTN_TRUENAS_CA_BUNDLE` over disabling |
+| `KTN_TRUENAS_VERIFY_TLS` | defaults to `true`. If it fails, connect by the name on the certificate rather than by IP — see [SECURITY.md](SECURITY.md#tls-connect-by-the-name-on-the-certificate) |
 | `KTN_SG_DEVICE` | SES device node to expose to the container |
 | `KTN_ENCLOSURE_ALLOWLIST` | restrict management to specific enclosure ids |
 | `KTN_POLL_*_SECONDS` | polling intervals (5 / 20 / 30 / 120 by default) |
