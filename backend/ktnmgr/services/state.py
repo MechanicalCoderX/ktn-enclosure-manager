@@ -364,6 +364,15 @@ class StateService:
             "app_version": __version__,
             "started_at": self._started_at.isoformat(),
             "truenas_version": self.system_info.value.get("version"),
+            # Null here is not necessarily a fault. `system.info` is the one
+            # call this app makes that no narrow role satisfies - it needs
+            # READONLY_ADMIN or SHARING_ADMIN - so a least-privilege API key
+            # legitimately cannot fetch it, and everything else still works.
+            # Surfacing the reason stops that reading as a broken connection.
+            "truenas_version_unavailable_reason": (
+                None if self.system_info.value.get("version")
+                else self.system_info.last_error
+            ),
             "truenas_configured": self.truenas is not None,
             "truenas_url": self.settings.truenas_url or None,
             "truenas_tls_verified": self.settings.truenas_verify_tls,
@@ -394,6 +403,9 @@ class StateService:
                 "truenas": _freshness(self.zfs, self.settings.poll_truenas_seconds),
                 "smart": _freshness(self.smart, self.settings.poll_smart_seconds),
                 "chassis": _freshness(self.chassis, self.settings.poll_ses_seconds),
+                # Included so a denied system.info is visible rather than only
+                # showing up as a missing version string.
+                "system_info": _freshness(self.system_info, 300),
             },
         }
 

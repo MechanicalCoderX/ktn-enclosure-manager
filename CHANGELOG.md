@@ -36,6 +36,31 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Security
+- **The TrueNAS API key no longer needs to be an administrator.** The app calls
+  five read methods; the key it used authenticated as `root`, because that is
+  what TrueNAS produces if you create a key as the user you happen to be.
+
+  `SECURITY.md` now documents a dedicated account with exactly three roles -
+  `DISK_READ`, `POOL_READ`, `REPORTING_READ` - and the drive map, pool and vdev
+  membership, ZFS error counters, temperatures and over-temperature alerts all
+  work with them.
+
+  **`system.info` is deliberately given up.** It accepts only `READONLY_ADMIN`
+  or `SHARING_ADMIN`, so keeping it would mean granting read access to the
+  entire appliance configuration in order to display a version string.
+  Diagnostics now reports *why* the version is missing instead of showing a
+  bare null, and includes `system_info` in its polling freshness so a denied
+  call is visible rather than silent.
+
+  Verified on 25.10.5 with such a key: the four data calls succeed,
+  `system.info` errors, and writes (`pool.dataset.create`, `user.create`) are
+  refused. Also recorded, because it costs an hour otherwise: role-based access
+  is enforced on the JSON-RPC API the app uses, while the legacy REST surface
+  returned **403 to every one of those reads** with the same key.
+
+
+
+### Security
 - **The regression suite for the v1.1.1 arbitrary file read did not test the
   vulnerability.** Mutation-checked by restoring the vulnerable SPA route: of
   the ten traversal vectors it covered, **all ten still passed**. The HTTP

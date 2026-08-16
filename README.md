@@ -108,7 +108,7 @@ annotated list. The essentials:
 
 | Variable | Meaning |
 |---|---|
-| `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | pool, vdev, ZFS error and SMART data. Leave empty to run without |
+| `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | pool, vdev, ZFS error and SMART data. Leave empty to run without. Use a least-privilege key — see [SECURITY.md](SECURITY.md#the-truenas-api-key-use-a-least-privilege-one) |
 | `KTN_TRUENAS_VERIFY_TLS` | defaults to `true`; prefer `KTN_TRUENAS_CA_BUNDLE` over disabling |
 | `KTN_SG_DEVICE` | SES device node to expose to the container |
 | `KTN_ENCLOSURE_ALLOWLIST` | restrict management to specific enclosure ids |

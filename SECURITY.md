@@ -195,6 +195,47 @@ account out of every other device, which is surprising behaviour for a normal
 logout. If you need every session gone right now, change the password; that
 does revoke them all.
 
+## The TrueNAS API key: use a least-privilege one
+
+The app calls exactly five read methods. It does **not** need an
+administrator key, and the default path of "create an API key" on TrueNAS
+produces one bound to whichever user you were — often `root`, which is
+unrestricted.
+
+Create a dedicated account instead. Roles needed:
+
+| Role | Covers |
+|---|---|
+| `DISK_READ` | `disk.query` |
+| `POOL_READ` | `pool.query` |
+| `REPORTING_READ` | `disk.temperatures`, `disk.temperature_alerts` |
+
+```
+Credentials -> Groups         : add `ktn-readonly`
+Credentials -> Users          : add `ktn-readonly`, that group, no shell,
+                                password disabled
+System -> Advanced -> Privilege: grant the group the three roles above
+Credentials -> API Keys       : create one for `ktn-readonly`
+```
+
+**`system.info` is deliberately given up.** It accepts only `READONLY_ADMIN`
+or `SHARING_ADMIN` — no narrow role satisfies it — and taking either would let
+a leaked key read the entire appliance configuration in order to display a
+version string. The drive map, pool and vdev membership, ZFS error counters,
+temperatures and over-temperature alerts all work without it; diagnostics
+simply shows no TrueNAS version, with the reason alongside it.
+
+Verified on 25.10.5: with those three roles, `pool.query`, `disk.query`,
+`disk.temperatures` and `disk.temperature_alerts` all succeed, `system.info`
+returns an error, and writes such as `pool.dataset.create` and `user.create`
+are refused.
+
+One transport note, because it costs an hour otherwise: role-based access is
+enforced on the JSON-RPC API at `/api/current`, which is what this app uses.
+The legacy REST surface at `/api/v2.0` answered **403 to every one of those
+reads** with the same key. If you are testing a narrow key by hand, test it
+over the API the app actually speaks.
+
 ## Secrets
 
 - The TrueNAS API key is held as a `SecretStr`, never logged, never included in
