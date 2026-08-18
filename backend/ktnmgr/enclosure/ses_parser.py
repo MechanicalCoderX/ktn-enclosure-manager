@@ -161,6 +161,19 @@ def parse_join(text: str, descriptors: list[TypeDescriptor]) -> list[ChassisElem
             descriptor = (
                 descriptors[type_index] if 0 <= type_index < len(descriptors) else None
             )
+            # element_index < 0 marks sg_ses's "Overall descriptor" -- the
+            # per-element-type summary rather than a physical sensor.
+            #
+            # DO NOT surface these as readings. On this KTN-STL3 they actively
+            # disagree with the real per-element values (measured 2026-08-18):
+            #
+            #   ti=18 overall = 30 C  but its only element 0 = 22 C
+            #   ti=21 overall = 22 C  but elements 0/1 = 29 C / 22 C
+            #
+            # 22 C is the correct inlet temperature -- corroborated by all 15
+            # drives sitting at 32-34 C, which implies a ~22 C inlet given the
+            # normal 10-11 C rise. A 30 C ambient would put them at 40-42 C.
+            # Consumers filter on is_overall; see views.tsx and services/state.py.
             current = ChassisElement(
                 type_index=type_index,
                 element_index=element_index,

@@ -323,6 +323,10 @@ export function ChassisView({ chassis }: { chassis: Chassis | null }) {
     );
   }
 
+  // Overall descriptors are SES per-type summaries, not physical sensors, and
+  // on this enclosure they contradict the real element readings (e.g. a 30 C
+  // "overall" for a group whose only sensor reads 22 C). Showing them would
+  // display a temperature no probe ever measured. Keep this filter.
   const elements = (chassis.elements ?? []).filter((e) => !e.is_overall);
   const group = (type: string) => elements.filter((e) => e.element_type === type);
   const subName = (id: number) =>
