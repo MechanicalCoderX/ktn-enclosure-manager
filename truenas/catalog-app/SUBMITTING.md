@@ -28,7 +28,24 @@ genuinely contentious requirement.
 If it is rejected, nothing is lost — **Install via YAML works today** and is
 documented in [`../../docs/INSTALL-TRUENAS.md`](../../docs/INSTALL-TRUENAS.md).
 
-## Status: rendered and validated against library 2.3.11
+## Status
+
+**Live status lives in [`SUBMISSION-TEXTS.md`](SUBMISSION-TEXTS.md), not here.**
+That file has the status table and the ready-to-paste issue/PR bodies; this file
+is the how and why. As of 2026-08-18:
+
+| | |
+|---|---|
+| Discussion issue | [truenas/apps#5599](https://github.com/truenas/apps/issues/5599) — open since 2026-08-15, no maintainer reply yet |
+| PR branch | `MechanicalCoderX/apps:add-ktn-enclosure-manager` — pushed |
+| Pull request | not opened, deliberately — see below |
+
+For context on the wait: across the last 30 closed `app-request` issues the
+median time to close is **5 days** (min 0, max 59), and every currently-open
+app-request is unanswered, the oldest by 8 days. Silence here is the queue's
+normal state, not a signal about this app.
+
+### Rendered and validated against library 2.3.11
 
 This package has been rendered against the real catalog library, so the
 placeholders are filled in and the template API mismatches this file used to
@@ -87,7 +104,17 @@ startup. That is why an app installed from the catalog still gets a working
 IDENT path, and it makes the plain compose deployment independent of the
 `mode=` tmpfs option too.
 
-## Still to do before opening the PR
+## Why the PR is not open yet
+
+**The issue is already filed and is the blocker.** truenas/apps requires an
+issue before a PR, and #5599 asks them a direct question: whether a
+community-train app may request a `/dev/sg*` device node at `rw`. Opening the
+PR before that is answered would be asking and then not waiting.
+
+When a maintainer replies, `SUBMISSION-TEXTS.md` section 2 has the PR body ready
+to paste.
+
+## Checks to run before opening the PR
 
 1. **Confirm the image tag in `ix_values.yaml`** matches the release you want
    published, and that it is publicly pullable.
