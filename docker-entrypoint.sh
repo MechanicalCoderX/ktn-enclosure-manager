@@ -71,7 +71,14 @@ if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
     done
     [ -S "$KTN_IDENT_HELPER_SOCKET" ] || echo "warning: IDENT helper socket did not appear"
 
-    trap 'kill "$HELPER_PID" 2>/dev/null || true' TERM INT
+    # No trap for the helper here: a previous version installed one, but the
+    # web process is started with exec, which replaces this shell - so the
+    # trap could never fire. It was dead code that looked like cleanup.
+    # Container teardown kills the whole cgroup, helper included; and while
+    # the container runs, /healthz probes the helper socket, so a helper that
+    # dies marks the container unhealthy instead of silently losing IDENT and
+    # all SES telemetry.
+    : "$HELPER_PID"
 fi
 
 if [ "$(id -u)" = "0" ]; then

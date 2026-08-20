@@ -16,6 +16,8 @@ from ktnmgr import __version__
 from ktnmgr.api.routes import router
 from ktnmgr.config import Settings, get_settings
 from ktnmgr.enclosure.disks import DiskInfoReader
+from ktnmgr.enclosure.helper_client import HelperUnavailableError
+from ktnmgr.enclosure.helper_client import send as helper_send
 from ktnmgr.enclosure.locate import build_locate_writer
 from ktnmgr.enclosure.ses import HelperSesRunner, SesRunner
 from ktnmgr.enclosure.sysfs import SysfsEnclosureBackend
@@ -65,6 +67,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             api_key=settings.truenas_api_key,
             verify_tls=settings.truenas_verify_tls,
             ca_bundle=settings.truenas_ca_bundle,
+            rest_fallback=settings.truenas_rest_fallback,
         )
     else:
         log.warning("TrueNAS not configured; pool, vdev and SMART data will be unavailable")
@@ -156,7 +159,25 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:
-        return JSONResponse({"ok": True, "enclosures": len(service.enclosures.value)})
+        """Liveness for the container healthcheck.
+
+        When a privileged helper is configured it is part of the deployment's
+        health, not an optional extra: without it the IDENT write and all SES
+        telemetry are gone. It runs as a background child of the entrypoint
+        with nothing supervising it, so a helper that died would otherwise
+        leave the container Healthy while the app silently lost half its
+        function. Probing it here is what makes the healthcheck honest.
+        """
+        body: dict[str, Any] = {"ok": True, "enclosures": len(service.enclosures.value)}
+        socket_path = settings.ident_helper_socket
+        if socket_path:
+            try:
+                response = helper_send(socket_path, {"op": "ses_version"}, timeout=4.0)
+                body["helper"] = "ok" if response.get("ok") else "error"
+            except HelperUnavailableError as exc:
+                body.update(ok=False, helper="unreachable", helper_error=str(exc))
+                return JSONResponse(body, status_code=503)
+        return JSONResponse(body)
 
     if FRONTEND_DIR.is_dir():
         app.mount(

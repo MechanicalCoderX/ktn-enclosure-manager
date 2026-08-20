@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     truenas_api_key: SecretStr = SecretStr("")
     truenas_verify_tls: bool = True
     truenas_ca_bundle: str | None = None
+    truenas_rest_fallback: bool = Field(
+        default=False,
+        description=(
+            "Fall back to the legacy REST /api/v2.0 surface when the JSON-RPC "
+            "WebSocket is unreachable. Off by default: role-scoped keys are "
+            "refused wholesale by REST (403) while working over JSON-RPC, so "
+            "on the recommended key this fallback can only produce a false "
+            "'rejected the API key' error - and REST is removed in TrueNAS "
+            "26.04. Enable only on a deployment using a full-access key."
+        ),
+    )
 
     # --- notifications ----------------------------------------------------
     alert_webhook_url: str = Field(

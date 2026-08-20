@@ -69,15 +69,30 @@ function usePolling(callback: () => void, intervalMs: number, active: boolean): 
 function ChangePasswordDialog({
   onClose,
   onChanged,
+  onRevoked,
 }: {
   onClose: () => void;
   onChanged: () => void;
+  onRevoked: () => void;
 }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const revokeAll = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await api.revokeSessions();
+      onRevoked();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -142,6 +157,17 @@ function ChangePasswordDialog({
             </button>
           </div>
         </form>
+
+        <hr />
+        <p className="sub">
+          Think a session was stolen but the password itself is fine? Sign this
+          account out everywhere — every session ends, including this one, and
+          you sign back in.
+        </p>
+        <button type="button" className="btn secondary" onClick={revokeAll}
+                disabled={busy}>
+          Sign out everywhere
+        </button>
       </div>
     </div>
   );
@@ -250,7 +276,7 @@ export function App() {
   const [authRequired, setAuthRequired] = useState(true);
   const [anonIdentAllowed, setAnonIdentAllowed] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
-  const [passwordChanged, setPasswordChanged] = useState(false);
+  const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
   const [theme, setTheme] = useTheme();
 
   useEffect(() => {
@@ -329,15 +355,11 @@ export function App() {
     return (
       <LoginScreen
         needsBootstrap={needsBootstrap}
-        notice={
-          passwordChanged
-            ? "Password changed. Sign in with your new password."
-            : null
-        }
+        notice={signOutNotice}
         onAuthenticated={(u) => {
           setUser(u);
           setNeedsBootstrap(false);
-          setPasswordChanged(false);
+          setSignOutNotice(null);
         }}
       />
     );
@@ -435,7 +457,14 @@ export function App() {
             // 401s on the next poll.
             setChangingPassword(false);
             setUser(null);
-            setPasswordChanged(true);
+            setSignOutNotice("Password changed. Sign in with your new password.");
+          }}
+          onRevoked={() => {
+            // Same epoch bump as a password change, so the same honest flow:
+            // this session is dead too; go sign back in.
+            setChangingPassword(false);
+            setUser(null);
+            setSignOutNotice("All sessions signed out. Sign in again.");
           }}
         />
       )}

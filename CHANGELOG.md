@@ -4,6 +4,54 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] — 2026-08-19
+
+Security-review release: four findings from a full-code review, none critical,
+all fixed.
+
+### Security
+- **The change-password endpoint is now rate limited.** It verifies a password
+  exactly like login does, but the login limiter never saw it because no login
+  happens. That mattered because this endpoint is the one a stolen session
+  cookie gets pointed at: the cookie expires, the password does not, and
+  `current_password` was brute-forceable without limit. The same fixed-window
+  limiter now guards both; the refusal is HTTP 429 so the browser can say
+  "slow down" rather than "wrong password".
+
+### Added
+- **`POST /api/auth/revoke-sessions` — sign out everywhere.** The session-epoch
+  mechanism has existed since the change-password work, but nothing exposed
+  it, so the only remedy for a suspected stolen cookie was a full password
+  change. The new endpoint bumps the epoch (ending every session for the
+  account, the caller's included) without touching the password, and the
+  change-password dialog now offers it. Logout alone never did this: sessions
+  are stateless signed cookies, so deleting the browser's copy leaves a stolen
+  copy working until it expires.
+- **`KTN_TRUENAS_REST_FALLBACK`** (default `false`) gates the legacy REST
+  `/api/v2.0` fallback, which is now **off by default**. Two measured reasons:
+  a role-scoped key — the recommended kind — is refused wholesale by REST
+  (403 on every read that works over JSON-RPC), so on such a key the fallback
+  could only convert a transient WebSocket blip into a false "TrueNAS rejected
+  the API key" alarm for the length of the cooldown; and REST is removed in
+  TrueNAS 26.04, at which point the path stops existing. Deployments on a
+  full-access key can opt back in. When the fallback does run and REST answers
+  403, the error now says the key lacks REST roles instead of claiming the key
+  was rejected.
+
+### Fixed
+- **`/healthz` now probes the privileged helper.** The helper runs as a
+  background child with nothing supervising it; if it died, IDENT and all SES
+  telemetry silently disappeared while the container stayed Healthy, because
+  the healthcheck only ever exercised the web process. The endpoint now sends
+  `ses_version` over the helper socket when one is configured and returns 503
+  if the helper does not answer, so a dead helper marks the container
+  unhealthy instead of hiding.
+- **Removed the entrypoint's dead `trap`.** It was installed to kill the
+  helper on TERM/INT, but the web process is started with `exec`, which
+  replaces the shell — the trap could never fire. Container teardown already
+  kills the whole cgroup; the trap was cleanup-shaped code that cleaned up
+  nothing.
+
 ## [1.4.0] — 2026-08-15
 
 ### Changed

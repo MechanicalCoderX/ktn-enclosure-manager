@@ -66,6 +66,7 @@ export const api = {
   logout: () => post<{ ok: boolean }>("/api/auth/logout"),
   changePassword: (current_password: string, new_password: string) =>
     post<{ ok: boolean }>("/api/auth/password", { current_password, new_password }),
+  revokeSessions: () => post<{ ok: boolean }>("/api/auth/revoke-sessions"),
 
   enclosures: () => request<Enclosure[]>("/api/enclosures"),
   // Path segments are encoded rather than interpolated raw. Enclosure ids are
