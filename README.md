@@ -71,7 +71,10 @@ docker compose up -d
 ```
 
 Then open `http://<truenas>:8420` and **create the administrator account** — the
-first run has no account and no default password.
+first run has no account and no default password. The account dialog (top
+right) can change the password or **sign the account out everywhere** — both
+end every existing session, so a suspected stolen cookie has a remedy that
+does not force a credential rotation.
 
 Prefer an open dashboard with no login, the way scrutiny and most TrueNAS
 monitoring apps work? Set `KTN_AUTH_REQUIRED=false`. The Identify LED write
@@ -110,6 +113,7 @@ annotated list. The essentials:
 |---|---|
 | `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | pool, vdev, ZFS error and SMART data. Leave empty to run without. Use a least-privilege key — see [SECURITY.md](SECURITY.md#the-truenas-api-key-use-a-least-privilege-one) |
 | `KTN_TRUENAS_VERIFY_TLS` | defaults to `true`. If it fails, connect by the name on the certificate rather than by IP — see [SECURITY.md](SECURITY.md#tls-connect-by-the-name-on-the-certificate) |
+| `KTN_TRUENAS_REST_FALLBACK` | defaults to `false`. Legacy REST fallback for the JSON-RPC transport; only useful with a full-access key, and REST is removed in TrueNAS 26.04 — see `.env.example` |
 | `KTN_SG_DEVICE` | SES device node to expose to the container |
 | `KTN_ENCLOSURE_ALLOWLIST` | restrict management to specific enclosure ids |
 | `KTN_POLL_*_SECONDS` | polling intervals (5 / 20 / 30 / 120 by default) |
@@ -229,7 +233,7 @@ git pull && docker compose build && docker compose up -d
 tar czf ktn-backup.tgz data/
 
 # uninstall (removes the app; touches nothing on the host)
-docker compose down && docker rmi ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.4.0
+docker compose down --rmi all
 ```
 
 State lives entirely in `/data`. The application creates no host files, no
