@@ -4,6 +4,41 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] — 2026-08-20
+
+Clears the project's parked "can't be done" list: two of the three turned out
+to be doable after all, and the third was our own stale documentation.
+
+### Added
+- **`truenas_version` now populates on the least-privilege key.**
+  ``system.info`` accepts only READONLY_ADMIN/SHARING_ADMIN, so on the
+  recommended role-scoped key diagnostics showed ``truenas_version: null``
+  forever - the documented cost of not holding a broad key for a version
+  string. Reading the middleware source showed ``system.version`` is declared
+  with ``authorization_required=False``, so the one field the UI uses is
+  available on any key. The client allow-lists it and ``poll_system_info``
+  falls back to it when ``system.info`` is denied; a real outage still
+  reports the original error rather than a silent empty success.
+- **`truenas/fix-custom-app-metadata.py`** - gives the custom app a real card
+  title, icon and displayed version. TrueNAS hardcodes every custom app's
+  metadata to a stub (title "Custom App", ``1.0.0_custom``, no icon) and no
+  compose ``x-`` extension can reach it - but the WebUI reads a collective
+  cache rebuilt by ``app.metadata.generate`` from the app's own
+  ``metadata.yaml``, and ``app.update`` merges only portals over that file.
+  Editing the display fields there is therefore durable across app updates.
+  Verified on 25.10.6: title, icon and version all render. The script backs
+  both files up and prints the rollback.
+
+### Fixed
+- **INSTALL-TRUENAS.md no longer claims the card icon is impossible.** The
+  earlier "writing one into the stored metadata is ignored - verified" note
+  was wrong: the edit only *looks* ignored until ``app.metadata.generate``
+  runs, because the WebUI reads the collective cache, not the per-app file.
+- **SECURITY.md's "logout is client-side" section caught up with v1.5.0**: it
+  still told operators a password change was the only way to end every
+  session, a release after ``revoke-sessions`` shipped exactly that without
+  the forced credential rotation.
+
 ## [1.5.0] — 2026-08-19
 
 Security-review release: four findings from a full-code review, none critical,

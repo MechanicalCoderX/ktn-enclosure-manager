@@ -191,8 +191,23 @@ class StateService:
             return
         try:
             self.system_info.succeed(await self.truenas.system_info())
+            return
         except (TrueNASError, OSError) as exc:
-            self.system_info.fail(str(exc))
+            first_error = str(exc)
+        # system.info accepts only READONLY_ADMIN/SHARING_ADMIN, so on the
+        # recommended least-privilege key it is always denied and diagnostics
+        # showed truenas_version: null forever. system.version carries no
+        # authorization requirement, so the version - the one field the UI
+        # actually uses - is recoverable on any key.
+        try:
+            version = await self.truenas.version()
+        except (TrueNASError, OSError):
+            self.system_info.fail(first_error)
+            return
+        if version:
+            self.system_info.succeed({"version": version})
+        else:
+            self.system_info.fail(first_error)
 
     async def poll_chassis(self) -> None:
         """sg_ses is the expensive source, so it runs on the slowest interval."""

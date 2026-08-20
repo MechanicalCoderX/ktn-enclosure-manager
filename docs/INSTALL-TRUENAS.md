@@ -76,15 +76,22 @@ you create the administrator in the browser.
 > `0.0.0.0` shows a **Web UI** button that cannot work, and several published
 > Install-via-YAML recipes have exactly that.
 >
-> **The app card icon cannot be set.** Every custom app shows the generic
-> TrueNAS cube and the title "Custom App". This is not something the YAML can
-> influence: TrueNAS builds a custom app's metadata from a hardcoded stub
-> (`catalog_reader.custom_app.get_version_details`) that contains no `icon`
-> key at all, and writing one into the stored metadata is ignored — both
-> verified on 25.10.5. Unlike the portal, there is no `x-` extension for it.
-> The app's own icon does appear as the browser tab favicon, and the card icon
-> would work if this app were ever accepted into the official catalog, where
-> `app.yaml` carries an `icon:` URL.
+> **The card icon, title and displayed version CAN be fixed — from the shell,
+> not the YAML.** Every custom app initially shows the generic TrueNAS cube,
+> the title "Custom App" and version `1.0.0_custom`, because TrueNAS builds a
+> custom app's metadata from a hardcoded stub
+> (`catalog_reader.custom_app.get_version_details`) and no `x-` extension can
+> reach it. An earlier revision of this document said writing the stored
+> metadata was ignored; that was wrong — the edit only appears to be ignored
+> until `app.metadata.generate` is run, because the WebUI reads a collective
+> cache rather than the per-app file. The display fields live in
+> `/mnt/.ix-apps/app_configs/<app>/metadata.yaml`, `app.update` merges only
+> portals over that file (preserving the rest), and regenerating the cache
+> makes the WebUI pick them up. Verified on 25.10.6: title, icon and displayed
+> version all render. Run [`truenas/fix-custom-app-metadata.py`](../truenas/fix-custom-app-metadata.py)
+> on the appliance to apply this for the app; it backs the files up first and
+> prints the rollback. Re-run it after a reinstall (not needed after normal
+> app updates).
 
 ### Privileges this asks for
 
