@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.3] — 2026-08-20
+
+Polish release ahead of wider publicity; no behaviour changes.
+
+### Changed
+- **The in-app favicon ships at 256px** (was 64px) and the vector source
+  `icon.svg` is now served by the app itself, both regenerated from the new
+  vector icon introduced alongside 1.5.2. This is the release that actually
+  delivers them in the image — they had only existed in the repo.
+
+### Docs and repo (shipped between tags, recorded here for the release notes)
+- Full docs accuracy audit; a CI guard now keeps the README version-neutral
+  about the image tag.
+- Screenshots regenerated to depict the real 15-bay shelf: the fixture's
+  synthetic test slot (SES 99) no longer appears in user-facing images.
+- Identify demo GIF added to the README; issue form templates (bug +
+  hardware compatibility report) and GitHub Discussions enabled.
+- README fan section corrected to the measured per-bank speeds.
+
 ## [1.5.2] — 2026-08-20
 
 The `/dev/sg*` permission floor, measured properly this time.
