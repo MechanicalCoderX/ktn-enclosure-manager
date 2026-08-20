@@ -182,18 +182,24 @@ dashboard.
 Audit entries for an unauthenticated write record the actor as `anonymous`, so
 the log never implies a named person approved something nobody signed in for.
 
-### Known limitation: logout is client-side
+### Logout is client-side; revocation is a separate, explicit action
 
 `POST /api/auth/logout` clears the cookie in the browser. It does **not**
 invalidate the token server-side — sessions are stateless signed cookies, so a
 copy of the cookie captured beforehand stays valid until it expires
 (`KTN_SESSION_MAX_AGE_SECONDS`, 8 hours by default).
 
-This is a deliberate trade: the app is single-administrator, and the
-alternative — bumping the session epoch on logout — would sign the same
-account out of every other device, which is surprising behaviour for a normal
-logout. If you need every session gone right now, change the password; that
-does revoke them all.
+This is a deliberate trade: the app is single-administrator, and bumping the
+session epoch on every logout would sign the same account out of every other
+device, which is surprising behaviour for a normal logout.
+
+If you need every session gone right now, you have two remedies (both since
+v1.5.0): **Sign out everywhere** in the change-password dialog
+(`POST /api/auth/revoke-sessions`) ends every session for the account without
+touching the password, and a password change does the same while also
+replacing the credential. Before v1.5.0 the password change was the only
+option, which forced a credential rotation on anyone who merely suspected a
+stolen cookie.
 
 ## TLS: connect by the name on the certificate
 

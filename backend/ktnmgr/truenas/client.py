@@ -48,6 +48,10 @@ class TrueNASClient:
     ALLOWED_METHODS = frozenset(
         {
             "system.info",
+            # Declared with authorization_required=False in the middleware, so
+            # it works on a role-scoped key that system.info refuses - which
+            # is exactly the recommended key. See SECURITY.md.
+            "system.version",
             "disk.query",
             "disk.temperatures",
             "pool.query",
@@ -290,6 +294,17 @@ class TrueNASClient:
     async def system_info(self) -> dict[str, Any]:
         info = await self.call("system.info")
         return info if isinstance(info, dict) else {}
+
+    async def version(self) -> str:
+        """The appliance's version string, on any key.
+
+        ``system.info`` accepts only READONLY_ADMIN/SHARING_ADMIN, so on the
+        recommended least-privilege key it is denied - and holding a broader
+        key just to read a version string is the wrong trade. This method has
+        no authorization requirement in the middleware, so it works everywhere.
+        """
+        result = await self.call("system.version")
+        return result if isinstance(result, str) else ""
 
     async def disks(self) -> list[dict[str, Any]]:
         """Disk inventory.
