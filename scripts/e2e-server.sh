@@ -13,6 +13,16 @@ mkdir -p "$DATA"
 SYSFS="$DATA/sys"
 cp -r "$ROOT/tests/fixtures/sysfs_root" "$SYSFS"
 
+# The fixture carries two synthetic entries the E2E suite depends on: an empty
+# bay at SES slot 99 (proves discovery keys on the 'slot' attribute) and a
+# decoy non-slot directory. The real KTN-STL3 has exactly 15 bays, so anything
+# user-facing shot against the fixture must prune them or it depicts hardware
+# that does not exist - which is exactly how a phantom "Bay 100" ended up in
+# the README screenshots. Screenshots set this; the E2E suite must not.
+if [ "${KTN_E2E_SYNTHETIC_SLOTS:-1}" = "0" ]; then
+    rm -rf "$SYSFS"/class/enclosure/*/99 "$SYSFS"/class/enclosure/*/decoy
+fi
+
 export KTN_SYSFS_ROOT="$SYSFS"
 export KTN_DEV_ROOT="$DATA/dev"
 export KTN_DATA_DIR="$DATA"
