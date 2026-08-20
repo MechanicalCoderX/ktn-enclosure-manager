@@ -78,13 +78,27 @@ access is the SES device node.
 Notably absent: `CAP_DAC_OVERRIDE`. The LED is driven by a SCSI command rather
 than a sysfs write, so no capability is needed for it at all.
 
-### `/dev/sg16` is granted `rw`, and that is not what it sounds like
+### `/dev/sg16` is granted `rw`, and the `w` is for exactly one command
 
-`sg_ses` submits SCSI commands through the `SG_IO` ioctl, which the device
-cgroup classifies as a write even for a read-only diagnostic page. Measured:
-with `:r` every `sg_ses` call fails `Operation not permitted`. This grants access
-to the *enclosure processor*, not to disk data. `CAP_SYS_RAWIO` was tested and is
+The `w` exists solely for the IDENT LED. Measured on the live shelf
+(2026-08-20): the device cgroup gates the *open mode*, not `SG_IO` itself.
+Every telemetry page works through a read-only open — since v1.5.2 all reads
+pass `--readonly`, so they run on an `O_RDONLY` fd on which the kernel's
+per-opcode filter refuses write-class SCSI commands outright (kernel-enforced:
+no bug in the read path can reach the control page). The LED is SEND
+DIAGNOSTIC, a write-class command, which requires a write-opened fd — that is
+the entire reason for the `w`.
+
+An earlier revision here claimed `SG_IO` "counts as a write even for a
+read-only diagnostic page", measured as `:r` failing `EPERM`. That measurement
+was real but misread: `sg_ses` opens the device `O_RDWR` by default, so the
+failure was the open being refused, not the ioctl. This grants access to the
+*enclosure processor*, not to disk data. `CAP_SYS_RAWIO` was tested and is
 **not** required, so it is not granted.
+
+**Monitoring-only mode:** grant the device `:r` instead. All telemetry keeps
+working; Identify returns a clear permission error instead of lighting the
+LED. A deployment that never wants the write can prove it to the kernel.
 
 ### Why there is no AppArmor relaxation
 

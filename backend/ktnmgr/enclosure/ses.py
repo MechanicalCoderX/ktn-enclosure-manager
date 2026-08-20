@@ -53,6 +53,20 @@ DEFAULT_TIMEOUT = 20.0
 #: 40 invocations with it produced 0.
 BASE_ARGS: tuple[str, ...] = ("--no-time",)
 
+#: Prepended to every READ invocation, on top of BASE_ARGS.
+#:
+#: ``--readonly`` makes sg_ses open the device O_RDONLY instead of its default
+#: O_RDWR. That matters twice over. First, it is what makes the device cgroup
+#: permission floor honest: with the device granted ``:r``, every telemetry
+#: page works through a read-only open, while the default open is refused at
+#: open() before SG_IO is ever attempted - which is exactly the measurement
+#: that was previously misread as "SG_IO counts as a write even for read-only
+#: pages". Second, it is kernel-enforced defence in depth: on a read-only fd
+#: the kernel's per-opcode filter refuses write-class SCSI commands (SEND
+#: DIAGNOSTIC among them), so no bug in this process can turn a telemetry read
+#: into a control write. All measured on the live shelf, 2026-08-20.
+READ_ARGS: tuple[str, ...] = (*BASE_ARGS, "--readonly")
+
 #: The ONLY mutating SES operations this application can perform. Both address
 #: a single array-device-slot element's identify bit. There is no code path to
 #: any other --set/--clear target (device_off, fault, PHY reset, ...), and the
@@ -120,7 +134,7 @@ class SesRunner:
         if not device_path.is_absolute() or device_path.parent.name in ("", "."):
             raise SesError(f"refusing non-absolute device path {device!r}")
 
-        argv = [self._binary, *BASE_ARGS, *READ_ONLY_PAGES[page], str(device_path)]
+        argv = [self._binary, *READ_ARGS, *READ_ONLY_PAGES[page], str(device_path)]
         log.debug("running %s", argv)
         try:
             with enclosure_access(self.lock_path):

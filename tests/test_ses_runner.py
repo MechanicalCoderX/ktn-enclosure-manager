@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from ktnmgr.enclosure.ses import BASE_ARGS, SesError, SesRunner
+from ktnmgr.enclosure.ses import READ_ARGS, SesError, SesRunner
 
 
 class _Proc:
@@ -48,7 +48,12 @@ def test_no_time_is_passed_on_every_page_read(
         assert "--no-time" in argv, f"REPORT TIMESTAMP not suppressed: {argv}"
         # Immediately after the binary, so it cannot be swallowed by a page
         # argument that takes a value.
-        assert argv[1:1 + len(BASE_ARGS)] == list(BASE_ARGS)
+        assert argv[1:1 + len(READ_ARGS)] == list(READ_ARGS)
+        # Reads open the device O_RDONLY. This is what lets a deployment grant
+        # the device ':r' for monitoring-only, and it is kernel-enforced
+        # defence in depth: a read-only fd cannot carry a write-class SCSI
+        # command, so no bug here can reach the control page.
+        assert "--readonly" in argv, f"read did not open O_RDONLY: {argv}"
 
 
 def test_no_time_is_passed_on_ident(captured: list[list[str]], tmp_path: Path) -> None:
@@ -60,6 +65,10 @@ def test_no_time_is_passed_on_ident(captured: list[list[str]], tmp_path: Path) -
     assert "--no-time" in argv
     assert "--index=0,4" in argv
     assert "--set=ident" in argv
+    # The one mutating call MUST NOT open read-only: SEND DIAGNOSTIC needs a
+    # write-opened fd, and --readonly here would break the IDENT LED with a
+    # confusing pass-through EPERM (measured on the live shelf).
+    assert "--readonly" not in argv
 
 
 def test_page_allow_list_still_rejects_unknown_pages(tmp_path: Path) -> None:
