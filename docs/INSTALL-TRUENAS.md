@@ -88,10 +88,15 @@ you create the administrator in the browser.
 > `/mnt/.ix-apps/app_configs/<app>/metadata.yaml`, `app.update` merges only
 > portals over that file (preserving the rest), and regenerating the cache
 > makes the WebUI pick them up. Verified on 25.10.6: title, icon and displayed
-> version all render. Run [`truenas/fix-custom-app-metadata.py`](../truenas/fix-custom-app-metadata.py)
-> on the appliance to apply this for the app; it backs the files up first and
-> prints the rollback. Re-run it after a reinstall (not needed after normal
-> app updates).
+> version all render. The details page additionally reads
+> `metadata.version` and `metadata.app_version`; `metadata.version` names the
+> `versions/<dir>` the middleware reads config from, so fixing it means
+> renaming that directory in the same operation - verified durable through a
+> full `app.update` cycle afterwards. Run
+> [`truenas/fix-custom-app-metadata.py`](../truenas/fix-custom-app-metadata.py)
+> on the appliance to apply all of it; it takes a full tar backup first and
+> prints the rollback. Re-run after a reinstall or after updating to a new
+> image tag (normal app updates do not revert the title or icon).
 
 ### Privileges this asks for
 
