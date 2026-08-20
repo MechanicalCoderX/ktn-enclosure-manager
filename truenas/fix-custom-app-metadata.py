@@ -50,7 +50,7 @@ DISPLAY = {
     ),
     "home": REPO,
     "sources": [REPO],
-    "icon": f"{REPO.replace('github.com', 'raw.githubusercontent.com')}/main/frontend/public/favicon.png",
+    "icon": f"{REPO.replace('github.com', 'raw.githubusercontent.com')}/main/frontend/public/icon.svg",
     "maintainers": [{"name": "MechanicalCoderX", "url": REPO, "email": ""}],
 }
 

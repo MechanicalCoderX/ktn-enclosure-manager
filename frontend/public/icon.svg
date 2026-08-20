@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- KTN Enclosure Manager: an EMC KTN-STL3 15-bay shelf, one bay identified. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a3441"/>
+      <stop offset="1" stop-color="#161c25"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="sled" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#39465a"/>
+      <stop offset="1" stop-color="#232c39"/>
+    </linearGradient>
+    <linearGradient id="ident" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+    <filter id="identGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#8b5cf6" flood-opacity="0.85"/>
+    </filter>
+    <filter id="ledGlow" x="-150%" y="-150%" width="400%" height="400%">
+      <feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="#34d399" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+
+  <!-- rack ears -->
+  <g fill="#1d2530" stroke="#0d1117" stroke-width="3">
+    <rect x="10" y="132" width="34" height="248" rx="8"/>
+    <rect x="468" y="132" width="34" height="248" rx="8"/>
+  </g>
+  <g fill="#0d1117">
+    <circle cx="27" cy="168" r="7"/>
+    <circle cx="27" cy="344" r="7"/>
+    <circle cx="485" cy="168" r="7"/>
+    <circle cx="485" cy="344" r="7"/>
+  </g>
+
+  <!-- chassis -->
+  <rect x="40" y="112" width="432" height="288" rx="18" fill="url(#body)" stroke="#0d1117" stroke-width="4"/>
+  <!-- top accent bar -->
+  <path d="M58 112 h396 a18 18 0 0 1 18 18 v6 H40 v-6 a18 18 0 0 1 18-18 z" fill="url(#accent)"/>
+
+  <!-- drive sleds: 5 x 3, row-major; bay [row 1, col 1] is identified -->
+  <g>
+    <!-- row 0 -->
+    <g>
+      <rect x="62"  y="152" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="140" y="152" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="218" y="152" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="296" y="152" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="374" y="152" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+    </g>
+    <!-- row 1 (col 1 = IDENT) -->
+    <g>
+      <rect x="62"  y="230" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="140" y="230" width="70" height="70" rx="9" fill="url(#ident)" stroke="#4c1d95" stroke-width="3" filter="url(#identGlow)"/>
+      <rect x="218" y="230" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="296" y="230" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="374" y="230" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+    </g>
+    <!-- row 2 -->
+    <g>
+      <rect x="62"  y="308" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="140" y="308" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="218" y="308" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="296" y="308" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+      <rect x="374" y="308" width="70" height="70" rx="9" fill="url(#sled)" stroke="#141b24" stroke-width="3"/>
+    </g>
+  </g>
+
+  <!-- sled handles -->
+  <g fill="#121821" opacity="0.9">
+    <rect x="74"  y="163" width="46" height="7" rx="3.5"/><rect x="152" y="163" width="46" height="7" rx="3.5"/><rect x="230" y="163" width="46" height="7" rx="3.5"/><rect x="308" y="163" width="46" height="7" rx="3.5"/><rect x="386" y="163" width="46" height="7" rx="3.5"/>
+    <rect x="74"  y="241" width="46" height="7" rx="3.5"/><rect x="230" y="241" width="46" height="7" rx="3.5"/><rect x="308" y="241" width="46" height="7" rx="3.5"/><rect x="386" y="241" width="46" height="7" rx="3.5"/>
+    <rect x="74"  y="319" width="46" height="7" rx="3.5"/><rect x="152" y="319" width="46" height="7" rx="3.5"/><rect x="230" y="319" width="46" height="7" rx="3.5"/><rect x="308" y="319" width="46" height="7" rx="3.5"/><rect x="386" y="319" width="46" height="7" rx="3.5"/>
+  </g>
+  <!-- ident sled handle, lighter for contrast on purple -->
+  <rect x="152" y="241" width="46" height="7" rx="3.5" fill="#ede9fe" opacity="0.85"/>
+
+  <!-- activity LEDs -->
+  <g fill="#34d399" filter="url(#ledGlow)">
+    <circle cx="115" cy="207" r="4.5"/><circle cx="193" cy="207" r="4.5"/><circle cx="271" cy="207" r="4.5"/><circle cx="349" cy="207" r="4.5"/><circle cx="427" cy="207" r="4.5"/>
+    <circle cx="115" cy="285" r="4.5"/><circle cx="271" cy="285" r="4.5"/><circle cx="349" cy="285" r="4.5"/><circle cx="427" cy="285" r="4.5"/>
+    <circle cx="115" cy="363" r="4.5"/><circle cx="193" cy="363" r="4.5"/><circle cx="271" cy="363" r="4.5"/><circle cx="349" cy="363" r="4.5"/><circle cx="427" cy="363" r="4.5"/>
+  </g>
+  <!-- ident sled LED: white-hot -->
+  <circle cx="193" cy="285" r="5" fill="#fef3c7">
+    <animate attributeName="opacity" values="1;0.35;1" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+</svg>
