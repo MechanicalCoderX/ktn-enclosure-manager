@@ -143,8 +143,11 @@ implementation gets both wrong:
 Measured, so nobody has to repeat it. The KTN-STL3 exposes four controllable
 cooling elements — `Cooling Fan B` at type header `20` (elements `20,0`,
 `20,1`) and `Cooling Fan A` at `23` (`23,0`, `23,1`) — plus an aggregate
-`Cooling Fan M` at `17` with zero elements, which must not be written to. All
-four run at `speed_code=7`, 5300 RPM.
+`Cooling Fan M` at `17` with zero elements, which must not be written to. The
+enclosure runs the two banks differently on its own authority - one PSU's pair
+latched at `speed_code=7` (5300 RPM, with the "requested on" flag set), the
+other at `speed_code=3` (2490 RPM) - which itself proves the firmware does
+modulate; it just refuses outside input.
 
 **Requesting a lower speed does not work.** `sg_ses --index=20,0
 --set=speed_code=6` returns success and prints nothing, and the value reads
@@ -251,9 +254,12 @@ npx playwright test                                          # E2E against the r
 ### Regenerating the screenshots
 
 ```bash
-bash scripts/e2e-server.sh &          # backend on :8421, against the fixtures
+KTN_E2E_SYNTHETIC_SLOTS=0 bash scripts/e2e-server.sh &   # backend on :8421
 node frontend/scripts/screenshots.mjs
 ```
+
+`KTN_E2E_SYNTHETIC_SLOTS=0` prunes the fixture's synthetic empty bay (SES 99,
+a discovery test aid) so the images show the shelf's real 15 bays.
 
 Shot against the captured fixture, never a live shelf. The fixture is already
 sanitised — serials `K1A0000N`, pool `tank` — so the images cannot carry real

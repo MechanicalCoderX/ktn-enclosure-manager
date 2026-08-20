@@ -6,8 +6,12 @@
  * images cannot leak real drive identifiers into a public repository. Shooting
  * a production system would.
  *
- *   bash scripts/e2e-server.sh &          # backend on :8421 against fixtures
+ *   KTN_E2E_SYNTHETIC_SLOTS=0 bash scripts/e2e-server.sh &   # backend on :8421
  *   node frontend/scripts/screenshots.mjs
+ *
+ * KTN_E2E_SYNTHETIC_SLOTS=0 prunes the fixture's synthetic empty bay (SES 99)
+ * and decoy directory: the tests need them, the real shelf has 15 bays, and a
+ * screenshot must depict the hardware, not the test scaffolding.
  *
  * Sizes match what was there before so the README layout does not shift.
  */
