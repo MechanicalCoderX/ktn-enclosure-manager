@@ -182,7 +182,10 @@ def logout(response: Response) -> dict:
 
 @router.post("/auth/password", dependencies=[Depends(require_csrf)])
 def change_password(
-    body: PasswordBody, user: CurrentUser, auth: Annotated[AuthService, Depends(get_auth)]
+    body: PasswordBody,
+    request: Request,
+    user: CurrentUser,
+    auth: Annotated[AuthService, Depends(get_auth)],
 ) -> dict:
     if user == ANONYMOUS:
         # There is no account to change. Refusing beats calling change_password
@@ -191,10 +194,50 @@ def change_password(
             status.HTTP_403_FORBIDDEN,
             "no account is signed in; authentication is disabled on this deployment",
         )
+    # Rate limited like login, because it verifies a password like login. This
+    # endpoint is the one a stolen session cookie gets pointed at: the cookie
+    # expires, the password does not, and current_password is the only thing
+    # standing between the two. Unlimited attempts here meant a cookie thief
+    # could brute-force their way from a temporary session to the permanent
+    # credential; the login limiter never saw it because no login happens.
+    client = request.client.host if request.client else "unknown"
+    try:
+        auth.limiter.check(client)
+    except AuthError as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
     try:
         auth.change_password(user, body.current_password, body.new_password)
     except AuthError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    auth.limiter.reset(client)
+    return {"ok": True}
+
+
+@router.post("/auth/revoke-sessions", dependencies=[Depends(require_csrf)])
+def revoke_sessions(
+    user: CurrentUser,
+    response: Response,
+    auth: Annotated[AuthService, Depends(get_auth)],
+) -> dict:
+    """Sign this account out everywhere, including here.
+
+    The remedy for a stolen cookie when the password itself is not suspected.
+    The epoch mechanism existed since the change-password work, but nothing
+    exposed it - the same mistake the change-password endpoint itself once
+    made, shipping an API with no way to use it. Every session for the account
+    stops being accepted, the caller's own included; the caller signs back in
+    and holds the only valid session again.
+    """
+    if user == ANONYMOUS:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "no account is signed in; authentication is disabled on this deployment",
+        )
+    try:
+        auth.revoke_sessions(user)
+    except AuthError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    response.delete_cookie(SESSION_COOKIE, path="/")
     return {"ok": True}
 
 

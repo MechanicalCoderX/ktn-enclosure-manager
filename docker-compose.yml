@@ -22,7 +22,7 @@
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.4.0
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.5.0
     build:
       context: .
       dockerfile: Dockerfile
@@ -64,6 +64,10 @@ services:
       KTN_TRUENAS_API_KEY: ${KTN_TRUENAS_API_KEY:-}
       KTN_TRUENAS_VERIFY_TLS: ${KTN_TRUENAS_VERIFY_TLS:-true}
       KTN_TRUENAS_CA_BUNDLE: ${KTN_TRUENAS_CA_BUNDLE:-}
+      # Legacy REST /api/v2.0 fallback. Off by default: role-scoped keys are
+      # refused by REST (403) while working over JSON-RPC, and REST is removed
+      # in TrueNAS 26.04. Enable only with a full-access key.
+      KTN_TRUENAS_REST_FALLBACK: ${KTN_TRUENAS_REST_FALLBACK:-false}
       KTN_ENCLOSURE_ALLOWLIST: ${KTN_ENCLOSURE_ALLOWLIST:-}
       # Authentication. Default on; see .env.example for what turning it off
       # exposes, and why the LED write is gated separately.

@@ -1,10 +1,13 @@
-"""TrueNAS API client: JSON-RPC over WebSocket, with REST v2.0 as fallback.
+"""TrueNAS API client: JSON-RPC over WebSocket, with an opt-in REST fallback.
 
 Transport choice (spec §21, §48): TrueNAS 25.10 serves the current, supported
 API as JSON-RPC 2.0 over a WebSocket at ``/api/current``. The legacy REST
 ``/api/v2.0`` surface is still present on 25.10.5 (it answers 401 rather than
-404) but is deprecated, so it is used only as a fallback when the WebSocket is
-unavailable. Both were confirmed present on the target before this was written.
+404) but is deprecated and disappears in 26.04 - and it refuses role-scoped
+keys outright (403 on every read that works over JSON-RPC). The fallback is
+therefore opt-in via ``rest_fallback``: useful only to a deployment on a
+full-access key, and harmful on the recommended least-privilege one, where it
+turns a WebSocket blip into a false "rejected the API key" alarm.
 
 The API key is held as a ``SecretStr`` and never logged, never echoed in an
 error, and never sent to the browser (§21).
@@ -62,12 +65,14 @@ class TrueNASClient:
         verify_tls: bool = True,
         ca_bundle: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        rest_fallback: bool = False,
     ) -> None:
         self.url = url.rstrip("/")
         self._api_key = api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
         self.verify_tls = verify_tls
         self.ca_bundle = ca_bundle
         self.timeout = timeout
+        self.rest_fallback = rest_fallback
         self._socket: Any | None = None
         self._lock = asyncio.Lock()
         self._request_id = 0
@@ -225,6 +230,18 @@ class TrueNASClient:
                 response = await client.post(f"{self.url}{path}", headers=headers, json={})
             else:
                 response = await client.get(f"{self.url}{path}", headers=headers)
+            if response.status_code == 403:
+                # Not a bad key. Role-scoped keys are authorised per method on
+                # the JSON-RPC API only; the legacy REST surface refuses them
+                # wholesale (measured on 25.10.5: the same key that reads
+                # everything over /api/current gets 403 on every /api/v2.0
+                # read). Saying "rejected the key" here sent operators off to
+                # rotate a key that was fine.
+                raise TrueNASError(
+                    f"{method}: the legacy REST API refused this key (403). "
+                    "Role-scoped keys only work over the JSON-RPC WebSocket; "
+                    "this does not mean the key is bad."
+                )
             if response.status_code == 401:
                 raise TrueNASError("TrueNAS rejected the API key")
             if response.status_code >= 400:
@@ -244,7 +261,21 @@ class TrueNASClient:
                 return await self._call_ws(method, params)
             except TrueNASError:
                 raise
-            except Exception as exc:  # transport-level: fall back to REST
+            except Exception as exc:  # transport-level failure
+                if not self.rest_fallback:
+                    # Off by default, for two reasons that were both measured.
+                    # A role-scoped key gets 403 on every legacy REST read
+                    # while working fine over JSON-RPC, so on the recommended
+                    # key the fallback cannot succeed - it can only convert a
+                    # transient WebSocket blip into a false "rejected the API
+                    # key" alarm. And /api/v2.0 is removed in TrueNAS 26.04,
+                    # at which point this path stops existing anyway.
+                    raise TrueNASError(
+                        f"{method}: the JSON-RPC WebSocket is unreachable "
+                        f"({type(exc).__name__}). The legacy REST fallback is "
+                        "disabled (KTN_TRUENAS_REST_FALLBACK); it only helps "
+                        "deployments using a full-access key."
+                    ) from exc
                 # Time-boxed rather than latched forever: a WebSocket outage
                 # used to disable the preferred transport for the lifetime of
                 # the process, so a brief blip meant permanent REST.

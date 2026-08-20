@@ -103,7 +103,9 @@ class RateLimiter:
         self._prune(now)
         recent = [t for t in self._hits.get(key, []) if now - t < self.window_seconds]
         if len(recent) >= self.limit:
-            raise AuthError("too many login attempts; try again shortly")
+            # Not "login attempts": the same limiter now also guards the
+            # password-verifying change-password endpoint.
+            raise AuthError("too many attempts; try again shortly")
         recent.append(now)
         self._hits[key] = recent
 
