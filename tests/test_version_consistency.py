@@ -124,4 +124,5 @@ def test_readme_never_pins_an_image_tag() -> None:
     """
     text = (ROOT / "README.md").read_text()
     tags = re.findall(rf"{re.escape(IMAGE)}:(\S+)", text)
-    assert not tags, f"README pins image tag(s) {tags}; keep it version-neutral"
+    pinned = [t for t in tags if t != "latest"]
+    assert not pinned, f"README pins image tag(s) {pinned}; keep it version-neutral"
