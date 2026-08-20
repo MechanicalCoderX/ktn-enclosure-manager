@@ -1,4 +1,4 @@
-# ![icon](docs/images/icon-64.png) KTN Enclosure Manager
+# <img src="docs/images/icon.svg" width="84" alt="" align="top"> KTN Enclosure Manager
 
 A local, zero-cost, web-based enclosure manager for SAS disk shelves attached to
 **TrueNAS SCALE Community Edition** — validated end to end against an
