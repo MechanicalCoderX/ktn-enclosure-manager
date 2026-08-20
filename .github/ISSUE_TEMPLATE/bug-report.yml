@@ -1,0 +1,62 @@
+name: Bug report
+description: Something the app does wrong on hardware it already supports.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Two sanitisation notes before you paste anything:
+        the app's **Diagnostics tab has a Copy button that produces already-sanitised
+        output** — prefer it over hand-collected data; and if you paste `sg_ses`
+        output, feel free to redact drive serials (leave the structure intact).
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: Shown in the Diagnostics tab, or `docker inspect` the image tag.
+      placeholder: "1.5.2"
+    validations:
+      required: true
+  - type: input
+    id: truenas-version
+    attributes:
+      label: TrueNAS SCALE version (or distro if not TrueNAS)
+      placeholder: "25.10.6"
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How is it installed?
+      options:
+        - Install via YAML (TrueNAS Apps UI)
+        - TrueNAS Custom App
+        - docker compose from a shell
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: shelf
+    attributes:
+      label: Enclosure model
+      placeholder: "EMC KTN-STL3"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics output
+      description: Diagnostics tab → Copy. It is sanitised by design.
+      render: json
+  - type: textarea
+    id: logs
+    attributes:
+      label: Container logs around the problem
+      description: "`docker logs ktn-enclosure-manager --since 10m` (or the Apps UI log viewer). Check for secrets before pasting — the app never logs them, but your shell history might."
+      render: text

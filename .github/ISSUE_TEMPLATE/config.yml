@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and general discussion
+    url: https://github.com/MechanicalCoderX/ktn-enclosure-manager/discussions
+    about: Setup help, "will it work on my shelf?", ideas — anything that isn't a bug.
