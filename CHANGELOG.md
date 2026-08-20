@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.2] — 2026-08-20
+
+The `/dev/sg*` permission floor, measured properly this time.
+
+### Security
+- **Every telemetry read now runs `sg_ses --readonly`.** Reads open the device
+  `O_RDONLY`, on which the kernel's per-opcode filter refuses write-class SCSI
+  commands outright — so no bug in the read path can ever reach the enclosure
+  control page. This is kernel-enforced, not application-promised.
+
+### Added
+- **Monitoring-only deployment mode.** Because reads are now genuinely
+  read-only, granting the device `:r` instead of `:rw` is a valid deployment:
+  every telemetry page keeps working (measured on the live shelf) and
+  Identify returns a clear permission error instead of lighting the LED.
+
+### Fixed
+- **The `rw` justification was wrong, and is now exact.** Since 1.1.0 the
+  docs claimed "`SG_IO` counts as a write even for a read-only diagnostic
+  page — with `:r` every call fails EPERM." The measurement was real but
+  misread: `sg_ses` opens the device `O_RDWR` *by default*, so `:r` refused
+  the open, never the ioctl. Re-measured with `--readonly`: the device cgroup
+  gates the open mode; reads pass on `:r`; only SEND DIAGNOSTIC (the IDENT
+  LED — the app's single write) needs a write-opened fd. The `w` in `rw` is
+  for exactly one command, and SECURITY.md, the compose header, the README
+  and the catalog submission texts now say precisely that.
+
 ## [1.5.1] — 2026-08-20
 
 Clears the project's parked "can't be done" list: two of the three turned out

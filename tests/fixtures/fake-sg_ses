@@ -26,7 +26,11 @@ PAGES = {
 
 
 def main(argv: list[str]) -> int:
-    args = [a for a in argv[1:] if a != "--no-time"]
+    # Open-mode and timestamp flags are not page selectors; strip them the way
+    # the real sg_ses would absorb them. --readonly arrived in v1.5.2 when
+    # reads moved to O_RDONLY opens - and this stub's strictness caught it in
+    # E2E, exactly as intended: the flag changed every read's argv shape.
+    args = [a for a in argv[1:] if a not in ("--no-time", "--readonly")]
 
     if "--version" in args:
         print("version: 2.86 20230623 (fixture replay)")

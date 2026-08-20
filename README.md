@@ -189,10 +189,12 @@ host and that the HBA is passed through to the TrueNAS VM. Check
 enclosures.
 
 **Chassis section says unavailable.** The container needs the SES device node
-and it must be granted `rw` (see SECURITY.md — `SG_IO` counts as a write).
-Confirm with `docker exec ktn-enclosure-manager sg_ses -p cf /dev/sgN`.
+granted at least `:r` (telemetry runs on a read-only open; see SECURITY.md).
+Confirm with `docker exec ktn-enclosure-manager sg_ses --readonly -p cf /dev/sgN`.
 
 **Identify returns a permission error.** Check the SES device is granted `:rw`
+— the LED write is the one operation that needs the `w`; a `:r` grant is a
+valid monitoring-only deployment where exactly this error is expected
 (see above). If your enclosure does not support the SES identify command, set
 `KTN_IDENT_METHOD=sysfs` — but note that path needs a writable `/sys` and
 `apparmor=unconfined`.

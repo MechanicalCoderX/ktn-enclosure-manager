@@ -51,12 +51,14 @@ Opening the PR before that is answered would be asking and then not waiting.
 >
 > ### What I want to check before opening a PR
 >
-> **The one unusual ask is a `/dev/sg*` device at `rw`.** That deserves
-> explaining rather than being buried in a diff: `sg_ses` submits SCSI commands
-> through the `SG_IO` ioctl, and the device cgroup classifies that as a write
-> even for a read-only diagnostic page — with `:r` every call fails `EPERM`.
-> It addresses the enclosure processor, not disk data. `CAP_SYS_RAWIO` was
-> tested and is **not** required, so it is not requested.
+> **The one unusual ask is a `/dev/sg*` device at `rw` — and the `w` is for
+> exactly one command.** Every telemetry read runs `sg_ses --readonly` on an
+> `O_RDONLY` fd, where the kernel's per-opcode filter refuses write-class
+> commands outright; measured, a `:r` grant serves every page the app reads.
+> The `w` exists solely for SEND DIAGNOSTIC — the IDENT LED, the app's single
+> write and its reason to exist. It addresses the enclosure processor, not
+> disk data. `CAP_SYS_RAWIO` was tested and is **not** required, so it is not
+> requested.
 >
 > Otherwise it is unremarkable: not privileged, keeps the default AppArmor
 > profile, no host path mounts, and drops every capability except
@@ -127,11 +129,13 @@ Choose the **🚀 App Addition** template, then paste:
 >
 > ## Special Notes
 >
-> **The `/dev/sg*` device is granted `rw`, and that is not what it sounds
-> like.** `sg_ses` submits SCSI commands through the `SG_IO` ioctl, which the
-> device cgroup counts as a write even for a read-only diagnostic page — with
-> `:r` every call fails `EPERM`. It addresses the enclosure processor, not disk
-> data. `CAP_SYS_RAWIO` was tested and is not required.
+> **The `/dev/sg*` device is granted `rw`, and the `w` is for exactly one
+> command.** Telemetry reads run `sg_ses --readonly` on an `O_RDONLY` fd — a
+> `:r` grant serves every page the app reads (measured), and the kernel's
+> per-opcode filter on a read-only fd refuses write-class commands outright.
+> The `w` exists solely for SEND DIAGNOSTIC, the IDENT LED — the app's single
+> write. It addresses the enclosure processor, not disk data. `CAP_SYS_RAWIO`
+> was tested and is not required.
 >
 > Otherwise: not privileged, default AppArmor profile retained, no host path
 > mounts, every capability dropped except `SETUID`/`SETGID` — used once by

@@ -6,10 +6,19 @@
 #              hardware goes through it: read-only telemetry pages, and the one
 #              write it can perform (the IDENT LED).
 #
-#              ':rw' is required and was determined by measurement: sg_ses
-#              submits SCSI commands through the SG_IO ioctl, which the device
-#              cgroup treats as a write even for a read-only diagnostic page.
-#              This addresses the enclosure processor, not disk data.
+#              ':rw' is needed ONLY for that one write. Measured on the live
+#              shelf (2026-08-20): the device cgroup gates the open() mode,
+#              not SG_IO itself - every telemetry page works through a
+#              read-only open (reads pass --readonly since v1.5.2), while
+#              SEND DIAGNOSTIC (the LED) needs a write-opened fd. An earlier
+#              note here claimed SG_IO counts as a write even for read-only
+#              pages; that measurement had only shown sg_ses's default O_RDWR
+#              open being refused. This addresses the enclosure processor,
+#              not disk data.
+#
+#              Monitoring-only deployments may grant ':r' instead: all
+#              telemetry keeps working and the Identify button returns a
+#              clear error instead of lighting the LED.
 #
 # That is the entire list. In particular this app does NOT need:
 #
@@ -22,7 +31,7 @@
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.5.1
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.5.2
     build:
       context: .
       dockerfile: Dockerfile
