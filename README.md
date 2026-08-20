@@ -25,6 +25,8 @@ hardware identity, or touching the TrueNAS WebUI.
   sensor.
 - **Identify** — light a bay's LED for 10s, 30s, 60s, 5 minutes, or until
   cleared. Timers are server-side, so closing the browser cannot strand a lit LED.
+
+  ![Identify demo](docs/images/identify-demo.gif)
 - **Alerts** — posts to ntfy or any webhook when a bay's health changes, naming
   the bay, serial and pool so you know which drive to pull. Transitions only, so
   a degraded pool does not message every poll.
@@ -259,7 +261,8 @@ npx playwright test                                          # E2E against the r
 
 ```bash
 KTN_E2E_SYNTHETIC_SLOTS=0 bash scripts/e2e-server.sh &   # backend on :8421
-node frontend/scripts/screenshots.mjs
+node frontend/scripts/screenshots.mjs        # the PNGs
+node frontend/scripts/identify-demo.mjs      # the demo GIF (see its header for the ffmpeg step)
 ```
 
 `KTN_E2E_SYNTHETIC_SLOTS=0` prunes the fixture's synthetic empty bay (SES 99,

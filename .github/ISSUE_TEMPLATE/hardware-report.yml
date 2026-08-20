@@ -1,0 +1,61 @@
+name: Hardware compatibility report
+description: You ran this against a shelf other than the KTN-STL3 — worked or not, this is the most valuable issue you can file.
+labels: [hardware-report]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This application is validated end-to-end on one shelf (EMC KTN-STL3).
+        Every other SES enclosure differs in ways only real captures reveal, so
+        **a report with the captures below is how support for your shelf gets
+        built** — whether the app currently works on it or not.
+
+        Redact drive serials/WWNs if you prefer; keep the structure intact.
+  - type: input
+    id: shelf
+    attributes:
+      label: Enclosure vendor and model
+      placeholder: "Dell MD1200 / NetApp DS4246 / ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Current result
+      options:
+        - Works fully (drive map, chassis, identify)
+        - Partially works (say what breaks below)
+        - Does not work at all
+    validations:
+      required: true
+  - type: textarea
+    id: discovery
+    attributes:
+      label: Enclosure discovery
+      description: |
+        ```
+        lsscsi -g | grep -i enclosu
+        ls /sys/class/enclosure/*/
+        cat /sys/class/enclosure/*/id
+        ```
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: ses-pages
+    attributes:
+      label: SES pages
+      description: |
+        With sg3-utils (`sg_ses` ships inside the app image too):
+        ```
+        sg_ses --no-time -p cf /dev/sgN
+        sg_ses --no-time -p es /dev/sgN
+        sg_ses --no-time -p aes /dev/sgN
+        ```
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else (what breaks, screenshots, oddities)
