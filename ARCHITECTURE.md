@@ -40,7 +40,7 @@ backend/ktnmgr/
     ses.py               allow-listed sg_ses execution (local and via helper)
     ses_parser.py        configuration + join page parsers
   truenas/
-    client.py            JSON-RPC over WebSocket, REST v2.0 fallback
+    client.py            JSON-RPC over WebSocket; opt-in legacy REST fallback (off by default)
     correlate.py         pool/vdev/SMART attribution onto block devices
   services/
     state.py             polling, caching, composition of the Bay view

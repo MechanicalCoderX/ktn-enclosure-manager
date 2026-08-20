@@ -112,3 +112,17 @@ def test_ci_python_matches_the_shipped_runtime() -> None:
         f"CI tests on {sorted(ci_versions)} but the image ships "
         f"{sorted(image_versions)}"
     )
+
+
+def test_readme_never_pins_an_image_tag() -> None:
+    """The README must stay version-neutral about the image.
+
+    It sat outside this file's checks and promptly drifted: an uninstall
+    example pinned :1.4.0 and survived three releases. Prose that names a
+    specific tag goes stale silently; commands in the README must work on
+    whatever version the reader runs.
+    """
+    text = (ROOT / "README.md").read_text()
+    tags = re.findall(rf"{re.escape(IMAGE)}:(\S+)", text)
+    pinned = [t for t in tags if t != "latest"]
+    assert not pinned, f"README pins image tag(s) {pinned}; keep it version-neutral"

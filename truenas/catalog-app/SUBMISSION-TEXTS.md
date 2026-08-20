@@ -103,7 +103,7 @@ Choose the **🚀 App Addition** template, then paste:
 >
 > - **Upstream**: https://github.com/MechanicalCoderX/ktn-enclosure-manager
 > - **Documentation**: https://github.com/MechanicalCoderX/ktn-enclosure-manager#readme
-> - **App Version**: 1.3.4
+> - **App Version**: 1.5.2
 >
 > ## Testing
 >
