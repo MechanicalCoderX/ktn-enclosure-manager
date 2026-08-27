@@ -85,7 +85,12 @@ services:
       # DIAGNOSTIC, issued by the gated helper. ':r' is a supported
       # monitoring-only grant - telemetry keeps working and Identify returns
       # a clear permission error instead of lighting the LED.
-      - "/dev/sg16:/dev/sg16:rw"
+      #
+      # Substitute YOUR node on both sides of the colon. This deliberately
+      # names no real device: pasting someone else's sg number fails at
+      # container create with an opaque device error, which is a poor way to
+      # find out you skipped an edit.
+      - "/dev/sgX:/dev/sgX:rw"
 
     cap_drop:
       - ALL
@@ -136,7 +141,7 @@ services:
       # (loopback is always answered, so the healthcheck keeps working);
       # the forwarded list names a TLS-terminating proxy whose
       # X-Forwarded-Proto is trusted for the cookie's Secure flag.
-      # KTN_ALLOWED_HOSTS: "nas.example.lan,10.10.20.51"
+      # KTN_ALLOWED_HOSTS: "nas.example.lan,192.0.2.10"
       # KTN_FORWARDED_ALLOW_IPS: "127.0.0.1"
 
       # Optional: restrict management to one enclosure.
