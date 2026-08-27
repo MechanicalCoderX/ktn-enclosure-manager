@@ -24,7 +24,12 @@ FROM python:3.14-slim@sha256:83ff1d245a3d57d04152252d3ef9cb361494d0b3395abd65a5e
 
 # sg3-utils: read-only chassis telemetry.
 # util-linux: setpriv, used to drop privileges for the web process.
+# The upgrade line applies Debian security point-releases that land between
+# base-image rebuilds: the digest pin freezes the OS snapshot, and Docker Hub
+# rebuilds slim images on its own schedule, so a fixed CVE (e.g. the openssl
+# deb13u2 -> u3 line) can sit unpatched in the newest pinned digest for days.
 RUN apt-get update \
+ && apt-get -y upgrade \
  && apt-get install -y --no-install-recommends sg3-utils util-linux \
  && rm -rf /var/lib/apt/lists/*
 
