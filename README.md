@@ -146,27 +146,49 @@ implementation gets both wrong:
 
 ### Fan control is not available on this shelf
 
-Measured, so nobody has to repeat it. The KTN-STL3 exposes four controllable
-cooling elements — `Cooling Fan B` at type header `20` (elements `20,0`,
-`20,1`) and `Cooling Fan A` at `23` (`23,0`, `23,1`) — plus an aggregate
-`Cooling Fan M` at `17` with zero elements, which must not be written to. The
-enclosure runs the two banks differently on its own authority - one PSU's pair
-latched at `speed_code=7` (5300 RPM, with the "requested on" flag set), the
-other at `speed_code=3` (2490 RPM) - which itself proves the firmware does
-modulate; it just refuses outside input.
+The shelf exposes four cooling elements — `Cooling Fan B` at type header `20`
+(elements `20,0`, `20,1`) and `Cooling Fan A` at `23` (`23,0`, `23,1`) — plus
+an aggregate `Cooling Fan M` at `17` with zero elements, which must not be
+written to. SES-3 defines a REQUESTED SPEED CODE field for these, so the
+question is not whether the field exists but whether the LCC honours it.
 
-**Requesting a lower speed does not work.** `sg_ses --index=20,0
---set=speed_code=6` returns success and prints nothing, and the value reads
-back as `7` immediately and still `7` twelve seconds later. The firmware
-accepts the request and reverts it. No neighbouring fan moves, so this is not
-a chassis-wide request being applied elsewhere — the enclosure simply keeps
-fan policy to itself. Tested with drives at 30 °C, the condition under which a
-firmware clamping to a computed minimum would be most likely to permit a
-reduction.
+**Fan policy belongs to the firmware, and that is directly observable
+read-only.** The captured fixtures in `tests/fixtures/ktn-stl3/` (2026-08-13)
+show every cooling element at `Actual speed=5300 rpm, Fan at highest speed`.
+On 2026-08-27 the same shelf reports bank B still at 5300 RPM (`speed_code=7`)
+and bank A at **2490 RPM (`speed_code=3`)** — while both PSU sensors read the
+same temperatures. No host has ever written to subenclosure 4, so bank A
+changed speed entirely on the enclosure's own authority. Two dated captures,
+no writes, different speeds: the firmware modulates, and it does so per bank.
 
-The failure mode matters more than the result: **`rc=0` is not confirmation.**
-Anything that checks only the exit status would report a working fan
-controller while the fans never changed. Read the value back.
+**Nothing here demonstrates that a well-formed speed request is refused,
+because one has never been sent.** The single write attempted in this
+project's history was `sg_ses --index=20,0 --set=speed_code=6`, and that
+command is self-contradictory: `sg_ses` builds the control element by copying
+the status element's flags, element `20,0` reports `Requested on=0`, and
+SES-3 Table 86 defines `RQST ON = 0` as *"the cooling mechanism is requested
+to turn off or remain off"*. So the enclosure was asked to set a speed **and**
+to switch the fan off, in the same descriptor. Reports on other hardware
+(Supermicro SC847E, Xyratex HB-1235) show that exact command form briefly
+stopping a fan before firmware reverts it. Treat "the firmware ignores speed
+requests" as **unproven**; what is proven is that no host-reachable override
+has ever been demonstrated on this hardware family, and that the firmware is
+actively managing the fans regardless.
+
+**`rc=0` is not confirmation**, and here it structurally cannot be: the
+Cooling *status* element carries `ACTUAL FAN SPEED` but no requested-speed
+read-back at all, so there is no field in which an accepted request could be
+observed. Anything checking only the exit status would report a working fan
+controller while nothing changed. Read the actual speed back, twice, seconds
+apart.
+
+**There is no non-SES path, and that one is permanent.** The Linux `ses`
+driver enumerates only `ENCLOSURE_COMPONENT_DEVICE` and
+`ENCLOSURE_COMPONENT_ARRAY_DEVICE` (`drivers/scsi/ses.c`), so cooling
+elements never appear under `/sys/class/enclosure/` on any kernel, for any
+enclosure — the drive `locate` and `active` attributes are there, no fan node
+is. This shelf also returns Illegal Request for mode page `0x14` (Enclosure
+Services Management), so that avenue is closed too.
 
 Two related facts from the same investigation:
 

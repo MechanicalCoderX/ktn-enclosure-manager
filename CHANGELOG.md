@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+- **A bay the app itself lit and then auto-cleared no longer reports as
+  "external/unknown origin".** The IDENT verdict composed a *cached* sysfs
+  reading (up to `poll_slots_seconds` old) with the *live* record dict
+  without ordering them, so in the window between a verified clear and the
+  next slot poll a bay read as lit-with-no-owner — the app's own request,
+  reported as an intruder's, while the LED was already physically out. Every
+  offered duration is an exact multiple of the poll interval and the
+  identify route re-phases that poll clock, so the expiry always landed
+  beside a scheduled poll: the race was structural, not unlucky. Writes this
+  app makes *and verifies by hardware read-back* are now stamped, and a
+  reading older than our own last verified write is superseded by it. A
+  genuinely external IDENT is still reported (§27) — only the single
+  in-flight reading that straddles our own write is discarded.
+
+### Changed
+- The README's fan-control section no longer claims the firmware was
+  observed refusing a speed request. The one command ever run
+  (`--set=speed_code=6`) also carried `RQST ON = 0`, which SES-3 defines as
+  *turn the fan off*, so it never tested a well-formed request. The section
+  now leads with what is actually provable read-only — the shelf changed
+  bank A from 5300 RPM to 2490 RPM with no host write to that subenclosure —
+  and adds the structural closure: the Linux `ses` driver never enumerates
+  cooling elements, so no sysfs fan path exists on any enclosure.
+
 ## [1.5.4] — 2026-08-26
 
 Hardening release from a full adversarial pre-submission review (eight

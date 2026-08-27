@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -214,8 +215,10 @@ async def test_reconcile_leaves_external_ident_alone(manager: IdentManager) -> N
     await manager.reconcile({(LOGICAL_ID, 5): True})
     assert manager.writer.read(LOGICAL_ID, 5) is True
     assert manager.writer.writes == []
-    origin, _ = manager.describe(LOGICAL_ID, 5, locate_on=True)
-    assert origin == ORIGIN_EXTERNAL
+    locate, origin, _ = manager.describe(
+        LOGICAL_ID, 5, locate_on=True, observed_at=time.monotonic()
+    )
+    assert (locate, origin) == (True, ORIGIN_EXTERNAL)
 
 
 async def test_reconcile_clears_only_our_expired_request(tmp_path: Path) -> None:
@@ -285,7 +288,9 @@ async def test_state_survives_manager_restart(tmp_path: Path) -> None:
 
 
 def test_describe_reports_nothing_when_dark(manager: IdentManager) -> None:
-    assert manager.describe(LOGICAL_ID, 0, locate_on=False) == (None, None)
+    assert manager.describe(
+        LOGICAL_ID, 0, locate_on=False, observed_at=time.monotonic()
+    ) == (False, None, None)
 
 
 def test_audit_log_rotates_instead_of_growing_forever(tmp_path: Path) -> None:

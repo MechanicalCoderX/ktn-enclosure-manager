@@ -61,16 +61,30 @@ class Cached(Generic[T]):
     last_error: str | None = None
     last_attempt_at: datetime | None = None
     _monotonic: float = field(default=0.0, repr=False)
+    #: Monotonic instant the data in `value` was READ, which is not when it was
+    #: cached: a poll samples the hardware and only then stores the result, and
+    #: for the slot cache the gap between the two is where a concurrent IDENT
+    #: write lands (IdentManager.describe). `updated_at` answers "how fresh is
+    #: this cache" for the diagnostics page; this answers "how old is the world
+    #: it describes", which is the only question an ordering can be built on.
+    observed_monotonic: float = field(default=0.0, repr=False)
 
     def due(self, interval: float) -> bool:
         return (time.monotonic() - self._monotonic) >= interval
 
-    def succeed(self, value: T) -> None:
+    def succeed(self, value: T, observed_at: float | None = None) -> None:
         self.value = value
         self.updated_at = datetime.now(UTC)
         self.last_attempt_at = self.updated_at
         self.last_error = None
         self._monotonic = time.monotonic()
+        # A caller that does not say when it sampled is taken to have sampled
+        # now. Every source in fact samples a little before it stores, but the
+        # difference only matters where something is ordered against the
+        # reading, and the slot cache - which IdentManager.describe orders
+        # against its own writes - is the one source that passes its real
+        # sampling instant.
+        self.observed_monotonic = self._monotonic if observed_at is None else observed_at
 
     def fail(self, error: str) -> None:
         self.last_attempt_at = datetime.now(UTC)
@@ -196,6 +210,15 @@ class StateService:
         exactly as poll_chassis's sg_ses reads do.
         """
         loop = asyncio.get_running_loop()
+        # Stamped before the first executor hop, so it is the earliest instant
+        # any reading below could have been taken. A poll is not instantaneous
+        # - discover() and the per-enclosure read_slots() calls each queue
+        # behind the cross-process enclosure lock - and an IDENT write can be
+        # verified while this one is in flight, in which case the readings it
+        # is about to cache are already superseded. Being early here is the
+        # safe direction: it can only make bays() distrust a reading that
+        # genuinely straddled one of our own writes.
+        observed_at = time.monotonic()
         try:
             discovered = await loop.run_in_executor(None, self.backend.discover)
             found = [e for e in discovered if self._allowed(e.logical_id)]
@@ -204,7 +227,7 @@ class StateService:
                 ref.logical_id: await loop.run_in_executor(None, self.backend.read_slots, ref)
                 for ref in found
             }
-            self.slots.succeed(slots)
+            self.slots.succeed(slots, observed_at=observed_at)
         except OSError as exc:
             self.slots.fail(str(exc))
 
@@ -457,7 +480,16 @@ class StateService:
                 smart = SmartInfo()
             identity = merge_identity(local, remote)
             identity.sas_address = sas_addresses.get(slot.ses_slot)
-            origin, expires = self.ident.describe(ref.logical_id, slot.ses_slot, slot.locate)
+            # The IDENT manager gets the age of this reading, not just its
+            # value, because it holds the newer evidence: a write it verified
+            # by hardware read-back after this snapshot was taken supersedes
+            # what the snapshot says (§27, IdentManager.describe). Its verdict
+            # replaces slot.locate for the whole bay rather than only feeding
+            # origin - a bay reported lit with no origin, or dark with a live
+            # countdown, would just be a differently-shaped lie.
+            locate, origin, expires = self.ident.describe(
+                ref.logical_id, slot.ses_slot, slot.locate, self.slots.observed_monotonic
+            )
 
             composed.append(
                 Bay(
@@ -468,7 +500,7 @@ class StateService:
                     health=classify(slot.status, slot.fault, bool(device), zfs, smart),
                     status=slot.status,
                     power_status=slot.power_status,
-                    locate=slot.locate,
+                    locate=locate,
                     fault=slot.fault,
                     ident_expires_at=expires,
                     ident_origin=origin,

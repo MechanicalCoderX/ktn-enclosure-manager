@@ -10,6 +10,13 @@ Design points from the spec:
      alone until an authenticated admin clears it.
 §37  A container restart during a timed IDENT is an explicit failure case, so
      outstanding requests are persisted to disk and reloaded.
+
+§27's external/unknown verdict is a *composition* of two independently-clocked
+facts: an observation of the hardware (which reaches this module through
+StateService's slot cache, up to poll_slots_seconds old) and this module's own
+records (live, in memory). Composing them without ordering information is what
+made a bay the application itself lit and then cleared briefly report as
+external - see ``describe`` and ``_last_write`` below.
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -83,6 +91,17 @@ class IdentManager:
         #: In-memory only: after a container restart, reconciliation (§27)
         #: re-proves ownership and retries from scratch anyway.
         self._clear_failures: dict[tuple[str, int], tuple[int, datetime]] = {}
+        #: (enclosure_id, ses_slot) -> (monotonic instant, resulting locate
+        #: state) of the last write this app made to that slot AND verified by
+        #: hardware read-back. It is the newest proof of a slot's IDENT state
+        #: that exists anywhere in the process, so ``describe`` uses it to
+        #: order a caller's cached observation against our own writes (§27).
+        #: Monotonic rather than wall clock: the two timestamps are only ever
+        #: compared inside one process, and an NTP step must not be able to
+        #: make an observation look older or newer than it was.
+        #: In-memory only, and never pruned - one entry per bay the app has
+        #: ever written to, so it is bounded by the size of the shelf.
+        self._last_write: dict[tuple[str, int], tuple[float, bool]] = {}
         # One write lock per enclosure (§26 step 5) so two concurrent requests
         # cannot interleave a write and its verification read.
         self._locks: dict[str, asyncio.Lock] = {}
@@ -129,15 +148,54 @@ class IdentManager:
         return self._records.get((enclosure_id.lower(), ses_slot))
 
     def describe(
-        self, enclosure_id: str, ses_slot: int, locate_on: bool
-    ) -> tuple[str | None, datetime | None]:
-        """Return (origin, expires_at) for a bay given its observed locate state."""
+        self, enclosure_id: str, ses_slot: int, locate_on: bool, observed_at: float
+    ) -> tuple[bool, str | None, datetime | None]:
+        """Return (locate, origin, expires_at) for a bay from an observation.
+
+        ``locate_on`` is a hardware reading and ``observed_at`` is the
+        ``time.monotonic()`` instant at which it was taken - not the instant it
+        was cached, and not now. Callers serve readings from a cache that is up
+        to one poll interval old, and the timestamp is mandatory because an
+        observation whose age is unknown cannot be ordered against this
+        manager's own writes; getting that ordering wrong is precisely the bug
+        this argument exists to prevent.
+
+        An observation taken at or before our last verified write to the slot
+        is superseded by that write's result. The write is the stronger
+        evidence: ``identify`` only reaches ``_last_write`` after the hardware
+        read-back confirmed the new state, so at that instant the LED provably
+        was what we say it was, while the reading describes a moment that has
+        already passed.
+
+        Without that rule the timer's auto-clear produced a bay that was
+        reported as lit (from a slot cache filled before the clear) with no
+        record (popped by the clear), which §27 renders as external/unknown
+        origin - a warning about an LED that was already provably dark, for a
+        request the application itself owned. The same false verdict is
+        reachable from either side of the race: a poll whose sysfs read landed
+        before the clearing write can complete after it, so simply refreshing
+        the cache once the timer clears (as the manual identify route does)
+        narrows the window without closing it. Ordering the two clocks closes
+        it for every phase relationship.
+
+        The rule is strictly bounded and cannot hide a genuinely external LED:
+        it only ever overrides a reading OLDER than one of our own verified
+        writes. An external light switched on after that write is observed by
+        a later poll, and reported (§27). Only the single in-flight poll that
+        straddles our write is discarded, which is exactly the reading that
+        cannot be attributed to either side.
+        """
+        key = (enclosure_id.lower(), ses_slot)
+        written_at, written_state = self._last_write.get(key, (None, False))
+        if written_at is not None and observed_at <= written_at:
+            locate_on = written_state
+
         record = self.record_for(enclosure_id, ses_slot)
         if not locate_on:
-            return (None, None)
+            return (False, None, None)
         if record is None:
-            return (ORIGIN_EXTERNAL, None)
-        return (record.origin, record.expires_at)
+            return (True, ORIGIN_EXTERNAL, None)
+        return (True, record.origin, record.expires_at)
 
     # ---------------------------------------------------------------- mutation
 
@@ -212,7 +270,30 @@ class IdentManager:
             # auto-clear: off means the LED is provably out, and on starts a
             # fresh request whose expiry must not inherit the old backoff.
             self._clear_failures.pop(key, None)
+
+            # PUBLICATION ORDER IS LOAD-BEARING, and it differs per branch.
+            #
+            # describe() reads _last_write and then _records, and bays() does
+            # NOT only run on the event loop: the /bays endpoint is a sync
+            # `def` (Starlette runs it in the anyio threadpool) and the health
+            # notifier composes bays() via run_in_executor. A reader can
+            # therefore observe these two dicts between any pair of bytecodes.
+            #
+            # So each branch publishes first whichever half is harmless when
+            # seen alone, and second the half that would fabricate an
+            # external IDENT if it were seen alone:
+            #
+            #   off: stamp(off) alone -> the reading is overridden to dark,
+            #        describe() returns "not lit". Harmless. But a popped
+            #        record seen WITHOUT the stamp is precisely the stale-lit
+            #        + no-record pair that reports external. Stamp first.
+            #   on:  the record alone -> a still-dark reading with a record
+            #        just reads as "off" for one poll. Harmless. But
+            #        stamp(on) seen WITHOUT the record forces locate on with
+            #        nothing to attribute it to - external again. Record
+            #        first.
             if not on:
+                self._last_write[key] = (time.monotonic(), False)
                 self._records.pop(key, None)
                 self._save()
                 return None
@@ -229,6 +310,7 @@ class IdentManager:
                 origin=ORIGIN_APP,
             )
             self._records[key] = record
+            self._last_write[key] = (time.monotonic(), True)
             self._save()
             return record
 

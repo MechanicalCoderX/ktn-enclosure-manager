@@ -86,8 +86,10 @@ class FakeDiskReader:
 
 
 class FakeIdent:
-    def describe(self, enclosure_id: str, ses_slot: int, locate: bool) -> tuple[None, None]:
-        return (None, None)
+    def describe(
+        self, enclosure_id: str, ses_slot: int, locate: bool, observed_at: float
+    ) -> tuple[bool, None, None]:
+        return (locate, None, None)
 
 
 class FakeSes:
