@@ -190,6 +190,36 @@ enclosure — the drive `locate` and `active` attributes are there, no fan node
 is. This shelf also returns Illegal Request for mode page `0x14` (Enclosure
 Services Management), so that avenue is closed too.
 
+**The fans are not chassis fans — they live inside the power supplies**, and
+that is why the two banks can disagree. The configuration page places
+`Cooling Fan B` in subenclosure 3 and `Cooling Fan A` in subenclosure 4, each
+alongside that subenclosure's own temperature sensors and its own `Power
+Supply` element. Each PSU runs its own pair on its own controller. On this
+shelf the two PSUs are the same model, same FRU revision and consecutive
+serial numbers, report the same temperatures, and still run at different
+speeds — which is a property of two independent control loops, not of a
+chassis-wide policy anyone can address.
+
+### Two things worth knowing before you touch SES on a Viper LCC
+
+**Serialise every SES command to a given enclosure.** This application already
+does — one cross-process `flock` guards every `sg_ses` invocation and every
+enclosure sysfs read (`enclosure/access.py`) — and it turns out that is not
+belt-and-braces. On some Viper LCC firmware, *parallel* SES access makes the
+enclosure disappear from the kernel entirely: the documented reproduction is
+reading `locate` for several slots concurrently, and the reporter swapped LCCs
+between four chassis and confirmed the fault followed the LCC, not the
+chassis. Hardware revision markings do not predict which units are affected.
+A `flock` mutex was the fix there too. If you write your own tooling for one
+of these shelves, do the same thing.
+
+**Do not poll the String In page (0x04).** It carries a plain-ASCII firmware
+console log — genuinely useful, with timestamped expander events — but it is
+a *drain-on-read* ring buffer: one read returned 4,560 bytes, an immediate
+second read returned nothing. Anything that polls it destroys log lines every
+other consumer would have seen. Read it deliberately, once, when you actually
+want the log. This application never reads it.
+
 Two related facts from the same investigation:
 
 - The enclosure publishes **no thermal thresholds at all** — every temperature
