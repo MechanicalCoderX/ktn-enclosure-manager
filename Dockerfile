@@ -9,7 +9,7 @@
 # ---------------------------------------------------------------- frontend
 # Pinned by digest: a floating tag makes today's build and next month's differ
 # silently, and hides a tampered upstream. Dependabot bumps these.
-FROM node:26-slim@sha256:4ebb5ace66f15a24c14c492e01a8beeed4fddf970a856109f5126e703e5fe503 AS frontend
+FROM node:26-slim@sha256:5758d367d7b4f48b73a9bb3530e687e47efb289f3b43f9c0450a25225ae0db5d AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
 # Neither --omit=optional nor --ignore-scripts here: rollup resolves its native
@@ -20,7 +20,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ----------------------------------------------------------------- runtime
-FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS runtime
+FROM python:3.14-slim@sha256:83ff1d245a3d57d04152252d3ef9cb361494d0b3395abd65a5ebe91c401c8e83 AS runtime
 
 # sg3-utils: read-only chassis telemetry.
 # util-linux: setpriv, used to drop privileges for the web process.

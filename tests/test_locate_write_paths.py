@@ -183,7 +183,7 @@ def _flock_is_held(lock_path: Path) -> bool:
     the lock, because flock conflicts across open file descriptions even
     within one process. Closing the fd releases the probe's own lock in the
     not-held case."""
-    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o666)
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
