@@ -129,9 +129,11 @@ class SesLocateWriter:
         self.backend = backend
         self.ses = ses
         self._type_index: dict[str, int] = {}
-        #: logical id -> {device slot number -> element index}, with None
-        #: marking a slot number two elements both claimed (ambiguous, so it
-        #: must never be written to). Cached for the writer's lifetime, like
+        #: logical id -> {device slot number -> per-type element index}, with
+        #: None marking a slot that cannot be addressed unambiguously (claimed
+        #: twice, claimed across bay-type blocks, or its block failed the
+        #: element-numbering cross-check - see _build_slot_map for the full
+        #: policy). Cached for the writer's lifetime, like
         #: _type_index: the slot->element wiring is chassis topology - which
         #: element addresses which physical bay is baked into the backplane
         #: and its firmware, and hot-swapping a drive changes which disk sits
@@ -186,22 +188,83 @@ class SesLocateWriter:
                 raise LocateError(
                     f"could not read SES additional element status: {exc}"
                 ) from exc
-            mapping: dict[int, int | None] = {}
-            for block in parse_additional_element_status(page.stdout):
-                if block.type_index != type_index:
-                    continue
-                for element_index, entry in block.entries.items():
-                    slot_number = entry.get("device_slot_number")
-                    # An empty bay may carry no protocol descriptor and thus
-                    # no slot number at all; it simply stays unmapped and any
-                    # IDENT for it is refused rather than guessed at.
-                    if not isinstance(slot_number, int):
-                        continue
-                    mapping[slot_number] = (
-                        None if slot_number in mapping else element_index
-                    )
+            mapping = self._build_slot_map(
+                parse_additional_element_status(page.stdout), type_index
+            )
+            if not mapping:
+                # Not cached, mirroring _array_type_index's raise-without-
+                # cache: an anomalous one-off read (truncated output, a
+                # firmware hiccup) must not pin every future IDENT to
+                # refusal until restart. A genuinely mapless enclosure just
+                # pays a page re-read per attempt.
+                raise LocateError(
+                    "refusing IDENT: the enclosure's additional element status "
+                    "page maps no device slot numbers for the bay type in use"
+                )
             self._slot_to_element[logical_id] = mapping
         return self._slot_to_element[logical_id]
+
+    @staticmethod
+    def _build_slot_map(blocks: list, type_index: int) -> dict[int, int | None]:
+        """Fold AES bay blocks into {device slot number -> per-type index}.
+
+        The element index sg_ses needs is the entry's POSITION within its
+        block (see AdditionalElementBlock: one descriptor per individual
+        element, in element order), never the printed global index. A slot
+        number is addressable only when exactly one element anywhere on the
+        page claims it AND that element sits in the type descriptor IDENT
+        addresses; every other claim pattern maps to None (refused):
+
+        - claimed twice within the block, or by a second block of the same
+          type index (a second subenclosure restarts positions, so neither
+          claim is trustworthy);
+        - claimed by the chosen block AND another bay-type block - the
+          kernel builds sysfs slots from every bay type, so the sysfs slot
+          number cannot say which block's bay it means;
+        - claimed only by a foreign block: absent from the map entirely,
+          refused as unmapped rather than mis-addressed.
+
+        A block whose printed element indexes repeat or regress (sg_ses
+        itself carries a workaround for firmware emitting bogus repeated
+        ei=0) fails the cross-check and poisons every slot it claims: if the
+        firmware cannot number its own elements consistently, its descriptor
+        ORDER cannot be trusted to be status-page order either.
+        """
+        first_chosen_seen = False
+        claims: dict[int, list[tuple[bool, bool, int]]] = {}
+        for block in blocks:
+            chosen = block.type_index == type_index and not first_chosen_seen
+            if block.type_index == type_index:
+                first_chosen_seen = True
+
+            printed = [
+                e["element_index"] for e in block.entries if "element_index" in e
+            ]
+            ordered = all(b > a for a, b in zip(printed, printed[1:], strict=False))
+
+            for position, entry in enumerate(block.entries):
+                slot_number = entry.get("device_slot_number")
+                # An empty bay may carry no protocol descriptor and thus no
+                # slot number; it stays unclaimed and IDENT for it is
+                # refused rather than guessed at.
+                if not isinstance(slot_number, int):
+                    continue
+                claims.setdefault(slot_number, []).append(
+                    (chosen, chosen and ordered, position)
+                )
+
+        mapping: dict[int, int | None] = {}
+        for slot_number, claim_list in claims.items():
+            if len(claim_list) == 1 and claim_list[0][1]:
+                mapping[slot_number] = claim_list[0][2]
+            elif any(chosen for chosen, _, _ in claim_list) or len(claim_list) > 1:
+                # Ambiguous (or the chosen block failed the ordering
+                # cross-check): recorded as None so the refusal names the
+                # duplicate rather than reporting the slot as unknown.
+                mapping[slot_number] = None
+            # A single claim from a foreign bay block: left out entirely,
+            # refused as unmapped - it is not this type descriptor's bay.
+        return mapping
 
     def _element_index_for(self, ref: object, type_index: int, slot: int) -> int:
         """Translate a sysfs slot number into the element index sg_ses needs.
@@ -218,9 +281,10 @@ class SesLocateWriter:
             return element_index
         if slot in mapping:
             raise LocateError(
-                f"refusing IDENT for slot {slot}: the enclosure reports more than "
-                f"one element with device slot number {slot}, so the bay cannot "
-                "be addressed unambiguously"
+                f"refusing IDENT for slot {slot}: the enclosure's additional "
+                f"element status page cannot address device slot number {slot} "
+                "unambiguously (more than one element claims it, or its "
+                "block's element numbering is inconsistent)"
             )
         offered = ", ".join(str(s) for s in sorted(mapping)) or "none"
         raise LocateError(
@@ -268,9 +332,18 @@ class SesLocateWriter:
 
 
 class HelperLocateWriter:
-    """Talks to the privileged helper over a unix socket."""
+    """Talks to the privileged helper over a unix socket.
 
-    def __init__(self, socket_path: Path, timeout: float = 5.0) -> None:
+    The default timeout is sized to the helper's worst-case cold-cache write
+    pipeline, not to a healthy round-trip: configuration-page read (<=20s,
+    ses.DEFAULT_TIMEOUT) + AES-page read (<=20s) + enclosure flock wait
+    (<=30s, access.DEFAULT_LOCK_TIMEOUT) + the IDENT command (<=20s) + the
+    settle poll (<=2s). Giving up before the helper does is worse than
+    waiting: the command may still complete server-side after the client
+    stops listening, leaving a lit LED with no record of who owns it.
+    """
+
+    def __init__(self, socket_path: Path, timeout: float = 95.0) -> None:
         self.socket_path = Path(socket_path)
         self.timeout = timeout
 

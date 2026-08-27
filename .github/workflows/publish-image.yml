@@ -114,6 +114,12 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # latest=false is load-bearing: metadata-action's default flavor is
+          # latest=auto, which adds :latest for ANY semver tag and would
+          # silently defeat the highest-tag gate below - the gated raw entry
+          # must be the sole source of :latest.
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -137,4 +143,7 @@ jobs:
           cache-from: |
             type=gha,scope=image-amd64
             type=gha,scope=image-arm64
-          cache-to: type=gha,mode=max
+          # No cache-to: verify is the sole cache producer. Publishing wrote
+          # to the unscoped default cache before 1.5.4, which nothing reads
+          # any more - and not writing here guarantees publish can never
+          # overwrite the per-arch caches the scan gate populated.

@@ -211,7 +211,7 @@ def test_duplicate_slot_numbers_are_refused(tmp_path: Path) -> None:
         "additional_element_status": DUPLICATE_SLOT_AES,
     }
     writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [2], {})
-    with pytest.raises(LocateError, match="more than one element with device slot number 2"):
+    with pytest.raises(LocateError, match="cannot address device slot number 2"):
         writer.write(PERMUTED_ID, 2, True)
     assert ses.ident_calls == []
 
@@ -226,4 +226,116 @@ def test_aes_read_failure_becomes_locate_error(tmp_path: Path) -> None:
     writer, ses = _writer(tmp_path, STL3_ID, pages, [0], {})
     with pytest.raises(LocateError, match="additional element status"):
         writer.write(STL3_ID, 0, True)
+    assert ses.ident_calls == []
+
+
+# ---------------------------------------------------- coordinate systems
+#
+# The four fixtures below are the regression suite for the global-vs-per-type
+# index bug: sg_ses prints the AES descriptor's raw ELEMENT INDEX field,
+# which is GLOBAL across type descriptors (the real KTN capture proves it),
+# while --index=T,E consumes the 0-based index WITHIN type T. Feeding the
+# printed value to --index is only ever correct on a shelf whose bay
+# descriptor happens to come first with eiioe=0 - such as the KTN-STL3,
+# which is exactly why the bug survived N=1 hardware.
+
+BAYS_SECOND_ID = "0x5000000000000003"
+EIIOE1_ID = "0x5000000000000004"
+EIP0_ID = "0x5000000000000005"
+CROSS_BLOCK_ID = "0x5000000000000006"
+
+
+def test_bays_second_shelf_uses_per_type_position(tmp_path: Path) -> None:
+    """The bay block sits AFTER a one-element expander block, so its printed
+    indexes run 1..4 while its per-type positions run 0..3. Requesting bay 1
+    must issue --index=1,0; the printed value 1 would light bay 2."""
+    pages = {
+        "configuration": (SYNTHETIC / "sg_cf_bays_second.txt").read_text(),
+        "additional_element_status": (SYNTHETIC / "sg_aes_bays_second.txt").read_text(),
+    }
+    writer, ses = _writer(
+        tmp_path, BAYS_SECOND_ID, pages, [1, 2, 3, 4], {0: 1, 1: 2, 2: 3, 3: 4}
+    )
+    assert writer.write(BAYS_SECOND_ID, 1, True) is True
+    assert ses.ident_calls[-1] == ("/dev/sg16", 1, 0, True)
+    backend = writer.backend
+    lit = {slot for slot, d in backend.dirs.items() if backend.read_locate_at(d / "locate")}
+    assert lit == {1}, "the printed global index would have lit bay 2"
+    assert writer.write(BAYS_SECOND_ID, 4, True) is True
+    assert ses.ident_calls[-1] == ("/dev/sg16", 1, 3, True)
+
+
+def test_eiioe1_shelf_ignores_the_shifted_printed_index(tmp_path: Path) -> None:
+    """Under eiioe=1 the printed index additionally counts overall elements,
+    so the first bay prints 1. Position stays the truth: bay 0 is element 0."""
+    pages = {
+        "configuration": (SYNTHETIC / "sg_cf_device_slot.txt").read_text(),
+        "additional_element_status": (SYNTHETIC / "sg_aes_eiioe1.txt").read_text(),
+    }
+    writer, ses = _writer(tmp_path, EIIOE1_ID, pages, [0, 1, 2, 3], {n: n for n in range(4)})
+    assert writer.write(EIIOE1_ID, 0, True) is True
+    assert ses.ident_calls[-1] == ("/dev/sg16", 0, 0, True)
+
+
+def test_eip0_descriptor_is_addressable_by_position(tmp_path: Path) -> None:
+    """An eip=0 descriptor ('Element N descriptor', no index field) still
+    occupies a position; the bay it claims must be addressable."""
+    pages = {
+        "configuration": (SYNTHETIC / "sg_cf_device_slot.txt").read_text(),
+        "additional_element_status": (SYNTHETIC / "sg_aes_eip0.txt").read_text(),
+    }
+    writer, ses = _writer(tmp_path, EIP0_ID, pages, [10, 11, 12], {0: 10, 1: 11, 2: 12})
+    assert writer.write(EIP0_ID, 11, True) is True
+    assert ses.ident_calls[-1] == ("/dev/sg16", 0, 1, True)
+
+
+def test_inconsistent_element_numbering_poisons_the_block(tmp_path: Path) -> None:
+    """A block whose printed indexes repeat (real firmware does this; sg_ses
+    carries a workaround for bogus repeated ei=0) fails the ordering
+    cross-check: if the firmware cannot number its elements, its descriptor
+    order cannot be trusted either, so every bay it claims is refused."""
+    broken = DUPLICATE_SLOT_AES.replace("device slot number: 2", "device slot number: 5", 1)
+    broken = broken.replace("Element index: 1", "Element index: 0")
+    pages = {
+        "configuration": (SYNTHETIC / "sg_cf_device_slot.txt").read_text(),
+        "additional_element_status": broken,
+    }
+    writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [2, 5], {})
+    with pytest.raises(LocateError, match="cannot address device slot number 5"):
+        writer.write(PERMUTED_ID, 5, True)
+    assert ses.ident_calls == []
+
+
+def test_cross_block_slot_claims_are_ambiguous(tmp_path: Path) -> None:
+    """The kernel builds sysfs slots from every bay-type block, so a slot
+    number claimed by the chosen block AND a foreign bay block cannot say
+    which bay it means - refused. A slot claimed only by the foreign block is
+    simply unmapped for this type descriptor."""
+    pages = {
+        "configuration": (SYNTHETIC / "sg_cf_cross_block.txt").read_text(),
+        "additional_element_status": (SYNTHETIC / "sg_aes_cross_block.txt").read_text(),
+    }
+    writer, ses = _writer(tmp_path, CROSS_BLOCK_ID, pages, [1, 2, 9], {})
+    with pytest.raises(LocateError, match="cannot address device slot number 2"):
+        writer.write(CROSS_BLOCK_ID, 2, True)
+    with pytest.raises(LocateError, match=r"do not include 9"):
+        writer.write(CROSS_BLOCK_ID, 9, True)
+    assert ses.ident_calls == []
+
+
+def test_empty_slot_map_is_not_cached(tmp_path: Path) -> None:
+    """An AES read that succeeds but maps nothing must not be cached: a
+    one-off anomalous read would otherwise pin every future IDENT to refusal
+    until restart. The page is re-read on the next attempt instead."""
+    empty_aes = "\n".join(DUPLICATE_SLOT_AES.splitlines()[:5]) + "\n"
+    pages = {
+        "configuration": (SYNTHETIC / "sg_cf_device_slot.txt").read_text(),
+        "additional_element_status": empty_aes,
+    }
+    writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [0], {})
+    with pytest.raises(LocateError, match="maps no device slot numbers"):
+        writer.write(PERMUTED_ID, 0, True)
+    with pytest.raises(LocateError, match="maps no device slot numbers"):
+        writer.write(PERMUTED_ID, 0, True)
+    assert ses.page_reads.count("additional_element_status") == 2
     assert ses.ident_calls == []

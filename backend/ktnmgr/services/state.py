@@ -270,6 +270,10 @@ class StateService:
     async def poll_chassis(self) -> None:
         """sg_ses is the expensive source, so it runs on the slowest interval."""
         if not self.ses.available():
+            # The honest-absence policy for SAS addresses (see the SesError
+            # handler below) must hold on this exit too: sg_ses vanishing
+            # mid-run would otherwise leave the last map serving forever.
+            self._sas_by_slot.clear()
             self.chassis.fail("sg_ses is not installed in this image")
             return
 
@@ -279,6 +283,10 @@ class StateService:
 
         for ref in self.enclosures.value:
             if not ref.sg_device:
+                # Same honest-absence rule as the SesError paths: an
+                # enclosure that lost its sg node cannot refresh its map,
+                # so the map must not outlive the ability to rebuild it.
+                self._sas_by_slot.pop(ref.logical_id, None)
                 continue
             try:
                 configuration = await loop.run_in_executor(
@@ -434,19 +442,20 @@ class StateService:
             local = self.disk_reader.read(device)
             remote = self.remote_disks.value.get(device or "")
             zfs = self.zfs.value.get(device or "", ZfsInfo())
+            smart = self.smart.value.get(device or "", SmartInfo())
             if remote is not None and _identity_conflict(local, remote):
                 # The TrueNAS caches are keyed by transient block name, so
                 # after a swap that reuses the name the removed disk's record
                 # can wear the new disk's name for up to one poll_truenas
                 # interval. When the stable identifiers disagree, the remote
-                # record - and the ZFS state indexed by the same name -
-                # describe the removed disk, so both are dropped rather than
-                # merged onto the wrong drive (§20).
+                # record - and the ZFS state and SMART data indexed by the
+                # same name - describe the removed disk, so all three are
+                # dropped rather than merged onto the wrong drive (§20).
                 remote = None
                 zfs = ZfsInfo()
+                smart = SmartInfo()
             identity = merge_identity(local, remote)
             identity.sas_address = sas_addresses.get(slot.ses_slot)
-            smart = self.smart.value.get(device or "", SmartInfo())
             origin, expires = self.ident.describe(ref.logical_id, slot.ses_slot, slot.locate)
 
             composed.append(
@@ -537,19 +546,36 @@ def _slot_sas_addresses(configuration_text: str, aes_text: str) -> dict[int, str
     type_index = array_slot_type_index(parse_configuration(configuration_text)[1])
     if type_index is None:
         return {}
-    claimed: dict[int, str | None] = {}
+    first_chosen_seen = False
+    claimed: dict[int, tuple[bool, str | None] | None] = {}
     for block in parse_additional_element_status(aes_text):
-        if block.type_index != type_index:
-            continue
-        for entry in block.entries.values():
+        chosen = block.type_index == type_index and not first_chosen_seen
+        if block.type_index == type_index:
+            first_chosen_seen = True
+        for entry in block.entries:
             slot_number = entry.get("device_slot_number")
-            address = entry.get("sas_address")
-            # An empty bay carries no protocol descriptor and thus neither
-            # field; it simply stays unmapped.
-            if not isinstance(slot_number, int) or not isinstance(address, str):
+            # An empty bay carries no protocol descriptor and thus no slot
+            # number; it simply stays unmapped. An entry WITH a slot number
+            # but no parsed address still claims the slot: a claim poisons
+            # duplicates whether or not its own address was printed
+            # (a SATA drive behind a protocol we do not parse must still
+            # invalidate a colliding claim, or the refusal policy has a
+            # hole exactly where firmware is at its weirdest).
+            if not isinstance(slot_number, int):
                 continue
-            claimed[slot_number] = None if slot_number in claimed else address
-    return {slot: address for slot, address in claimed.items() if address is not None}
+            address = entry.get("sas_address")
+            if slot_number in claimed:
+                claimed[slot_number] = None
+            else:
+                claimed[slot_number] = (
+                    chosen,
+                    address if isinstance(address, str) else None,
+                )
+    return {
+        slot: claim[1]
+        for slot, claim in claimed.items()
+        if claim is not None and claim[0] and claim[1] is not None
+    }
 
 
 def _freshness(cache: Cached[Any], interval: float) -> dict[str, Any]:

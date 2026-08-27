@@ -103,11 +103,12 @@ Choose the **🚀 App Addition** template, then paste:
 >
 > - **Upstream**: https://github.com/MechanicalCoderX/ktn-enclosure-manager
 > - **Documentation**: https://github.com/MechanicalCoderX/ktn-enclosure-manager#readme
-> - **App Version**: 1.5.2
+> - **App Version**: 1.5.4
 >
 > ## Testing
 >
 > - [x] `basic-values.yaml`
+> - [x] `hostpath-anon-values.yaml`
 >
 > Rendered against library `2.3.11`; output is valid YAML with the portal and
 > notes intact.

@@ -147,7 +147,12 @@ below rather than left implicit.
   administrator is created in the browser. Bootstrap refuses once any account
   exists.
 - Session cookies are signed, `HttpOnly`, `SameSite=Strict`, and `Secure` when
-  served over HTTPS, with a fixed expiry.
+  served over HTTPS, with a fixed expiry. Behind a TLS-terminating reverse
+  proxy, set `KTN_FORWARDED_ALLOW_IPS` to the proxy's address so the app sees
+  the HTTPS scheme and marks the cookie `Secure`. Name only the actual proxy:
+  a trusted peer also controls `X-Forwarded-For` — the address login rate
+  limiting keys on — so `'*'` (or a proxy other clients can reach) lets a
+  direct client rotate fabricated addresses past the limiter.
 - Login is rate limited per client address.
 - Mutating requests require a custom header, which a cross-site form post cannot
   set — combined with `SameSite=Strict`, that is the CSRF defence.
@@ -193,6 +198,10 @@ allowed-hosts setting (`KTN_ALLOWED_HOSTS`, a comma-separated list matched
 case- and port-insensitively) defaults to allowing every host rather than
 breaking existing bookmark-by-IP deployments. If you disable authentication,
 set `KTN_ALLOWED_HOSTS` to the names and addresses you actually browse to.
+Loopback Hosts (`127.0.0.1`, `::1`, `localhost`) are always answered even
+with the list set: a rebound request's Host names the attacker's domain,
+never loopback, so the exemption costs nothing - and the container's own
+healthcheck probes over loopback and must keep working.
 
 **It does not open the write.** `KTN_ALLOW_ANONYMOUS_IDENT` is separate and
 stays `false` even when authentication is disabled; an anonymous Identify

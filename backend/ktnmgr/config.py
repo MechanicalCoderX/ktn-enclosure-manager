@@ -34,9 +34,13 @@ class Settings(BaseSettings):
             "flag derives from the request scheme, and uvicorn's default only "
             "believes X-Forwarded-Proto from 127.0.0.1 - so behind an external "
             "TLS proxy the cookie was never marked Secure. Set this to the "
-            "proxy's address to fix that. The default is uvicorn's own, so an "
-            "unset deployment behaves exactly as before. Consumed by the "
-            "container entrypoint (--forwarded-allow-ips), not by the app."
+            "proxy's address to fix that. Name ONLY the actual proxy: a "
+            "trusted peer also controls X-Forwarded-For, which is the address "
+            "the login rate limiter keys on, so '*' (or a proxy other clients "
+            "can reach) lets a direct client rotate fabricated addresses past "
+            "the limiter. The default is uvicorn's own, so an unset "
+            "deployment behaves exactly as before. Consumed by the container "
+            "entrypoint (--forwarded-allow-ips), not by the app."
         ),
     )
 

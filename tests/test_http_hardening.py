@@ -109,6 +109,18 @@ def test_allowed_hosts_refuses_a_foreign_host(tmp_path: Path) -> None:
                           headers={"host": "evil.example"}).status_code == 400
 
 
+def test_allowed_hosts_always_answers_loopback(tmp_path: Path) -> None:
+    """The image's own HEALTHCHECK probes http://127.0.0.1:8420/healthz, so a
+    hardened container would report permanently unhealthy if the allow-list
+    could exclude loopback. It cannot: a rebound request's Host names the
+    attacker's domain, never loopback, so the standing exemption costs the
+    rebinding defence nothing."""
+    with make_client(tmp_path, allowed_hosts="nas.example") as client:
+        assert client.get("/healthz", headers={"host": "127.0.0.1:8420"}).status_code == 200
+        assert client.get("/healthz", headers={"host": "localhost"}).status_code == 200
+        assert client.get("/healthz", headers={"host": "[::1]:8420"}).status_code == 200
+
+
 def test_allowed_hosts_matches_port_insensitively(tmp_path: Path) -> None:
     """Rebinding cannot change the port, so the port carries no signal - and
     the port a browser sends depends on how the app was published, which the

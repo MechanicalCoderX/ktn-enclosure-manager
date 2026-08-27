@@ -82,6 +82,12 @@ services:
       # exposes, and why the LED write is gated separately.
       KTN_AUTH_REQUIRED: ${KTN_AUTH_REQUIRED:-true}
       KTN_ALLOW_ANONYMOUS_IDENT: ${KTN_ALLOW_ANONYMOUS_IDENT:-false}
+      # Host-header allow-list (DNS-rebinding defence, mainly for open
+      # deployments) and the reverse-proxy trust for X-Forwarded-Proto.
+      # Loopback Hosts are always answered, so the healthcheck keeps working.
+      # See .env.example for both.
+      KTN_ALLOWED_HOSTS: ${KTN_ALLOWED_HOSTS:-}
+      KTN_FORWARDED_ALLOW_IPS: ${KTN_FORWARDED_ALLOW_IPS:-127.0.0.1}
       KTN_ALERT_WEBHOOK_URL: ${KTN_ALERT_WEBHOOK_URL:-}
       KTN_ALERT_STYLE: ${KTN_ALERT_STYLE:-ntfy}
       KTN_ALERT_ON_RECOVERY: ${KTN_ALERT_ON_RECOVERY:-true}

@@ -271,20 +271,23 @@ def test_aes_returns_only_bay_blocks(aes_text: str) -> None:
 
 
 def test_aes_slot_identity_on_ktn_stl3(aes_text: str) -> None:
-    """On the KTN-STL3 the element index equals the device slot number for
-    all 15 bays. That identity is a property of THIS shelf, not of SES --
-    which is why the mapping must be read from the page instead of assumed
-    (the permuted-fixture test below is the counterexample)."""
+    """On the KTN-STL3 the printed index, the list position and the device
+    slot number all coincide for the 15 bays. That identity is a property of
+    THIS shelf (its bay descriptor is first, eiioe=0, slots numbered from
+    zero), not of SES -- which is why the mapping must be positional and read
+    from the page instead of assumed (the fixtures below are the
+    counterexamples)."""
     (block,) = parse_additional_element_status(aes_text)
-    assert list(block.entries) == list(range(15))
-    for element_index, entry in block.entries.items():
-        assert entry["device_slot_number"] == element_index
+    assert len(block.entries) == 15
+    for position, entry in enumerate(block.entries):
+        assert entry["element_index"] == position
+        assert entry["device_slot_number"] == position
         assert entry["eiioe"] == 0
 
 
 def test_aes_takes_drive_address_not_attached(aes_text: str) -> None:
     (block,) = parse_additional_element_status(aes_text)
-    addresses = {entry["sas_address"] for entry in block.entries.values()}
+    addresses = {entry["sas_address"] for entry in block.entries}
     assert len(addresses) == 15
     # 0x50060480aabbcc01 is the expander the drives attach through; a parser
     # that matched 'attached SAS address' would return it for all 15 bays.
@@ -294,15 +297,16 @@ def test_aes_takes_drive_address_not_attached(aes_text: str) -> None:
 
 def test_aes_permuted_slot_numbers() -> None:
     """Synthetic shelf whose slot numbering is 1-based and permuted relative
-    to element indexes, with one empty bay carrying no phy list at all."""
+    to element positions, with one empty bay carrying no phy list at all."""
     text = (SYNTHETIC / "sg_aes_permuted.txt").read_text()
     (block,) = parse_additional_element_status(text)
     assert block.element_type == "Device slot"
     assert block.subenclosure_id == 0
     assert block.type_index == 0
-    assert list(block.entries) == [0, 1, 2, 3]
+    assert [e["element_index"] for e in block.entries] == [0, 1, 2, 3]
     assert block.entries[0] == {
-        "eiioe": 1,
+        "element_index": 0,
+        "eiioe": 0,
         "device_slot_number": 4,
         "sas_address": "0x5000aaaa00000001",
     }
@@ -313,7 +317,40 @@ def test_aes_permuted_slot_numbers() -> None:
     # filled from the trailing expander block's SAS address either.
     assert "device_slot_number" not in block.entries[2]
     assert "sas_address" not in block.entries[2]
-    assert block.entries[2]["eiioe"] == 1
+    assert block.entries[2]["eiioe"] == 0
+
+
+def test_aes_printed_index_is_global_not_per_type() -> None:
+    """The bays-second fixture models what the KTN capture proves about real
+    firmware: the printed ELEMENT INDEX continues across type descriptors
+    (the bay block opens at 1, after the expander's 0). The parser must keep
+    positions and printed indexes separate -- position identifies the
+    element within its type; the printed value is a cross-check only."""
+    text = (SYNTHETIC / "sg_aes_bays_second.txt").read_text()
+    # The expander block is filtered out (non-bay); only the bay block returns.
+    (bays,) = parse_additional_element_status(text)
+    assert (bays.element_type, bays.type_index) == ("Array device slot", 1)
+    assert [e["element_index"] for e in bays.entries] == [1, 2, 3, 4]
+    assert [e["device_slot_number"] for e in bays.entries] == [1, 2, 3, 4]
+
+
+def test_aes_eip0_descriptor_form_counts_positionally() -> None:
+    """eip=0 descriptors print 'Element N descriptor' with no index field;
+    they still occupy a position and their fields must attach to a fresh
+    entry, not bleed into the previous element's."""
+    text = (SYNTHETIC / "sg_aes_eip0.txt").read_text()
+    (block,) = parse_additional_element_status(text)
+    assert len(block.entries) == 3
+    assert block.entries[0]["device_slot_number"] == 10
+    assert "element_index" not in block.entries[1]
+    assert block.entries[1]["device_slot_number"] == 11
+    assert block.entries[1]["sas_address"] == "0x5000dddd00000001"
+    assert block.entries[2] == {
+        "element_index": 2,
+        "eiioe": 0,
+        "device_slot_number": 12,
+        "sas_address": "0x5000dddd00000002",
+    }
 
 
 def test_aes_malformed_output_does_not_raise() -> None:

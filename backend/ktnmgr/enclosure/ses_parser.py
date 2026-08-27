@@ -50,6 +50,17 @@ _AES_TYPEDESC_RE = re.compile(
     r"^\s*Element type:\s*(.+?),\s*subenclosure id:\s*(\d+)\s*\[ti=(\d+)\]\s*$"
 )
 _AES_ELEMENT_RE = re.compile(r"^\s*Element index:\s*(\d+)(?:\s+eiioe=(\d+))?\s*$")
+# eip=0 descriptors carry no element index field; sg_ses then prints
+# "Element %d descriptor" instead (the else-branch of the eip test in
+# sg_ses.c). The number is sg_ses's own running count, not an index into
+# anything, so it is not captured - the descriptor's position in the block
+# is what identifies the element (see parse_additional_element_status).
+_AES_ELEMENT_NOIDX_RE = re.compile(r"^\s*Element\s+\d+\s+descriptor\s*$")
+# Any other line that opens with "Element" at descriptor indentation is an
+# element header this parser does not understand; it must reset the current
+# entry rather than let the unknown element's fields bleed into the previous
+# entry's dict.
+_AES_ELEMENT_GUARD_RE = re.compile(r"^\s*Element\b")
 _AES_SLOT_RE = re.compile(r"device slot number:\s*(\d+)")
 # Anchoring at line start (after indentation) is what excludes the expander's
 # "attached SAS address:" line -- only the drive's own address may match.
@@ -308,10 +319,27 @@ def array_slot_type_index(descriptors: list[TypeDescriptor]) -> int | None:
 class AdditionalElementBlock:
     """One bay-type block of the additional element status page.
 
-    ``entries`` maps element_index -> parsed fields in file order. Fields are
-    ``device_slot_number`` (int), ``sas_address`` (str, the drive's own
-    address as printed, e.g. ``0x5000cca0e0000002``) and ``eiioe`` (int); a
-    field the output did not carry is simply absent from the dict.
+    ``entries`` is the block's descriptors in file order, one dict per
+    element. **The list position is the element's 0-based index within its
+    type descriptor** - the coordinate ``sg_ses --index=T,E`` addresses.
+    That identification is structural, not parsed: SES-3 returns exactly one
+    AES descriptor per individual element of each eligible type, in status
+    page order, and sg_ses prints them in that order. It therefore holds for
+    eip=0 descriptors (which carry no index field at all) and regardless of
+    EIIOE.
+
+    The printed ``ELEMENT INDEX`` field, when present, is kept as
+    ``element_index`` **for cross-checking only**: it is a global index
+    across all type descriptors (the KTN-STL3 capture proves it - the ti=4
+    expander prints 42, the sum of the four preceding types' counts), whose
+    zero point additionally shifts with EIIOE. Feeding it to ``--index`` is
+    exactly the wrong-bay bug the AES mapping exists to prevent; it is only
+    equal to the per-type position on shelves whose bay descriptor happens
+    to come first, such as the KTN-STL3.
+
+    Other fields per entry: ``device_slot_number`` (int), ``sas_address``
+    (str, the drive's own address as printed, e.g. ``0x5000cca0e0000002``)
+    and ``eiioe`` (int); a field the output did not carry is simply absent.
     """
 
     __slots__ = ("element_type", "subenclosure_id", "type_index", "entries")
@@ -320,7 +348,7 @@ class AdditionalElementBlock:
         self.element_type = element_type
         self.subenclosure_id = subenclosure_id
         self.type_index = type_index
-        self.entries: dict[int, dict[str, int | str]] = {}
+        self.entries: list[dict[str, int | str]] = []
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return (
@@ -371,10 +399,23 @@ def parse_additional_element_status(text: str) -> list[AdditionalElementBlock]:
 
         element = _AES_ELEMENT_RE.match(line)
         if element:
-            current_entry = {}
+            current_entry = {"element_index": int(element.group(1))}
             if element.group(2) is not None:
                 current_entry["eiioe"] = int(element.group(2))
-            current_block.entries[int(element.group(1))] = current_entry
+            current_block.entries.append(current_entry)
+            continue
+        if _AES_ELEMENT_NOIDX_RE.match(line):
+            # eip=0: no index field exists; the position appended here is the
+            # element's whole identity.
+            current_entry = {}
+            current_block.entries.append(current_entry)
+            continue
+        if _AES_ELEMENT_GUARD_RE.match(line):
+            # An element header this parser does not recognise. Detaching
+            # current_entry means the unknown element's fields are dropped
+            # instead of silently attributed to the previous element - a
+            # wrong attribution here is a wrong bay downstream.
+            current_entry = None
             continue
 
         if current_entry is None:

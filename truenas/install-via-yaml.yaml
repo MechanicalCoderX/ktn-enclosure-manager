@@ -131,6 +131,14 @@ services:
       # open dashboard is read-only; this one can light a drive LED.
       KTN_ALLOW_ANONYMOUS_IDENT: "false"
 
+      # Optional hardening, both default-compatible when left as-is. The
+      # Host allow-list is the DNS-rebinding defence for open deployments
+      # (loopback is always answered, so the healthcheck keeps working);
+      # the forwarded list names a TLS-terminating proxy whose
+      # X-Forwarded-Proto is trusted for the cookie's Secure flag.
+      # KTN_ALLOWED_HOSTS: "nas.example.lan,10.10.20.51"
+      # KTN_FORWARDED_ALLOW_IPS: "127.0.0.1"
+
       # Optional: restrict management to one enclosure.
       # Find yours with:  cat /sys/class/enclosure/*/id
       KTN_ENCLOSURE_ALLOWLIST: ""

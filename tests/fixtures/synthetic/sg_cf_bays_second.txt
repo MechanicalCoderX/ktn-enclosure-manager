@@ -1,0 +1,17 @@
+  ACME      SES Shelf         0002
+Configuration diagnostic page:
+  number of secondary subenclosures: 0
+  generation code: 0x1
+  enclosure descriptor list
+    Subenclosure identifier: 0 [primary]
+      relative ES process id: 1, number of ES processes: 1
+      number of type descriptor headers: 2
+      enclosure logical identifier (hex): 5000000000000003
+      enclosure vendor: ACME      product: Bays Second       rev: 0001
+  type descriptor header and text list
+    Element type: SAS expander, subenclosure id: 0
+      number of possible elements: 1
+      text: Expander
+    Element type: Array device slot, subenclosure id: 0
+      number of possible elements: 4
+      text: Drive Slots

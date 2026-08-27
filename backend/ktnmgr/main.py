@@ -143,6 +143,15 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         if entry.strip()
     }
     if allowed_hosts:
+        # Loopback is always answered. The threat is DNS rebinding, and a
+        # rebound request's Host names the ATTACKER'S domain - it can never
+        # name loopback - so this exemption gives up nothing. Without it the
+        # image's own HEALTHCHECK (which probes http://127.0.0.1:8420/healthz
+        # and therefore sends a loopback Host) would fail 400 the moment an
+        # operator sets KTN_ALLOWED_HOSTS exactly as SECURITY.md advises,
+        # reporting a hardened container as permanently unhealthy.
+        allowed_hosts |= {"127.0.0.1", "::1", "localhost"}
+    if allowed_hosts:
         # Registered before security_headers, which therefore wraps it (later
         # registration is outermost), so even this rejection carries the
         # defence-in-depth headers that middleware promises on every response.

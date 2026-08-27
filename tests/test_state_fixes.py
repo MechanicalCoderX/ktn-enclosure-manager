@@ -29,6 +29,7 @@ from ktnmgr.models import (
     EnclosureRef,
     SlotHealth,
     SlotState,
+    SmartInfo,
     ZfsInfo,
     ZfsState,
 )
@@ -319,20 +320,28 @@ def _bay_service(
 
 def test_swapped_drive_does_not_wear_previous_identity() -> None:
     """The kernel provably reuses block names (a replacement drive got the
-    removed drive's ``sdf``). Until poll_truenas refreshes, the remote record
-    and ZFS state under that name describe the REMOVED disk and must be
-    dropped, not merged onto the new one."""
+    removed drive's ``sdf``). Until poll_truenas refreshes, the remote record,
+    ZFS state and SMART data under that name describe the REMOVED disk and
+    must be dropped together, not merged onto the new one."""
     local = DiskIdentity(serial="NEW123", wwn="0x5000cca000000002")
     remote = DiskIdentity(serial="OLD999", wwn="0x5000cca000000001", model="Old Model 4TB")
     zfs = ZfsInfo(pool="tank", vdev="raidz2-0", state=ZfsState.FAULTED)
 
-    (bay,) = _bay_service(local, remote, zfs).bays(STL3_ID)
+    service = _bay_service(local, remote, zfs)
+    # SMART rides the same transient block name as the other TrueNAS caches.
+    service.smart.succeed(
+        {"sdf": SmartInfo(temperature_c=71.0, over_temperature=True, alert="overheating")}
+    )
+    (bay,) = service.bays(STL3_ID)
 
     assert bay.disk.serial == "NEW123"
     assert bay.disk.model is None, "the removed drive's model must not fill the gap"
     assert bay.zfs.pool is None
     assert bay.zfs.state is ZfsState.UNKNOWN
-    # And the health must not be FAILED via the removed disk's FAULTED state.
+    assert bay.smart.temperature_c is None, "the removed drive's SMART must drop too"
+    assert bay.smart.over_temperature is False
+    # And the health must be clean: neither FAILED via the removed disk's
+    # FAULTED state nor degraded via its over-temperature alert.
     assert bay.health is SlotHealth.OK
 
 

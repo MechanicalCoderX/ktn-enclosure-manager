@@ -39,8 +39,8 @@ affected).
   are contained as `TrueNASError` instead of escaping and starving the
   unrelated SES/SMART polls.
 - Health alerts are no longer lost to a transient webhook failure: a
-  transition is committed only after the endpoint accepts it, with bounded
-  per-bay retry.
+  transition is committed only after the endpoint accepts it, and an
+  undelivered one is retried until delivered or superseded, spaced per bay.
 - An expired Identify whose auto-clear hits a transient failure (helper
   restart, detached enclosure) is retried with bounded backoff instead of
   being dropped with the LED left lit; permanent failure is logged loudly.
@@ -49,8 +49,9 @@ affected).
   of `401`.
 - The chassis view maps SES statuses onto the full health scale —
   Critical/Unrecoverable show as failed, not flattened to a warning badge —
-  and a failed sign-out now surfaces in the error banner instead of being
-  silently swallowed.
+  and a failed sign-out now surfaces on the screen the user lands on (the
+  login-screen notice — or the error banner when authentication is
+  disabled) instead of being silently swallowed.
 
 ### Added
 - Shelves that report drive bays as plain **Device slot** elements (SES type

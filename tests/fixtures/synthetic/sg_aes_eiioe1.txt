@@ -1,0 +1,22 @@
+  ACME      SES Shelf         0003
+  Primary enclosure logical identifier (hex): 5000000000000004
+Additional element status diagnostic page:
+  generation code: 0x1
+  additional element status descriptor list
+    Element type: Device slot, subenclosure id: 0 [ti=0]
+      Element index: 1  eiioe=1
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 0
+        SAS address: 0x5000cccc00000000
+      Element index: 2  eiioe=1
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 1
+        SAS address: 0x5000cccc00000001
+      Element index: 3  eiioe=1
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 2
+        SAS address: 0x5000cccc00000002
+      Element index: 4  eiioe=1
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 3
+        SAS address: 0x5000cccc00000003
