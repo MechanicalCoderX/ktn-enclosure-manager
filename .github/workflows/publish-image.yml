@@ -10,13 +10,32 @@ name: Publish image
 #   GitHub -> your profile -> Packages -> ktn-enclosure-manager
 #   -> Package settings -> Change visibility -> Public
 # Otherwise `docker pull` will ask TrueNAS users for credentials.
+#
+# Actions here (and in the other workflows) are pinned by commit SHA for the
+# same reason the Dockerfile pins its base images by digest: a moving tag can
+# be repointed upstream, and this workflow holds a packages:write token. The
+# trailing comment records the release each SHA was taken from; the
+# github-actions Dependabot entry bumps SHA and comment together.
 
+# Exactly one trigger, deliberately. Two others were removed:
+#   release: published - creating a Release with a new tag fired BOTH this and
+#     the tag-push trigger, two runs racing to push the same image tags;
+#   workflow_dispatch - a manual run from main has no tag ref, so the semver
+#     patterns below matched nothing and the push moved ONLY `latest`, to
+#     whatever main's HEAD happened to be at the time.
+# Publishing is the tag push; the Release object is documentation on top of it
+# (still create the Release WITH the tag - a bare tag leaves the repo's
+# "Latest" badge stale).
 on:
   push:
     tags: ["v*"]
-  release:
-    types: [published]
-  workflow_dispatch:
+
+# One run per ref at a time, and never cancelled mid-push: a re-run of a tag's
+# workflow must queue behind the first, not interleave two pushes of the same
+# registry tags.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -45,31 +64,63 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history plus tags: the highest-tag check below compares
+          # against every v* tag, and the default depth-1 checkout of a tag
+          # fetches no others - the check would then see its own tag as
+          # highest, always, and `latest` would move on every backport.
+          # fetch-tags is stated explicitly rather than relied on as a side
+          # effect of depth 0, so a future fetch-depth change cannot silently
+          # starve the check.
+          fetch-depth: 0
+          fetch-tags: true
 
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Is this the highest release tag?
+        id: latest
+        # `latest` must never move backwards. Granting it to every v* tag (as
+        # this workflow once did) means a backport - tagging v1.4.9 after
+        # v1.5.3 has shipped - silently repoints :latest at the older release
+        # for every new install. So `latest` goes only to the tag that version-
+        # sorts highest among all v* tags. sort -V is exact for the plain
+        # vMAJOR.MINOR.PATCH tags this repo uses; it mis-ranks pre-release
+        # suffixes (v2.0.0-rc1 sorts ABOVE v2.0.0), so revisit this check
+        # before ever pushing such a tag.
+        run: |
+          highest="$(git tag --list 'v*' | sort -V | tail -n 1)"
+          echo "pushed=${GITHUB_REF_NAME} highest=${highest}"
+          if [ "${GITHUB_REF_NAME}" = "${highest}" ]; then
+            echo "is_latest=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "is_latest=false" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Derive tags
         id: meta
-        uses: docker/metadata-action@v6
+        # No is_default_branch entry: this workflow runs only on v* tag pushes,
+        # so a branch condition can never be true here - its old effect was
+        # confined to the removed workflow_dispatch path. `latest` comes from
+        # the highest-tag check above, not from being a tag at all.
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ steps.latest.outputs.is_latest }}
 
       - name: Build and push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           push: true
@@ -79,5 +130,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+          # Read the per-arch scopes the verify gate exported: on a cache hit
+          # the layers pushed here are the exact layers Trivy scanned there.
+          # (A miss rebuilds honestly - the gate is the scan, the cache only
+          # makes the pushed bytes match it.)
+          cache-from: |
+            type=gha,scope=image-amd64
+            type=gha,scope=image-arm64
           cache-to: type=gha,mode=max

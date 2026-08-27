@@ -60,7 +60,7 @@ x-notes: |
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.5.3
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.5.4
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 
@@ -77,10 +77,14 @@ services:
     devices:
       # ### EDIT ### your SES device.  Find it with:  lsscsi -g | grep enclosu
       #
-      # This is the only hardware access the app needs. ':rw' is required even
-      # though nothing on your disks is written: sg_ses submits SCSI commands
-      # through the SG_IO ioctl, which the device cgroup counts as a write.
-      # It addresses the enclosure processor, not disk data.
+      # This is the only hardware access the app needs, and it addresses the
+      # enclosure processor, not disk data. Measured on the live shelf
+      # (2026-08-20): the device cgroup gates the open() mode, not SG_IO
+      # itself. Every telemetry read runs on a read-only open (sg_ses
+      # --readonly); the 'w' exists solely for the one IDENT LED SEND
+      # DIAGNOSTIC, issued by the gated helper. ':r' is a supported
+      # monitoring-only grant - telemetry keeps working and Identify returns
+      # a clear permission error instead of lighting the LED.
       - "/dev/sg16:/dev/sg16:rw"
 
     cap_drop:
@@ -97,7 +101,10 @@ services:
       # uses a SCSI command instead, which that profile permits.
 
     tmpfs:
-      # setgid so the helper's socket inherits gid 1000; avoids needing CAP_CHOWN.
+      # The helper binds its socket under gid 1000 itself (setegid, via the
+      # retained CAP_SETGID), so the web process can connect without the
+      # container holding CAP_CHOWN. The 2770 mode here is defence in depth,
+      # not the mechanism - nothing depends on the directory's setgid bit.
       - /run/ktn:mode=2770,uid=0,gid=1000
 
     environment:

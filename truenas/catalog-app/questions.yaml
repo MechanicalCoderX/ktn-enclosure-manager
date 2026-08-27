@@ -9,6 +9,8 @@ groups:
     description: Where the web interface listens
   - name: Storage Configuration
     description: Where application state is kept
+  - name: Labels Configuration
+    description: Custom container labels
   - name: Resources Configuration
     description: CPU and memory limits
 
@@ -30,7 +32,6 @@ questions:
           schema:
             type: string
             required: true
-            default: /dev/sg16
             valid_chars: '^/dev/(sg|bsg)[a-zA-Z0-9/:]+$'
             valid_chars_error: Must be a /dev/sg* or /dev/bsg/* path
 
@@ -142,8 +143,9 @@ questions:
                 schema:
                   type: int
                   default: 8420
-                  min: 1024
+                  min: 1
                   max: 65535
+                  required: true
               - variable: host_ips
                 label: Host IPs
                 schema:
@@ -210,6 +212,43 @@ questions:
                         required: true
 
   # ----------------------------------------------------- resources
+  - variable: labels
+    label: ""
+    group: Labels Configuration
+    schema:
+      type: list
+      default: []
+      items:
+        - variable: label
+          label: Label
+          schema:
+            type: dict
+            attrs:
+              - variable: key
+                label: Key
+                schema:
+                  type: string
+                  required: true
+              - variable: value
+                label: Value
+                schema:
+                  type: string
+                  required: true
+              - variable: containers
+                label: Containers
+                description: Containers where the label should be applied
+                schema:
+                  type: list
+                  items:
+                    - variable: container
+                      label: Container
+                      schema:
+                        type: string
+                        required: true
+                        enum:
+                          - value: ktn-enclosure-manager
+                            description: ktn-enclosure-manager
+
   - variable: resources
     group: Resources Configuration
     label: ""

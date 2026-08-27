@@ -10,28 +10,30 @@
   read-only SES page reads over a unix socket.
 #}
 {% do c.restart.set_policy("unless-stopped") %}
-{% do c.healthcheck.set_test("curl", {"port": values.consts.internal_port, "path": "/healthz"}) %}
+{% do c.healthcheck.use_built_in() %}
 
 {# ------------------------------------------------------------- privileges #}
-{% do c.clear_caps() %}
+{# The library drops ALL capabilities by default; grant back only the two the
+   entrypoint's setpriv drop needs. #}
 {% do c.add_caps(["SETUID", "SETGID"]) %}
 {# no-new-privileges is set by the library for every container. #}
 
 {# ------------------------------------------------------------------ device #}
 {#
-  ':rw' is required even though only read-only pages are ever issued: sg_ses
-  submits SCSI commands through the SG_IO ioctl, which the device cgroup counts
-  as a write. This addresses the enclosure processor, not disk data.
+  Measured floor (app SECURITY.md): every telemetry read works on a read-only
+  device open; the 'w' exists solely so the IDENT helper can issue the one
+  SES SEND DIAGNOSTIC that lights a bay LED. This addresses the enclosure
+  processor, never disk data. 'm' (mknod) is not needed.
 #}
-{% do c.devices.add_device(values.enclosure.sg_device, values.enclosure.sg_device, "rwm") %}
+{% do c.devices.add_device(values.enclosure.sg_device, values.enclosure.sg_device, "rw") %}
 
 {# ------------------------------------------------------------------- mounts #}
 {% do c.add_storage("/data", values.storage.data) %}
 {#
   Plain 0770 here: the catalog library validates the mode against
-  ^0[0-7]{3}$, so a setgid mode cannot be expressed. The entrypoint applies
-  the setgid bit itself at startup, which is more robust anyway - it no longer
-  depends on the deployment getting the mode right.
+  ^0[0-7]{3}$, so a setgid mode cannot be expressed - and none is needed.
+  The root helper binds its socket with egid 1000 (via CAP_SETGID), so the
+  socket carries the web process's group without any directory setgid bit.
 #}
 {% do c.add_storage("/run/ktn", {"type": "tmpfs", "tmpfs_config": {"mode": "0770", "uid": 0, "gid": values.consts.app_group_id}}) %}
 

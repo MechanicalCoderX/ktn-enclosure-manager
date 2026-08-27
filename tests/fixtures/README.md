@@ -35,3 +35,13 @@ python3 tests/build_sysfs_fixture.py
 
 It writes `vpd_pg80` as real bytes including the 4-byte VPD header, so the
 serial parser is exercised on the byte layout the kernel actually produces.
+
+## synthetic/
+
+Hand-written sg_ses output variants the KTN-STL3 cannot produce, used to pin
+parser behaviour the real capture never exercises: a configuration page with
+textless type descriptors (`sg_cf_textless.txt`), bays reported as plain
+`Device slot` type 0x01 (`sg_cf_device_slot.txt`), and an AES page whose
+device slot numbers are permuted/1-based relative to element indexes
+(`sg_aes_permuted.txt`) — the case where Identify must translate, and where
+an unmapped slot must be refused.

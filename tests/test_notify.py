@@ -2,7 +2,9 @@
 
 The properties that matter: it fires on transitions only (a permanently
 degraded pool must not message every poll), it survives restarts without
-re-announcing, and a broken notification endpoint never disturbs polling.
+re-announcing, a broken notification endpoint never disturbs polling, and an
+alert the endpoint never accepted is retried on later polls rather than
+silently dropped.
 """
 
 from __future__ import annotations
@@ -169,6 +171,137 @@ async def test_a_rejected_post_is_not_reported_as_delivered(
     messages = [r.getMessage() for r in caplog.records]
     assert not any(m.startswith("notified:") for m in messages), messages
     assert any("rejected" in m and "404" in m for m in messages), messages
+
+
+async def test_transient_failure_is_retried_with_original_transition(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failed-drive alert lost to a network hiccup must go out on a later
+    poll - carrying the transition the operator never heard about - and
+    exactly once."""
+    delivered: list[dict[str, Any]] = []
+    attempts = 0
+
+    class FlakyClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise httpx.ConnectError("hiccup")
+            delivered.append({"url": url, **kwargs})
+            return FakeResponse(200)
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", FlakyClient)
+    notifier = HealthNotifier("http://ntfy/topic", state_path=tmp_path / "n.json",
+                              retry_seconds=0.0)
+
+    await notifier.evaluate([make_bay(0, SlotHealth.OK)])
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # eaten by the network
+    assert delivered == []
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # retried, accepted
+    assert len(delivered) == 1
+    assert "was: ok -> now: failed" in delivered[0]["content"].decode(), (
+        "the retry lost the original previous-state context"
+    )
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # now committed
+    assert len(delivered) == 1
+
+
+async def test_dead_endpoint_neither_wedges_nor_duplicates_across_flapping(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """FAILED -> OK -> FAILED with the endpoint down throughout: the first
+    undelivered FAILED alert is superseded by the recovery, and once the
+    endpoint returns exactly one alert - for the live transition - goes out."""
+    down = True
+    delivered: list[dict[str, Any]] = []
+
+    class SometimesClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+            if down:
+                raise httpx.ConnectError("endpoint is down")
+            delivered.append({"url": url, **kwargs})
+            return FakeResponse(200)
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", SometimesClient)
+    notifier = HealthNotifier("http://ntfy/topic", state_path=tmp_path / "n.json",
+                              retry_seconds=0.0)
+
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # undeliverable
+    await notifier.evaluate([make_bay(0, SlotHealth.OK)])      # supersedes the stale alert
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # undeliverable again
+    assert delivered == []
+
+    down = False
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+    assert len(delivered) == 1, "the surviving transition must be announced exactly once"
+    assert "was: ok -> now: failed" in delivered[0]["content"].decode()
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # steady state now
+    assert len(delivered) == 1
+
+
+async def test_undelivered_alert_survives_a_restart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Only delivered transitions are persisted, so a restart between the
+    failed attempt and the retry must not lose the alert."""
+    state = tmp_path / "n.json"
+
+    class BrokenClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, *a: Any, **k: Any) -> None:
+            raise httpx.ConnectError("nope")
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", BrokenClient)
+    first = HealthNotifier("http://ntfy/topic", state_path=state)
+    await first.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    delivered: list[dict[str, Any]] = []
+
+    class WorkingClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+            delivered.append({"url": url, **kwargs})
+            return FakeResponse(200)
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", WorkingClient)
+    second = HealthNotifier("http://ntfy/topic", state_path=state)
+    await second.evaluate([make_bay(0, SlotHealth.FAILED)])
+    assert len(delivered) == 1, "the restart swallowed an alert the operator never got"
+
+
+async def test_retries_are_spaced_not_per_poll(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Re-attempting a dead endpoint on every poll tick would stall the loop
+    by a connect timeout each cycle; attempts inside the cooldown are skipped."""
+    posts = 0
+
+    class BrokenClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, *a: Any, **k: Any) -> None:
+            nonlocal posts
+            posts += 1
+            raise httpx.ConnectError("nope")
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", BrokenClient)
+    notifier = HealthNotifier("http://ntfy/topic", state_path=tmp_path / "n.json",
+                              retry_seconds=60.0)
+    for _ in range(5):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+    assert posts == 1, "a dead endpoint was hammered on every poll"
 
 
 async def test_many_simultaneous_changes_are_sent_concurrently(

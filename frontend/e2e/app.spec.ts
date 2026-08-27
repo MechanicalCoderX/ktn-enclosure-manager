@@ -119,6 +119,24 @@ test.describe("identify", () => {
     await expect(auditTable).toContainText("IDENT_ON");
     await expect(auditTable).toContainText("success");
   });
+
+  test("a failed identify shows the error banner and lights nothing", async ({ page }) => {
+    // Sever only the identify POST at the network layer. Bay polling still
+    // reaches the real backend, so the no-dot assertions below reflect true
+    // enclosure state - not a page frozen on data it can no longer refresh.
+    // Bay 5 is used by no other test, so a leaked LED elsewhere (bay 3 stays
+    // lit after the audit test) cannot mask a false negative here.
+    await page.route("**/api/enclosures/*/slots/*/identify", (route) => route.abort());
+
+    await page.getByRole("listitem", { name: /^Bay 5, / }).click();
+    await page.getByRole("button", { name: "Identify", exact: true }).click();
+
+    // The rejection text is fetch's browser-specific wording ("Failed to
+    // fetch" on Chromium), so assert the banner itself, not the prose.
+    await expect(page.locator("main > .notice.error")).toBeVisible();
+    await expect(identDot(page, 5)).toHaveCount(0);
+    await expect(page.getByRole("listitem", { name: /^Bay 5,.*identify active/i })).toHaveCount(0);
+  });
 });
 
 test.describe("chassis and diagnostics", () => {
@@ -176,5 +194,90 @@ test.describe("responsive", () => {
       "aria-label",
       /^Bay 1, SES slot 0/,
     );
+  });
+});
+
+test.describe("change password", () => {
+  // Deliberately the last block in the file: it rotates the one credential
+  // every other test's bootstrapAndLogin() depends on, and the backend is
+  // shared by both projects (workers: 1, one webServer per run). The test
+  // restores the password through the same dialog it exercises; the afterEach
+  // below is the net for a failure that lands between change and change-back.
+  const ROTATED = "e2e-rotated-password";
+
+  test.afterEach(async ({ request }) => {
+    // A test that died holding the rotated credential would fail every later
+    // login in the run with a misleading 401. The request fixture keeps its
+    // own cookie jar, so the login here establishes the session the change
+    // needs. Every auth POST must carry the CSRF header - the server refuses
+    // header-less mutations before it ever reads the body.
+    const csrf = { "X-KTN-Request": "1" };
+    const asSuite = await request.post("/api/auth/login", {
+      headers: csrf,
+      data: { username: USER, password: PASSWORD },
+    });
+    if (asSuite.ok()) return; // the credential the suite expects still works
+    const asRotated = await request.post("/api/auth/login", {
+      headers: csrf,
+      data: { username: USER, password: ROTATED },
+    });
+    expect(asRotated.ok(), "admin password is neither the suite's nor the rotated one").toBe(true);
+    const restored = await request.post("/api/auth/password", {
+      headers: csrf,
+      data: { current_password: ROTATED, new_password: PASSWORD },
+    });
+    expect(restored.ok()).toBe(true);
+  });
+
+  test("refuses a mismatch client-side, then a real change signs the session out", async ({
+    page,
+  }) => {
+    await bootstrapAndLogin(page);
+    await page.getByRole("button", { name: "Change password" }).click();
+    const dialog = page.getByRole("dialog");
+
+    // Both new-password fields satisfy the native minLength=12 constraint, so
+    // submission reaches the dialog's handler and the refusal asserted is its
+    // own mismatch check - not the browser's validation bubble, which proves
+    // nothing about this code.
+    await dialog.getByLabel("Current password").fill(PASSWORD);
+    await dialog.getByLabel("New password", { exact: true }).fill(ROTATED);
+    await dialog.getByLabel("Confirm new password").fill(`${ROTATED}-typo`);
+    await dialog.getByRole("button", { name: "Change password" }).click();
+    await expect(dialog.getByText("New passwords do not match")).toBeVisible();
+    // The refusal happens before any request leaves the page, so the session
+    // must still be live behind the dialog.
+    await expect(page.getByRole("tab", { name: "Drive map" })).toBeVisible();
+
+    // Fix the confirmation and submit for real. The change bumps the session
+    // epoch, which invalidates this session's cookie too, so the app must
+    // land on the login screen with the notice - not a dead dashboard
+    // answering 401 on its next poll.
+    await dialog.getByLabel("Confirm new password").fill(ROTATED);
+    await dialog.getByRole("button", { name: "Change password" }).click();
+    await expect(
+      page.getByText("Password changed. Sign in with your new password."),
+    ).toBeVisible({ timeout: 10_000 });
+
+    // The rotated credential works where the old cookie no longer does.
+    await page.getByLabel("Username").fill(USER);
+    await page.getByLabel("Password", { exact: true }).fill(ROTATED);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByRole("tab", { name: "Drive map" })).toBeVisible();
+
+    // Rotate back through the same UI so the rest of the run - including the
+    // other project's pass over this file - signs in with the suite password.
+    await page.getByRole("button", { name: "Change password" }).click();
+    await dialog.getByLabel("Current password").fill(ROTATED);
+    await dialog.getByLabel("New password", { exact: true }).fill(PASSWORD);
+    await dialog.getByLabel("Confirm new password").fill(PASSWORD);
+    await dialog.getByRole("button", { name: "Change password" }).click();
+    await expect(
+      page.getByText("Password changed. Sign in with your new password."),
+    ).toBeVisible({ timeout: 10_000 });
+    await page.getByLabel("Username").fill(USER);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByRole("tab", { name: "Drive map" })).toBeVisible();
   });
 });

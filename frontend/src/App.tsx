@@ -334,6 +334,29 @@ export function App() {
     Boolean(user && selectedEnclosure && tab === "chassis"),
   );
 
+  const signOut = () =>
+    api
+      .logout()
+      .catch((e) => {
+        // Server-side revocation is the real sign-out; without this .catch a
+        // failed POST (backend restarting, network blip) was an unhandled
+        // rejection — the button silently did nothing while the user walked
+        // away believing the session was dead. Say so, on the screen the user
+        // actually lands on: with auth required that is the login screen,
+        // which renders signOutNotice, not the dashboard's error banner.
+        const detail = e instanceof Error ? e.message : String(e);
+        const message =
+          `Sign out did not complete (${detail}). The server may still honour ` +
+          "this session — sign in and sign out again, or use " +
+          "Change password → Sign out everywhere.";
+        if (authRequired) setSignOutNotice(message);
+        else setError(message);
+      })
+      // Local state is cleared regardless: the UI must reflect what the user
+      // asked for, and a dead-looking dashboard polling with a maybe-valid
+      // cookie would be worse than the honest login screen plus the warning.
+      .finally(() => setUser(null));
+
   const identify = async (slot: number, on: boolean, duration: IdentDuration) => {
     if (!selectedEnclosure) return;
     setBusy(true);
@@ -432,10 +455,7 @@ export function App() {
             <button className="btn secondary" onClick={() => setChangingPassword(true)}>
               Change password
             </button>
-            <button
-              className="btn secondary"
-              onClick={() => api.logout().then(() => setUser(null))}
-            >
+            <button className="btn secondary" onClick={() => void signOut()}>
               Sign out ({user})
             </button>
           </>

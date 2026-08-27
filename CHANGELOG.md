@@ -4,6 +4,81 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.4] — 2026-08-26
+
+Hardening release from a full adversarial pre-submission review (eight
+independent lenses, every finding re-verified against the code). The one
+user-visible behaviour change worth reading first: **on enclosures where the
+vendor's device slot numbering does not match the SES element index, Identify
+now lights the correct bay** — previously it could light the wrong bay's LED
+on such shelves (the KTN-STL3, where the two numberings coincide, was never
+affected).
+
+### Fixed
+- **Identify addresses bays through a device-slot→element-index map** built
+  from the enclosure's Additional Element Status page (already on the
+  helper's read-only allow-list), cached per enclosure. A slot the page does
+  not map unambiguously is refused with a clear error instead of guessed at.
+- The SES configuration-page parser no longer mis-attributes a descriptor's
+  element count and label when a type descriptor carries no text line (a
+  normal sg_ses variant).
+- A seated drive that failed hard enough for the kernel to delete its block
+  device now renders as **failed**, not as an empty bay: fault/Critical SES
+  status is checked before the device-presence test.
+- Bay SAS addresses are joined on the AES device slot number instead of
+  conflating element index with sysfs slot; when the mapping is unknown, no
+  address is shown rather than possibly the wrong drive's.
+- A same-name disk swap can no longer wear the previous drive's ZFS/remote
+  identity for a poll interval: remote records are dropped when serial/WWN
+  disagree with the local identity.
+- Enclosure hardware I/O (discovery, slot reads — flock-guarded, up to 30 s)
+  now runs in a worker thread instead of on the event loop, so a wedged
+  shelf degrades the slot cache instead of stalling the whole HTTP surface
+  including `/healthz`.
+- With the opt-in REST fallback enabled, transport and JSON-decode failures
+  are contained as `TrueNASError` instead of escaping and starving the
+  unrelated SES/SMART polls.
+- Health alerts are no longer lost to a transient webhook failure: a
+  transition is committed only after the endpoint accepts it, with bounded
+  per-bay retry.
+- An expired Identify whose auto-clear hits a transient failure (helper
+  restart, detached enclosure) is retried with bounded backoff instead of
+  being dropped with the LED left lit; permanent failure is logged loudly.
+- Login rate limiting is thread-safe under concurrent requests, and a
+  rate-limited login is answered `429` (matching change-password) instead
+  of `401`.
+- The chassis view maps SES statuses onto the full health scale —
+  Critical/Unrecoverable show as failed, not flattened to a warning badge —
+  and a failed sign-out now surfaces in the error banner instead of being
+  silently swallowed.
+
+### Added
+- Shelves that report drive bays as plain **Device slot** elements (SES type
+  0x01) are now supported alongside Array device slot (0x17) for discovery,
+  Identify and SAS addresses.
+- `KTN_ALLOWED_HOSTS`: optional Host-header allow-list closing DNS rebinding
+  when running with authentication disabled (default: allow all, unchanged).
+- `KTN_FORWARDED_ALLOW_IPS`: trust `X-Forwarded-Proto` from a named reverse
+  proxy so the session cookie's `Secure` flag survives TLS termination
+  (default unchanged: localhost only).
+- Root helper: per-connection socket timeout (an idle client no longer pins
+  a root-process thread), and the post-bind chown/chmod verifies via
+  `lstat` that the path is a non-symlink socket before touching it.
+- Test coverage for the previously untested security core: the helper's
+  request dispatcher, the production Identify write path (helper socket +
+  SES command), and expired/tampered/unsigned session cookies — plus
+  negative-path auth tests and new E2E flows.
+
+### Changed
+- Release workflows: single tag trigger with a concurrency group, `latest`
+  only for the highest semver tag, third-party actions pinned to commit
+  SHAs, and the arm64 image now passes the Trivy gate before publish.
+- Documentation truth pass: INSTALL-TRUENAS.md, SECURITY.md, ARCHITECTURE.md
+  and the staged catalog package no longer carry pre-1.5.2 claims (writable
+  `/sys`, AppArmor relaxation, the retracted "SG_IO counts as a write"
+  rationale, the removed setgid-bit mechanism); SECURITY.md now documents
+  six allow-listed read methods and the `system.version` fallback.
+
 ## [1.5.3] — 2026-08-20
 
 Polish release ahead of wider publicity; no behaviour changes.
@@ -98,6 +173,28 @@ all fixed.
   `current_password` was brute-forceable without limit. The same fixed-window
   limiter now guards both; the refusal is HTTP 429 so the browser can say
   "slow down" rather than "wrong password".
+- **The TrueNAS API key no longer needs to be an administrator.** The app calls
+  five read methods; the key it used authenticated as `root`, because that is
+  what TrueNAS produces if you create a key as the user you happen to be.
+
+  `SECURITY.md` now documents a dedicated account with exactly three roles -
+  `DISK_READ`, `POOL_READ`, `REPORTING_READ` - and the drive map, pool and vdev
+  membership, ZFS error counters, temperatures and over-temperature alerts all
+  work with them.
+
+  **`system.info` is deliberately given up.** It accepts only `READONLY_ADMIN`
+  or `SHARING_ADMIN`, so keeping it would mean granting read access to the
+  entire appliance configuration in order to display a version string.
+  Diagnostics now reports *why* the version is missing instead of showing a
+  bare null, and includes `system_info` in its polling freshness so a denied
+  call is visible rather than silent. (1.5.1 later recovered the version
+  itself via `system.version`, which needs no role at all.)
+
+  Verified on 25.10.5 with such a key: the four data calls succeed,
+  `system.info` errors, and writes (`pool.dataset.create`, `user.create`) are
+  refused. Also recorded, because it costs an hour otherwise: role-based access
+  is enforced on the JSON-RPC API the app uses, while the legacy REST surface
+  returned **403 to every one of those reads** with the same key.
 
 ### Added
 - **`POST /api/auth/revoke-sessions` — sign out everywhere.** The session-epoch
@@ -135,60 +232,6 @@ all fixed.
 
 ## [1.4.0] — 2026-08-15
 
-### Changed
-- **Dependency and toolchain refresh.** Runtime base python 3.13 → **3.14**,
-  frontend builder node 20 → **26**, vite 5 → **8**, TypeScript 5 → **7**,
-  react 18 → **19**, and nine GitHub Actions to current majors. All
-  digest-pinned; the full suite, typecheck, E2E and Trivy scan pass on the new
-  toolchain.
-- **Four development-scope advisories resolved** — three in vite (including a
-  high-severity `server.fs.deny` bypass) and one in esbuild's dev server. They
-  were invisible until Dependabot security alerts were enabled on the
-  repository; `npm audit --omit=dev` in CI does not see them by design, since
-  they are not shipped to users, but they are real for anyone running the dev
-  server.
-
-### Fixed
-- **CI now tests on the interpreter and Node the image actually ships.** Both
-  had silently drifted: the runtime moved to python 3.14 while the suite ran on
-  3.13, and the frontend builder moved to node 26 while CI built on 22.
-
-  That drift is not cosmetic. A different Node means a different npm, which
-  resolves a different dependency tree - precisely how a missing CSS type
-  declaration passed `npm run typecheck` on one and failed the image build on
-  the other, for the same commit. Tests that run on an interpreter nobody
-  receives can pass while the released image fails.
-
-  Two tests now assert that `verify.yml` and the `Dockerfile` agree on both
-  versions, so they cannot drift again.
-
-## Unreleased
-
-### Security
-- **The TrueNAS API key no longer needs to be an administrator.** The app calls
-  five read methods; the key it used authenticated as `root`, because that is
-  what TrueNAS produces if you create a key as the user you happen to be.
-
-  `SECURITY.md` now documents a dedicated account with exactly three roles -
-  `DISK_READ`, `POOL_READ`, `REPORTING_READ` - and the drive map, pool and vdev
-  membership, ZFS error counters, temperatures and over-temperature alerts all
-  work with them.
-
-  **`system.info` is deliberately given up.** It accepts only `READONLY_ADMIN`
-  or `SHARING_ADMIN`, so keeping it would mean granting read access to the
-  entire appliance configuration in order to display a version string.
-  Diagnostics now reports *why* the version is missing instead of showing a
-  bare null, and includes `system_info` in its polling freshness so a denied
-  call is visible rather than silent.
-
-  Verified on 25.10.5 with such a key: the four data calls succeed,
-  `system.info` errors, and writes (`pool.dataset.create`, `user.create`) are
-  refused. Also recorded, because it costs an hour otherwise: role-based access
-  is enforced on the JSON-RPC API the app uses, while the legacy REST surface
-  returned **403 to every one of those reads** with the same key.
-
-
-
 ### Security
 - **The regression suite for the v1.1.1 arbitrary file read did not test the
   vulnerability.** Mutation-checked by restoring the vulnerable SPA route: of
@@ -216,6 +259,31 @@ all fixed.
   `publish-image.yml`, with the publish job gated on it. One definition, so the
   two cannot drift - which is how this hid in the first place, two workflows
   building the same Dockerfile independently.
+- **Dependency and toolchain refresh.** Runtime base python 3.13 → **3.14**,
+  frontend builder node 20 → **26**, vite 5 → **8**, TypeScript 5 → **7**,
+  react 18 → **19**, and nine GitHub Actions to current majors. All
+  digest-pinned; the full suite, typecheck, E2E and Trivy scan pass on the new
+  toolchain.
+- **Four development-scope advisories resolved** — three in vite (including a
+  high-severity `server.fs.deny` bypass) and one in esbuild's dev server. They
+  were invisible until Dependabot security alerts were enabled on the
+  repository; `npm audit --omit=dev` in CI does not see them by design, since
+  they are not shipped to users, but they are real for anyone running the dev
+  server.
+
+### Fixed
+- **CI now tests on the interpreter and Node the image actually ships.** Both
+  had silently drifted: the runtime moved to python 3.14 while the suite ran on
+  3.13, and the frontend builder moved to node 26 while CI built on 22.
+
+  That drift is not cosmetic. A different Node means a different npm, which
+  resolves a different dependency tree - precisely how a missing CSS type
+  declaration passed `npm run typecheck` on one and failed the image build on
+  the other, for the same commit. Tests that run on an interpreter nobody
+  receives can pass while the released image fails.
+
+  Two tests now assert that `verify.yml` and the `Dockerfile` agree on both
+  versions, so they cannot drift again.
 
 ## [1.3.4] — 2026-08-14
 

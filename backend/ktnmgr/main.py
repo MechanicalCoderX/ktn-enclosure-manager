@@ -33,6 +33,25 @@ log = logging.getLogger(__name__)
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 
+def _canonical_host(value: str) -> str:
+    """Lowercased host with any port stripped, for KTN_ALLOWED_HOSTS matching.
+
+    Matching is port-insensitive on purpose: DNS rebinding can change what a
+    hostname resolves to but never the port the browser sends, so the port
+    adds nothing to the check - and the port a legitimate browser sends
+    depends on how the deployment published the app, which the operator
+    should not have to enumerate. A bracketed IPv6 literal ([::1]:8420) loses
+    brackets and port; an unbracketed one (::1) has multiple colons and no
+    port syntax, so it is left whole rather than mangled by a rsplit.
+    """
+    value = value.strip().lower()
+    if value.startswith("["):
+        return value[1 : value.find("]")] if "]" in value else value
+    if value.count(":") == 1:
+        return value.rsplit(":", 1)[0]
+    return value
+
+
 def build_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(
@@ -117,6 +136,38 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         description="Local enclosure management for SES disk shelves on TrueNAS SCALE.",
         lifespan=lifespan,
     )
+
+    allowed_hosts = {
+        _canonical_host(entry)
+        for entry in settings.allowed_hosts.split(",")
+        if entry.strip()
+    }
+    if allowed_hosts:
+        # Registered before security_headers, which therefore wraps it (later
+        # registration is outermost), so even this rejection carries the
+        # defence-in-depth headers that middleware promises on every response.
+        @app.middleware("http")
+        async def enforce_host(request: Any, call_next: Any) -> Any:
+            """Refuse requests whose Host is not one this app answers to.
+
+            This is the DNS-rebinding defence (see Settings.allowed_hosts): a
+            hostile page can repoint its own hostname at this app's address,
+            and the browser will then treat the app as same-origin with the
+            attacker - the session cookie does not travel (it is keyed to the
+            real hostname), so with authentication on the API answers 401
+            anyway, but the opt-in anonymous modes answer with data. The Host
+            header is the one thing rebinding cannot forge: it still names the
+            attacker's domain. An absent Host header is refused too - failing
+            open there would exempt exactly the hand-crafted requests.
+            """
+            host = request.headers.get("host")
+            if host is None or _canonical_host(host) not in allowed_hosts:
+                return JSONResponse(
+                    {"detail": "request Host header does not match KTN_ALLOWED_HOSTS"},
+                    status_code=400,
+                )
+            return await call_next(request)
+
     @app.middleware("http")
     async def security_headers(request: Any, call_next: Any) -> Any:
         """Defence-in-depth headers on every response.

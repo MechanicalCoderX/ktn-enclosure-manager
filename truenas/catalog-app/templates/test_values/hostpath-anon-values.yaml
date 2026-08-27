@@ -1,0 +1,34 @@
+# Exercises the paths basic-values.yaml does not: host_path storage instead
+# of ix_volume, open dashboard (auth_required off) with the IDENT write kept
+# gated, and a TrueNAS URL left unset with TLS verification disabled.
+enclosure:
+  # CI has no SAS shelf; see basic-values.yaml.
+  sg_device: /dev/null
+  allowlist: ""
+
+access:
+  auth_required: false
+  allow_anonymous_ident: false
+
+truenas:
+  url: ""
+  api_key: ""
+  verify_tls: false
+
+network:
+  web_port:
+    bind_mode: published
+    port_number: 30421
+    host_ips: []
+
+storage:
+  data:
+    type: host_path
+    host_path_config:
+      path: /opt/tests/mnt/ktn-data
+      create_host_path: true
+
+resources:
+  limits:
+    cpus: 2
+    memory: 512

@@ -16,7 +16,7 @@ did:
 
 | Requirement | Why | Likely reviewer reaction |
 |---|---|---|
-| An `/dev/sg*` device, `rw` | `SG_IO` counts as a write even for read-only pages | reasonable, narrow |
+| An `/dev/sg*` device, `rw` | the `w` covers exactly one command — the IDENT LED's SEND DIAGNOSTIC; every telemetry read runs on a read-only open | reasonable, narrow |
 | `SETUID`, `SETGID` | drop the web process to uid 1000 | declarable via `capabilities`, and used only to *reduce* privilege |
 
 That is the whole list. No host mounts, no `--privileged`, no AppArmor
@@ -94,15 +94,18 @@ references on its first line.
 ### One real constraint worth knowing
 
 **The catalog library cannot express a setgid tmpfs.** Its mode validator is
-`^0[0-7]{3}$`, so `2770` is rejected outright. This app needs the setgid bit on
-`/run/ktn` so the helper's socket inherits gid 1000 - the web process runs as
-uid 1000 and cannot open a `root:root` socket, and chgrp'ing it would need
-`CAP_CHOWN`, which the container deliberately drops.
+`^0[0-7]{3}$`, so `2770` is rejected outright. The helper's socket must carry
+gid 1000 - the web process runs as uid 1000 and cannot open a `root:root`
+socket, and chgrp'ing it would need `CAP_CHOWN`, which the container
+deliberately drops.
 
-The entrypoint therefore applies `chmod 2770` to the socket directory itself at
-startup. That is why an app installed from the catalog still gets a working
-IDENT path, and it makes the plain compose deployment independent of the
-`mode=` tmpfs option too.
+Since 1.3.3 that constraint does not matter: the helper binds the socket
+under gid 1000 itself (`os.setegid`, via the retained `CAP_SETGID`), so
+nothing depends on the directory's setgid bit at all. An entrypoint `chmod`
+was tried first and silently *stripped* the bit (no `CAP_FSETID` - see
+`docker-entrypoint.sh`). That is why an app installed from the catalog still
+gets a working IDENT path, and it makes the plain compose deployment
+independent of the `mode=` tmpfs option too.
 
 ## Why the PR is not open yet
 
@@ -122,10 +125,26 @@ to paste.
 2. **Re-render if you bump `lib_version`.** Their CI recomputes
    `lib_version_hash` and rewrites `templates/library/`, so a stale hash fails.
 
-3. **Expect review discussion about the device.** `/dev/sg*` at `rw` is the one
-   unusual ask. It addresses the enclosure processor, not disk data, and `:r`
-   genuinely does not work because `SG_IO` counts as a write - that is worth
-   saying in the PR description rather than leaving them to wonder.
+3. **Expect review discussion about the device.** `/dev/sg*` at `rw` is the
+   one unusual ask, and the measured permission floor (v1.5.2) is the
+   strongest answer to it - put it in the PR description rather than leaving
+   them to wonder. The facts, measured on live hardware: the device cgroup
+   gates the `open()` mode, not `SG_IO` itself; every telemetry read runs
+   `sg_ses --readonly` on an `O_RDONLY` fd, on which the kernel's per-opcode
+   filter refuses write-class commands outright; the `w` exists solely for
+   the one IDENT LED SEND DIAGNOSTIC, issued by the gated root helper; and
+   `:r` is a supported monitoring-only grant. It addresses the enclosure
+   processor, not disk data.
 
 If it is rejected, nothing is lost - **Install via YAML works today** and is
 documented in [`../../docs/INSTALL-TRUENAS.md`](../../docs/INSTALL-TRUENAS.md).
+
+## Catalog `version` vs app version
+
+This staged copy keeps `app.yaml`'s `version` equal to the app release so the
+repo's version-consistency test can pin every version-bearing file. The copy
+in the submission fork deliberately diverges on this one field: upstream's
+CONTRIBUTIONS.md starts a new app's catalog `version` at 1.0.0 and bumps it
+per package change, decoupled from `app_version`. When syncing this directory
+to the fork, carry everything except `version`, which follows the catalog's
+own numbering there.

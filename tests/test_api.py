@@ -100,11 +100,15 @@ def test_login_rate_limited(client: TestClient) -> None:
                     json={"username": "admin", "password": "wrong"}, headers=CSRF).status_code
         for _ in range(8)
     ]
-    assert codes.count(401) >= 5
+    # Wrong passwords inside the window are 401; once it is full the limiter
+    # answers 429 - the same split change_password uses, so a locked-out user
+    # is told to wait rather than told their password is wrong.
+    assert codes.count(401) == 5
+    assert codes.count(429) == 3
     # Once the window is exhausted every attempt is refused, correct or not.
     blocked = client.post("/api/auth/login",
                           json={"username": "admin", "password": PASSWORD}, headers=CSRF)
-    assert blocked.status_code == 401
+    assert blocked.status_code == 429
 
 
 # ----------------------------------------------------------------------- CSRF

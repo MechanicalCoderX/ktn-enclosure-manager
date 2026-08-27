@@ -36,6 +36,8 @@ backend/ktnmgr/
     sysfs.py             discovery, slot enumeration, locate read/write
     disks.py             local disk identity straight from sysfs
     locate.py            semantic validation + the two write paths
+    access.py            cross-process flock; an IDENT write + its settle
+                         read-back cannot interleave with other SES traffic
     helper_client.py     unix-socket client for the privileged helper
     ses.py               allow-listed sg_ses execution (local and via helper)
     ses_parser.py        configuration + join page parsers
@@ -47,6 +49,8 @@ backend/ktnmgr/
     ident.py             timer engine, persistence, startup reconciliation
     auth.py              Argon2id accounts, signed sessions, rate limiting
     audit.py             append-only JSON-lines audit log
+    notify.py            health-change alerts to ntfy/webhook; transitions
+                         only, delivery-confirmed before a state is recorded
   api/routes.py          semantic HTTP surface
   main.py                wiring
 helper/ktn_ident_helper.py   the only privileged process

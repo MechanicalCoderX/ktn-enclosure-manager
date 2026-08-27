@@ -57,14 +57,33 @@ class IdentHandler(socketserver.StreamRequestHandler):
     ses: SesRunner
     writer: object
 
+    # Applied to every connection by StreamRequestHandler.setup(). Without it,
+    # a client that connects and never sends a newline pins this thread - in
+    # the root process - on the blocking readline forever, and repeated
+    # connects grow threads without bound. No privilege is at stake (requests
+    # are still validated below), but a compromised web process must not be
+    # able to wedge the helper just by holding sockets open. Five seconds is
+    # generous: the real client writes its one-line request immediately.
+    timeout = 5
+
     def handle(self) -> None:
-        raw = self.rfile.readline(MAX_REQUEST_BYTES)
+        try:
+            raw = self.rfile.readline(MAX_REQUEST_BYTES)
+        except TimeoutError:
+            log.warning("closing connection: no request within %ss", self.timeout)
+            return
         try:
             response = self._dispatch(raw)
         except Exception as exc:  # noqa: BLE001 - a helper must never die on input
             log.warning("rejected request: %s", exc)
             response = {"ok": False, "error": str(exc)}
-        self.wfile.write((json.dumps(response) + "\n").encode("utf-8"))
+        try:
+            self.wfile.write((json.dumps(response) + "\n").encode("utf-8"))
+        except OSError as exc:
+            # Same attacker, other direction: a client that never reads would
+            # otherwise pin the thread on send. The connection timeout above
+            # covers writes too; the response is simply dropped.
+            log.warning("could not send response: %s", exc)
 
     def _dispatch(self, raw: bytes) -> dict[str, object]:
         try:
@@ -223,12 +242,34 @@ def main() -> int:
 
     # Belt and braces for a deployment that does grant CAP_CHOWN, and a clear
     # warning if the group still is not right rather than a silent failure.
-    if gid is not None:
+    #
+    # Invariant before root touches the path: the directory entry must still
+    # be the socket this process just bound. The socket's directory is
+    # writable by the web gid and carries no sticky bit, so a compromised web
+    # process racing the bind-to-chmod window could unlink our socket and
+    # drop a symlink in its place, landing the chown/chmod below - as root,
+    # link followed - on a file of its choosing. os.lstat never follows
+    # links: a substituted symlink shows up as S_ISLNK, not S_ISSOCK, and the
+    # helper bails instead of touching it. (One syscall of race remains
+    # between this check and the chown/chmod; the check turns a pre-plantable
+    # symlink into a race that must be won inside that window, which is the
+    # best a path-based chmod can do - fchmod cannot reach a unix socket's
+    # directory entry through its fd.)
+    st = os.lstat(args.socket)
+    if not stat.S_ISSOCK(st.st_mode):
+        log.error(
+            "%s is not the socket this helper bound (mode %o) - the path was "
+            "tampered with between bind and permission setup; refusing to start",
+            args.socket, stat.S_IFMT(st.st_mode),
+        )
+        server.server_close()
+        # Deliberately do not unlink: the entry is not ours to remove.
+        return 1
+    if gid is not None and st.st_gid != gid:
         try:
-            if os.stat(args.socket).st_gid != gid:
-                os.chown(args.socket, 0, gid)
+            os.chown(args.socket, 0, gid)
         except PermissionError:
-            actual = os.stat(args.socket).st_gid
+            actual = os.lstat(args.socket).st_gid
             if actual != gid:
                 log.warning(
                     "cannot set socket group to %s (currently %s); the web process "

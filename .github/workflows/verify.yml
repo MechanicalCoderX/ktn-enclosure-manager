@@ -11,6 +11,11 @@ name: Verify
 # on a TypeScript error while publish succeeded and shipped an image - its
 # frontend came from a cached layer, so `npm run build` never re-ran. The
 # release was fine by luck; a cache miss would have published a broken one.
+#
+# Actions are pinned by commit SHA for the same reason the Dockerfile pins its
+# base images by digest: a moving tag can be repointed upstream. The trailing
+# comment records the release each SHA was taken from; the github-actions
+# Dependabot entry bumps SHA and comment together.
 
 on:
   workflow_call:
@@ -25,9 +30,9 @@ jobs:
       # Must track the runtime base image in the Dockerfile. Testing on a
       # different interpreter than the one shipped means the suite can pass
       # while the released image fails on a version-specific change.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
 
@@ -60,13 +65,13 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Must track the frontend builder image in the Dockerfile. Building on a
       # different Node - and therefore a different npm - resolves a different
       # dependency tree, which is how a TypeScript error once passed here and
       # failed the image build on the same commit.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26"
           cache: npm
@@ -84,12 +89,12 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26"
           cache: npm
@@ -111,31 +116,63 @@ jobs:
         working-directory: frontend
         run: npx playwright test
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 7
 
+  # Both architectures that publish-image.yml pushes, built and scanned here.
+  # Before this was a matrix the gate built amd64 only, while publish built
+  # linux/amd64,linux/arm64 - the arm64 layers were born after the gate and
+  # reached the registry with no Trivy scan ever run on them. Trivy inspects
+  # layer contents without executing anything, so scanning the emulated arm64
+  # image is exact; actually RUNNING the suite per-arch is a different (and
+  # unpaid-for) job - tests and E2E stay amd64-only above.
   image:
-    name: image builds
+    name: image builds (${{ matrix.arch }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # `arch` exists because `platform` contains a slash, which is unsafe
+        # in a gha cache scope name.
+        include:
+          - platform: linux/amd64
+            arch: amd64
+          - platform: linux/arm64
+            arch: arm64
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # QEMU user-mode emulation: the Dockerfile's RUN steps execute arm64
+      # binaries (pip, apt) during the foreign-arch build. Native amd64 does
+      # not need it, so the step is skipped there to keep that leg identical
+      # to what it was before the matrix existed.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        if: matrix.arch != 'amd64'
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
       - name: Build (no push)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
+          platforms: ${{ matrix.platform }}
           push: false
+          # `load` works for a single foreign platform: the daemon stores the
+          # image without running it, which is all Trivy needs.
           load: true
           tags: ktn-enclosure-manager:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Per-arch scopes: with a shared scope the two legs race each other's
+          # cache export, and publish-image.yml could not tell which arch it
+          # was reusing. It reads both scopes, so on a cache hit the layers it
+          # pushes are the exact layers scanned below.
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
 
       - name: Scan image for known vulnerabilities
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ktn-enclosure-manager:ci
           format: table

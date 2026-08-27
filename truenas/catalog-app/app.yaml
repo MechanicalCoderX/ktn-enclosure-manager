@@ -1,57 +1,47 @@
 annotations:
-  min_scale_version: 24.10.0
-app_version: 1.5.3
+  min_scale_version: 24.10.2.2
+app_version: 1.5.4
 capabilities:
-  - name: SETUID
-    description: Needed to drop the web process from root to uid 1000 at startup.
-  - name: SETGID
-    description: Needed to drop the web process from root to gid 1000 at startup.
+- description: KTN Enclosure Manager is able to change group ID of processes
+  name: SETGID
+- description: KTN Enclosure Manager is able to change user ID of processes
+  name: SETUID
 categories:
-  - storage
-  - monitoring
+- storage
 changelog_url: https://github.com/MechanicalCoderX/ktn-enclosure-manager/blob/main/CHANGELOG.md
 date_added: '2026-08-13'
 description: Physical drive-bay map, chassis telemetry and IDENT LED control for SES
   disk shelves attached to TrueNAS SCALE.
 home: https://github.com/MechanicalCoderX/ktn-enclosure-manager
 host_mounts: []
-icon: https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/icon.png
+icon: https://media.sys.truenas.net/apps/ktn-enclosure-manager/icons/icon.svg
 keywords:
-  - enclosure
-  - ses
-  - sas
-  - jbod
-  - disk-shelf
-  - identify
+- enclosure
+- ses
+- sas
+- jbod
+- disk-shelf
+- identify
 lib_version: 2.3.11
 lib_version_hash: 874636814efb275e5276ea9d709b7cd665fed42bb1d50328e853d9253a2e1229
 maintainers:
-  - email: toonces82@gmail.com
-    name: MechanicalCoderX
-    url: https://github.com/MechanicalCoderX/ktn-enclosure-manager
+- email: dev@truenas.com
+  name: truenas
+  url: https://www.truenas.com/
 name: ktn-enclosure-manager
 run_as_context:
-  - description: >-
-      The web application runs as a non-root user with no capabilities and no
-      device access.
-    gid: 1000
-    group_name: ktn
-    uid: 1000
-    user_name: ktn
-  - description: >-
-      A small IDENT helper runs as root. It accepts only identify_on,
-      identify_off and read-only SES page reads over a unix socket, and cannot
-      be passed a filesystem path or a command.
-    gid: 0
-    group_name: root
-    uid: 0
-    user_name: root
+- description: Container [ktn-enclosure-manager] runs as root user and group.
+  gid: 0
+  group_name: Host group is [root]
+  uid: 0
+  user_name: Host user is [root]
 screenshots:
-  - https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/drive-map-dark.png
-  - https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/bay-detail.png
-  - https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/chassis.png
+- https://media.sys.truenas.net/apps/ktn-enclosure-manager/screenshots/screenshot1.png
+- https://media.sys.truenas.net/apps/ktn-enclosure-manager/screenshots/screenshot2.png
+- https://media.sys.truenas.net/apps/ktn-enclosure-manager/screenshots/screenshot3.png
 sources:
-  - https://github.com/MechanicalCoderX/ktn-enclosure-manager
+- https://apps.truenas.com/catalog/ktn-enclosure-manager_community/
+- https://github.com/MechanicalCoderX/ktn-enclosure-manager
 title: KTN Enclosure Manager
 train: community
-version: 1.5.3
+version: 1.5.4

@@ -1,10 +1,14 @@
 categories:
-  - storage
-  - monitoring
-icon_url: https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/icon.png
+- storage
+icon_url: https://media.sys.truenas.net/apps/ktn-enclosure-manager/icons/icon.svg
 screenshots:
-  - https://raw.githubusercontent.com/MechanicalCoderX/ktn-enclosure-manager/main/docs/images/drive-map-dark.png
+- https://media.sys.truenas.net/apps/ktn-enclosure-manager/screenshots/screenshot1.png
+- https://media.sys.truenas.net/apps/ktn-enclosure-manager/screenshots/screenshot2.png
+- https://media.sys.truenas.net/apps/ktn-enclosure-manager/screenshots/screenshot3.png
 tags:
-  - enclosure
-  - ses
-  - jbod
+- enclosure
+- ses
+- sas
+- jbod
+- disk-shelf
+- identify

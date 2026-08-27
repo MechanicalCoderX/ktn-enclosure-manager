@@ -164,8 +164,16 @@ def login(
     auth: Annotated[AuthService, Depends(get_auth)],
 ) -> dict:
     client = request.client.host if request.client else "unknown"
+    # The limiter refusal is 429, not 401, mirroring change_password: the two
+    # endpoints share one limiter, and the same refusal answered "wrong
+    # password" here and "slow down" there. 429 tells a locked-out legitimate
+    # user that waiting - not retyping - is the remedy, and tells nothing
+    # about the credential that 401 does not already tell.
     try:
         auth.limiter.check(client)
+    except AuthError as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
+    try:
         username = auth.verify(body.username, body.password)
     except AuthError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc

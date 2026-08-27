@@ -61,12 +61,28 @@ class IdentManager:
         audit: AuditLog,
         state_path: Path,
         tick_seconds: float = 1.0,
+        clear_max_attempts: int = 5,
+        clear_backoff_seconds: float = 2.0,
     ) -> None:
         self.writer = writer
         self.audit = audit
         self.state_path = Path(state_path)
         self.tick_seconds = tick_seconds
+        # Retry policy for expired-IDENT auto-clears. The most likely clear
+        # failure is transient - HelperLocateWriter raises LocateError while the
+        # helper socket is down for a helper restart - so dropping the record on
+        # the first failure would leave the LED lit forever, the exact outcome
+        # §26's server-side timers exist to prevent. Retries are bounded so a
+        # permanently failing slot cannot spin the timer loop forever, and the
+        # delay doubles per failure (defaults: 2, 4, 8, 16 s, ~30 s in total)
+        # to outlast a helper restart without hammering a dead socket.
+        self.clear_max_attempts = clear_max_attempts
+        self.clear_backoff_seconds = clear_backoff_seconds
         self._records: dict[tuple[str, int], IdentRecord] = {}
+        #: (enclosure_id, ses_slot) -> (failed clear attempts, next retry time).
+        #: In-memory only: after a container restart, reconciliation (§27)
+        #: re-proves ownership and retries from scratch anyway.
+        self._clear_failures: dict[tuple[str, int], tuple[int, datetime]] = {}
         # One write lock per enclosure (§26 step 5) so two concurrent requests
         # cannot interleave a write and its verification read.
         self._locks: dict[str, asyncio.Lock] = {}
@@ -192,6 +208,10 @@ class IdentManager:
                 )
 
             key = (enclosure_id, ses_slot)
+            # Any successful write supersedes retry state left by a failed
+            # auto-clear: off means the LED is provably out, and on starts a
+            # fresh request whose expiry must not inherit the old backoff.
+            self._clear_failures.pop(key, None)
             if not on:
                 self._records.pop(key, None)
                 self._save()
@@ -247,7 +267,10 @@ class IdentManager:
                         on=False,
                         user="system:reconcile",
                     )
-                except LocateError as exc:
+                except (LocateError, LookupError) as exc:
+                    # LookupError covers a detached enclosure at startup, the
+                    # same pairing as the timer loop. The record stays, so the
+                    # loop's bounded clear-retry takes over from here.
                     log.error("could not clear expired IDENT %s: %s", key, exc)
 
         external = [k for k, lit in observed.items() if lit and k not in self._records]
@@ -268,6 +291,11 @@ class IdentManager:
                 for key, record in list(self._records.items()):
                     if not record.expired(now):
                         continue
+                    attempts, retry_at = self._clear_failures.get(key, (0, now))
+                    if now < retry_at:
+                        # A previous clear attempt failed and its backoff window
+                        # is still open; keep the record so the retry happens.
+                        continue
                     log.info("IDENT timer expired for %s; clearing", key)
                     try:
                         await self.identify(
@@ -276,12 +304,43 @@ class IdentManager:
                             on=False,
                             user="system:timer",
                         )
-                    except LocateError as exc:
-                        log.error("automatic IDENT clear failed for %s: %s", key, exc)
-                        # Drop the record so a permanently failing slot does not
-                        # spin the timer loop every tick.
-                        self._records.pop(key, None)
-                        self._save()
+                    except (LocateError, LookupError) as exc:
+                        # LocateError is what HelperLocateWriter raises while the
+                        # helper socket is unreachable (e.g. mid helper restart);
+                        # LookupError is the sysfs backend's signal for a detached
+                        # enclosure. Both are frequently transient, and a dropped
+                        # record means nothing will ever clear this LED (§26) -
+                        # so retry with backoff, but only a bounded number of
+                        # times so a permanently failing slot cannot spin the
+                        # timer loop forever.
+                        attempts += 1
+                        if attempts >= self.clear_max_attempts:
+                            log.error(
+                                "giving up on expired IDENT %s after %d failed clear "
+                                "attempts (%s) - the LED may still be lit; clear it "
+                                "from the UI or on the enclosure itself",
+                                key,
+                                attempts,
+                                exc,
+                            )
+                            self._records.pop(key, None)
+                            self._clear_failures.pop(key, None)
+                            self._save()
+                        else:
+                            delay = self.clear_backoff_seconds * 2 ** (attempts - 1)
+                            self._clear_failures[key] = (
+                                attempts,
+                                now + timedelta(seconds=delay),
+                            )
+                            log.warning(
+                                "automatic IDENT clear failed for %s "
+                                "(attempt %d/%d, retrying in %.0fs): %s",
+                                key,
+                                attempts,
+                                self.clear_max_attempts,
+                                delay,
+                                exc,
+                            )
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - the timer loop must never die

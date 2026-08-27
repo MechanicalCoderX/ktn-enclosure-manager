@@ -19,7 +19,12 @@ from ktnmgr import __version__
 from ktnmgr.config import Settings
 from ktnmgr.enclosure.disks import DiskInfoReader
 from ktnmgr.enclosure.ses import SesError, SesRunner
-from ktnmgr.enclosure.ses_parser import build_telemetry
+from ktnmgr.enclosure.ses_parser import (
+    array_slot_type_index,
+    build_telemetry,
+    parse_additional_element_status,
+    parse_configuration,
+)
 from ktnmgr.enclosure.sysfs import EnclosureNotFoundError, SysfsEnclosureBackend
 from ktnmgr.models import (
     Bay,
@@ -86,10 +91,16 @@ def classify(
     a hot *and* faulted disk still reads as failed.
     """
     normalised = (status or "").strip().lower()
-    if not has_device:
-        return SlotHealth.EMPTY
+    # Fault outranks emptiness, so it is tested first. A drive can fail hard
+    # enough that the kernel deletes its SCSI device - the bay then exposes no
+    # block device - while the enclosure still asserts the slot's fault
+    # indicator or reports Critical/Unrecoverable. Testing has_device first
+    # rendered exactly that bay, the one most in need of attention, as EMPTY
+    # on the shelf map.
     if fault or normalised in ("critical", "unrecoverable"):
         return SlotHealth.FAILED
+    if not has_device:
+        return SlotHealth.EMPTY
     if zfs.state in (ZfsState.FAULTED, ZfsState.UNAVAIL, ZfsState.REMOVED):
         return SlotHealth.FAILED
     if zfs.state is ZfsState.DEGRADED or zfs.resilvering:
@@ -103,6 +114,30 @@ def classify(
     if normalised == "ok":
         return SlotHealth.OK
     return SlotHealth.UNKNOWN
+
+
+def _identity_conflict(local: DiskIdentity, remote: DiskIdentity) -> bool:
+    """True when sysfs and the cached TrueNAS record describe different disks.
+
+    The remote index is keyed by transient block name and refreshed only every
+    poll_truenas interval, and the kernel provably reuses names: on the
+    validation system a replacement drive was assigned the same ``sdf`` the
+    removed drive had held (see DiskInfoReader.read). For up to one interval
+    the removed disk's TrueNAS record therefore wears the new disk's name.
+
+    WWN is compared first and is decisive when both sides carry one: it is the
+    globally unique node identifier, both sides normalise it to the same
+    ``0x...`` form, and agreeing WWNs mean any serial difference is formatting
+    (VPD pg80 vs. disk.query), not a different disk. Serial is the fallback
+    when either WWN is absent. A field present on only one side proves
+    nothing, so it never counts as a conflict (§20: absence of data must not
+    be treated as data).
+    """
+    if local.wwn and remote.wwn:
+        return local.wwn.strip().lower() != remote.wwn.strip().lower()
+    if local.serial and remote.serial:
+        return local.serial.strip().lower() != remote.serial.strip().lower()
+    return False
 
 
 class StateService:
@@ -134,17 +169,40 @@ class StateService:
         self.chassis: Cached[dict[str, ChassisTelemetry]] = Cached(value={})
         self.system_info: Cached[dict[str, Any]] = Cached(value={})
 
+        # logical id -> {AES device slot number -> drive SAS address}. Kept
+        # separate from the chassis telemetry cache because the two answer in
+        # different coordinate systems: telemetry elements are keyed by
+        # element index, while bays() looks addresses up by the sysfs slot
+        # number, which the kernel fills from the AES page's device slot
+        # number. See poll_chassis and _slot_sas_addresses.
+        self._sas_by_slot: dict[str, dict[int, str]] = {}
+
         self._task: asyncio.Task[None] | None = None
         self._started_at = datetime.now(UTC)
 
     # --------------------------------------------------------------- polling
 
     async def poll_hardware(self) -> None:
-        """sysfs: cheap, frequent, and the only source the bay map truly needs."""
+        """sysfs: cheap, frequent, and the only source the bay map truly needs.
+
+        Cheap does not mean non-blocking. discover() and read_slots() take the
+        cross-process enclosure lock, which busy-waits up to 30s when the
+        helper holds it (enclosure/access.py), and the slot reads themselves
+        make the kernel ses driver issue diagnostics to the shelf. Run inline
+        on the event loop, a wedged shelf or a stuck lock holder therefore
+        froze the entire HTTP surface - healthz included - instead of merely
+        degrading the slot cache, so both calls go through the executor
+        exactly as poll_chassis's sg_ses reads do.
+        """
+        loop = asyncio.get_running_loop()
         try:
-            found = [e for e in self.backend.discover() if self._allowed(e.logical_id)]
+            discovered = await loop.run_in_executor(None, self.backend.discover)
+            found = [e for e in discovered if self._allowed(e.logical_id)]
             self.enclosures.succeed(found)
-            slots = {ref.logical_id: self.backend.read_slots(ref) for ref in found}
+            slots = {
+                ref.logical_id: await loop.run_in_executor(None, self.backend.read_slots, ref)
+                for ref in found
+            }
             self.slots.succeed(slots)
         except OSError as exc:
             self.slots.fail(str(exc))
@@ -236,6 +294,30 @@ class StateService:
                 if stale is not None:
                     stale.stale = True
                     stale.error = error
+                # Telemetry is retained and *flagged* stale; the SAS address
+                # map cannot be - a bay's sas_address carries no staleness
+                # marker - so it is dropped instead. After a drive swap a kept
+                # map would show the removed drive's address against the new
+                # drive, and no address is strictly better than the wrong
+                # drive's.
+                self._sas_by_slot.pop(ref.logical_id, None)
+                continue
+
+            # The AES page is what maps element index to the sysfs slot number
+            # bays() joins on (the same translation the IDENT path performs -
+            # see SesLocateWriter). Read in its own try so an AES failure does
+            # not mark the just-collected cf/join telemetry stale.
+            try:
+                aes = await loop.run_in_executor(
+                    None, self.ses.read_for, ref, "additional_element_status"
+                )
+            except SesError as exc:
+                self._sas_by_slot.pop(ref.logical_id, None)
+                error = str(exc)
+                continue
+            self._sas_by_slot[ref.logical_id] = _slot_sas_addresses(
+                configuration.stdout, aes.stdout
+            )
 
         if error and not collected:
             self.chassis.fail(error)
@@ -248,9 +330,14 @@ class StateService:
         """Announce bay health transitions. Never allowed to break polling."""
         if self.notifier is None or not self.notifier.enabled:
             return
+        loop = asyncio.get_running_loop()
         try:
             for ref in self.enclosures.value:
-                await self.notifier.evaluate(self.bays(ref.logical_id))
+                # bays() is synchronous sysfs I/O (~7 identity attributes per
+                # disk on a cache miss), so it runs in the executor like every
+                # other blocking read reached from the poll loop.
+                composed = await loop.run_in_executor(None, self.bays, ref.logical_id)
+                await self.notifier.evaluate(composed)
         except Exception:  # noqa: BLE001 - notification is best-effort
             log.exception("health notification failed")
 
@@ -320,22 +407,22 @@ class StateService:
         raise EnclosureNotFoundError(f"enclosure {logical_id} is not attached")
 
     def _sas_addresses(self, logical_id: str) -> dict[int, str]:
-        """SES-reported SAS port address per slot, from cached telemetry.
+        """SES-reported SAS port address per sysfs slot number.
 
         Deliberately not used to correlate slots to disks - it is the port
         address and differs from the block layer's node WWN - but it is worth
         displaying, and it is the only place the drive's SAS identity appears.
+
+        Keyed by the AES page's device slot number because that is the
+        coordinate bays() joins on: the kernel fills the sysfs ``slot``
+        attribute from that field. This map used to be keyed by element index
+        instead - the same numbering conflation the IDENT path had to fix (see
+        SesLocateWriter): the two coincide on the KTN-STL3 but SES-3 does not
+        guarantee it, and on a permuted shelf that displayed the wrong drive's
+        address. When the AES page is unavailable the map is empty and no
+        address is shown - honest absence beats a wrong join.
         """
-        telemetry = self.chassis.value.get(logical_id)
-        if telemetry is None:
-            return {}
-        return {
-            element.element_index: element.fields["SAS address"]
-            for element in telemetry.elements
-            if element.element_type == "Array device slot"
-            and not element.is_overall
-            and "SAS address" in element.fields
-        }
+        return self._sas_by_slot.get(logical_id, {})
 
     def bays(self, logical_id: str) -> list[Bay]:
         ref = self.enclosure(logical_id)
@@ -345,9 +432,20 @@ class StateService:
         for slot in self.slots.value.get(ref.logical_id, []):
             device = slot.block_device
             local = self.disk_reader.read(device)
-            identity = merge_identity(local, self.remote_disks.value.get(device or ""))
-            identity.sas_address = sas_addresses.get(slot.ses_slot)
+            remote = self.remote_disks.value.get(device or "")
             zfs = self.zfs.value.get(device or "", ZfsInfo())
+            if remote is not None and _identity_conflict(local, remote):
+                # The TrueNAS caches are keyed by transient block name, so
+                # after a swap that reuses the name the removed disk's record
+                # can wear the new disk's name for up to one poll_truenas
+                # interval. When the stable identifiers disagree, the remote
+                # record - and the ZFS state indexed by the same name -
+                # describe the removed disk, so both are dropped rather than
+                # merged onto the wrong drive (§20).
+                remote = None
+                zfs = ZfsInfo()
+            identity = merge_identity(local, remote)
+            identity.sas_address = sas_addresses.get(slot.ses_slot)
             smart = self.smart.value.get(device or "", SmartInfo())
             origin, expires = self.ident.describe(ref.logical_id, slot.ses_slot, slot.locate)
 
@@ -423,6 +521,35 @@ class StateService:
                 "system_info": _freshness(self.system_info, 300),
             },
         }
+
+
+def _slot_sas_addresses(configuration_text: str, aes_text: str) -> dict[int, str]:
+    """Map AES device slot number -> the drive's own SAS address.
+
+    Blocks are filtered to the bay type descriptor discovered from the
+    configuration page, mirroring SesLocateWriter._slot_element_map: on a
+    shelf exposing both bay element types, only the descriptor the kernel
+    built the sysfs slots from may contribute. A slot number two elements both
+    claim is unaddressable, so it yields no address at all rather than an
+    arbitrary pick - the same refusal policy the IDENT path applies, because a
+    wrong address misidentifies a physical drive to the operator.
+    """
+    type_index = array_slot_type_index(parse_configuration(configuration_text)[1])
+    if type_index is None:
+        return {}
+    claimed: dict[int, str | None] = {}
+    for block in parse_additional_element_status(aes_text):
+        if block.type_index != type_index:
+            continue
+        for entry in block.entries.values():
+            slot_number = entry.get("device_slot_number")
+            address = entry.get("sas_address")
+            # An empty bay carries no protocol descriptor and thus neither
+            # field; it simply stays unmapped.
+            if not isinstance(slot_number, int) or not isinstance(address, str):
+                continue
+            claimed[slot_number] = None if slot_number in claimed else address
+    return {slot: address for slot, address in claimed.items() if address is not None}
 
 
 def _freshness(cache: Cached[Any], interval: float) -> dict[str, Any]:

@@ -130,9 +130,13 @@ Not available yet. The app source in a format suitable for submission to the
 [`truenas/catalog-app/`](../truenas/catalog-app/), along with
 [SUBMITTING.md](../truenas/catalog-app/SUBMITTING.md).
 
-Be aware this app needs a writable `/sys`, an SES device node, and (for
-Identify) a relaxed AppArmor profile. Those are unusual for a catalog app and
-may well be grounds for rejection. Method 1 works today regardless.
+The one unusual thing this app asks a catalog reviewer to accept is the SES
+device node itself (`/dev/sg*` at `rw`). Since 1.1.0 there is no writable
+`/sys`, no AppArmor relaxation and no extra capability: the LED is driven by a
+SCSI command on that node under the default profile. The permission floor was
+measured exactly in 1.5.2 — every telemetry read runs on a read-only open, and
+the `w` exists for one SEND DIAGNOSTIC — see [SECURITY.md](../SECURITY.md).
+Method 1 works today regardless.
 
 ---
 
@@ -143,18 +147,25 @@ docker logs ktn-enclosure-manager | grep "startup complete"
 # -> startup complete: 1 enclosure(s): EMC ESES Enclosure 0x...
 ```
 
-If it reports `0 enclosure(s)`:
+If it reports `0 enclosure(s)`, check `/sys/class/enclosure` is non-empty
+**on the host**. If it is empty, the HBA is not passed through or is not in
+IT/HBA mode — nothing this app can fix. No `/sys` volume belongs in the YAML:
+Docker's own read-only `/sys` already exposes `/sys/class/enclosure`, which is
+all the app reads.
 
-- Check `/sys/class/enclosure` is non-empty **on the host**. If it is empty, the
-  HBA is not passed through or is not in IT/HBA mode — nothing this app can fix.
-- Check the `/sys:/sys:rw` volume is present in your YAML.
-
-If the Chassis tab says unavailable, the SES device node is missing or was
-granted `:r` instead of `:rw`:
+If the Chassis tab says unavailable, the SES device node is missing from the
+`devices:` block or points at the wrong `/dev/sgN`. Telemetry runs on a
+read-only open, so even a `:r` grant is enough for it; confirm the same way
+the app reads:
 
 ```bash
-docker exec ktn-enclosure-manager sg_ses -p cf /dev/sg16 | head -3
+docker exec ktn-enclosure-manager sg_ses --readonly -p cf /dev/sg16 | head -3
 ```
+
+If only Identify returns a permission error, the device is granted `:r` — a
+valid monitoring-only deployment where exactly that error is expected. The LED
+write is the one operation that needs the `w`; grant `:rw` to enable it (see
+[SECURITY.md](../SECURITY.md)).
 
 ## Upgrading
 

@@ -26,6 +26,19 @@ class Settings(BaseSettings):
         description="Signing key for session cookies; generated on first run if unset.",
     )
     session_max_age_seconds: int = 8 * 3600
+    forwarded_allow_ips: str = Field(
+        default="127.0.0.1",
+        description=(
+            "Proxy addresses whose X-Forwarded-* headers uvicorn honours "
+            "(comma-separated; '*' trusts any). The session cookie's Secure "
+            "flag derives from the request scheme, and uvicorn's default only "
+            "believes X-Forwarded-Proto from 127.0.0.1 - so behind an external "
+            "TLS proxy the cookie was never marked Secure. Set this to the "
+            "proxy's address to fix that. The default is uvicorn's own, so an "
+            "unset deployment behaves exactly as before. Consumed by the "
+            "container entrypoint (--forwarded-allow-ips), not by the app."
+        ),
+    )
 
     # --- storage ----------------------------------------------------------
     data_dir: Path = Path("/data")
@@ -105,6 +118,20 @@ class Settings(BaseSettings):
     # --- auth -------------------------------------------------------------
     login_rate_limit: int = 5
     login_rate_window_seconds: int = 60
+
+    #: Host names this app answers to (comma-separated; empty allows all).
+    #:
+    #: This is the DNS-rebinding defence for the opt-in anonymous modes. A
+    #: malicious page can repoint its own hostname's DNS at this app and then
+    #: read API responses cross-origin, because the browser believes it is
+    #: still same-origin with the attacker's site; the giveaway is the Host
+    #: header, which still names the attacker's domain. With authentication on
+    #: this is moot (the request carries no session cookie for a foreign
+    #: hostname and gets 401), so the default stays allow-all rather than
+    #: breaking every existing deployment's IP-plus-port bookmark. Matching is
+    #: port-insensitive: rebinding cannot change the port, and the port a
+    #: browser sends depends on how the app was published.
+    allowed_hosts: str = ""
 
     #: Require a local account to view anything. Default on.
     #:

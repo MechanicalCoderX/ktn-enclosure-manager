@@ -43,6 +43,18 @@ _OVERALL_RE = re.compile(
     r"INVOP=(\d+).*?INFO=(\d+).*?NON-CRIT=(\d+).*?CRIT=(\d+).*?UNRECOV=(\d+)", re.DOTALL
 )
 
+# Additional element status (sg_ses -p aes). Unlike the configuration page,
+# each type header here carries its own [ti=N], so no cross-reference against
+# the configuration order is needed to recover the type index.
+_AES_TYPEDESC_RE = re.compile(
+    r"^\s*Element type:\s*(.+?),\s*subenclosure id:\s*(\d+)\s*\[ti=(\d+)\]\s*$"
+)
+_AES_ELEMENT_RE = re.compile(r"^\s*Element index:\s*(\d+)(?:\s+eiioe=(\d+))?\s*$")
+_AES_SLOT_RE = re.compile(r"device slot number:\s*(\d+)")
+# Anchoring at line start (after indentation) is what excludes the expander's
+# "attached SAS address:" line -- only the drive's own address may match.
+_AES_SAS_ADDR_RE = re.compile(r"^\s*SAS address:\s*(0x[0-9a-fA-F]+)\s*$")
+
 
 class TypeDescriptor:
     """One entry of the configuration page's type descriptor list."""
@@ -104,10 +116,19 @@ def parse_configuration(text: str) -> tuple[list[Subenclosure], list[TypeDescrip
 
             count = 0
             label = ""
+            seen_count = False
             for lookahead in lines[index + 1 : index + 5]:
+                # sg_ses prints the "text:" line only when the descriptor's
+                # text length is nonzero (if(txt_len) in sg_ses.c), so a
+                # textless descriptor is normal SES output, not truncation.
+                # Without this boundary the fixed window would run into the
+                # NEXT "Element type:" block and steal its count and label.
+                if _TYPEDESC_RE.match(lookahead):
+                    break
                 count_match = _COUNT_RE.match(lookahead)
-                if count_match:
+                if count_match and not seen_count:
                     count = int(count_match.group(1))
+                    seen_count = True
                 text_match = _TEXT_RE.match(lookahead)
                 if text_match:
                     label = text_match.group(1).strip()
@@ -251,8 +272,16 @@ def build_telemetry(
     )
 
 
-#: SES element type name for a drive bay, as sg_ses prints it.
+#: SES element type name for a drive bay (SES type 0x17), as sg_ses prints it.
 ARRAY_DEVICE_SLOT = "Array device slot"
+#: Older shelves report bays as SES type 0x01, which sg_ses prints as
+#: "Device slot". The kernel ses driver creates sysfs slots for both types,
+#: so bay filtering must accept both names or those shelves show zero bays.
+DEVICE_SLOT = "Device slot"
+#: Every element-type name that means "a drive bay". Order matters: 0x17 is
+#: the modern type and wins when a shelf exposes both (see
+#: array_slot_type_index).
+BAY_ELEMENT_TYPES = (ARRAY_DEVICE_SLOT, DEVICE_SLOT)
 
 
 def array_slot_type_index(descriptors: list[TypeDescriptor]) -> int | None:
@@ -261,9 +290,100 @@ def array_slot_type_index(descriptors: list[TypeDescriptor]) -> int | None:
     ``sg_ses --index=T,E`` addresses element E of type descriptor T, so IDENT
     needs T. It is 0 on the KTN-STL3 but that is not guaranteed on other
     shelves, so it is discovered from the configuration page rather than
-    assumed.
+    assumed. Both bay type names are accepted; when a shelf exposes both,
+    "Array device slot" (0x17) wins because it is the type the SES-3 spec
+    designates for individually addressable drive bays.
     """
+    device_slot_fallback: int | None = None
     for descriptor in descriptors:
-        if descriptor.element_type == ARRAY_DEVICE_SLOT and descriptor.count > 0:
+        if descriptor.count <= 0:
+            continue
+        if descriptor.element_type == ARRAY_DEVICE_SLOT:
             return descriptor.index
-    return None
+        if descriptor.element_type == DEVICE_SLOT and device_slot_fallback is None:
+            device_slot_fallback = descriptor.index
+    return device_slot_fallback
+
+
+class AdditionalElementBlock:
+    """One bay-type block of the additional element status page.
+
+    ``entries`` maps element_index -> parsed fields in file order. Fields are
+    ``device_slot_number`` (int), ``sas_address`` (str, the drive's own
+    address as printed, e.g. ``0x5000cca0e0000002``) and ``eiioe`` (int); a
+    field the output did not carry is simply absent from the dict.
+    """
+
+    __slots__ = ("element_type", "subenclosure_id", "type_index", "entries")
+
+    def __init__(self, element_type: str, subenclosure_id: int, type_index: int) -> None:
+        self.element_type = element_type
+        self.subenclosure_id = subenclosure_id
+        self.type_index = type_index
+        self.entries: dict[int, dict[str, int | str]] = {}
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"AdditionalElementBlock(type={self.element_type!r}, "
+            f"sub={self.subenclosure_id}, ti={self.type_index}, "
+            f"n={len(self.entries)})"
+        )
+
+
+def parse_additional_element_status(text: str) -> list[AdditionalElementBlock]:
+    """Parse ``sg_ses -p aes`` into per-bay slot/address mappings.
+
+    Only bay-type blocks (see BAY_ELEMENT_TYPES) are returned; expander and
+    controller blocks carry no drive information this app needs.
+
+    The page exists because element index and physical bay are not the same
+    thing: the ``device slot number`` field is the enclosure's own statement
+    of which physical bay an element occupies. On the KTN-STL3 the two happen
+    to be equal for all 15 bays, but SES does not guarantee that (other
+    shelves number slots 1-based or permuted), so consumers must map through
+    this page rather than assume identity.
+    """
+    blocks: list[AdditionalElementBlock] = []
+    current_block: AdditionalElementBlock | None = None
+    current_entry: dict[str, int | str] | None = None
+
+    for line in text.splitlines():
+        header = _AES_TYPEDESC_RE.match(line)
+        if header:
+            current_entry = None
+            element_type = header.group(1).strip()
+            if element_type in BAY_ELEMENT_TYPES:
+                current_block = AdditionalElementBlock(
+                    element_type=element_type,
+                    subenclosure_id=int(header.group(2)),
+                    type_index=int(header.group(3)),
+                )
+                blocks.append(current_block)
+            else:
+                # Setting None here is what stops a non-bay block's lines
+                # (e.g. the expander's phy table) from being attributed to
+                # the previous bay block.
+                current_block = None
+            continue
+
+        if current_block is None:
+            continue
+
+        element = _AES_ELEMENT_RE.match(line)
+        if element:
+            current_entry = {}
+            if element.group(2) is not None:
+                current_entry["eiioe"] = int(element.group(2))
+            current_block.entries[int(element.group(1))] = current_entry
+            continue
+
+        if current_entry is None:
+            continue
+        slot_match = _AES_SLOT_RE.search(line)
+        if slot_match:
+            current_entry.setdefault("device_slot_number", int(slot_match.group(1)))
+        addr_match = _AES_SAS_ADDR_RE.match(line)
+        if addr_match:
+            current_entry.setdefault("sas_address", addr_match.group(1))
+
+    return blocks

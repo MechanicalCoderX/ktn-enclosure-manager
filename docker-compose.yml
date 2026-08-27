@@ -31,7 +31,7 @@
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.5.3
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.5.4
     build:
       context: .
       dockerfile: Dockerfile
@@ -91,6 +91,9 @@ services:
       KTN_POLL_SMART_SECONDS: ${KTN_POLL_SMART_SECONDS:-120}
 
     tmpfs:
-      # setgid so the helper's socket inherits gid 1000 and the container needs
-      # no CAP_CHOWN.
+      # The helper binds its socket under gid 1000 itself (setegid, via the
+      # retained CAP_SETGID), so no CAP_CHOWN is needed. The 2770 mode here is
+      # defence in depth, not the mechanism - nothing depends on the
+      # directory's setgid bit (an entrypoint chmod would silently strip it
+      # anyway: no CAP_FSETID; see docker-entrypoint.sh).
       - /run/ktn:mode=2770,uid=0,gid=1000

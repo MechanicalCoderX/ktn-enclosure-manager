@@ -161,6 +161,23 @@ def test_helper_binds_the_socket_with_the_requested_group(tmp_path: Path) -> Non
     assert seen[0] == seen[1] == os.getegid()
 
 
+def test_helper_times_out_a_client_that_never_writes() -> None:
+    """A connect-and-stall client must not pin a root thread forever.
+
+    StreamRequestHandler.setup() applies the class-level ``timeout`` to every
+    connection; None would restore the blocking readline an idle client could
+    hold open indefinitely (and repeat, growing threads without bound).
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "helper"))
+    import ktn_ident_helper  # type: ignore[import-not-found]
+
+    timeout = ktn_ident_helper.IdentHandler.timeout
+    assert timeout is not None, "handler has no connection timeout"
+    assert 0 < timeout <= 30
+
+
 def test_helper_still_binds_when_the_group_cannot_be_assumed(tmp_path: Path) -> None:
     """A running app with a warning beats no app at all."""
     import os

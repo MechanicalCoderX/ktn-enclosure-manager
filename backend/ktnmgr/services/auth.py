@@ -17,6 +17,7 @@ import os
 import re
 import secrets
 import stat
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -90,6 +91,15 @@ class RateLimiter:
     window_seconds: int
     _hits: dict[str, list[float]] = field(default_factory=dict)
     _last_prune: float = 0.0
+    #: The routes that call this limiter are plain ``def`` endpoints, so
+    #: FastAPI runs them on a threadpool (~40 workers). ``check`` is a
+    #: read-modify-write on ``_hits``; unlocked, parallel requests each read
+    #: the same "4 attempts" list and all conclude there is room, so a burst
+    #: of concurrent logins exceeds the configured limit - which defeats the
+    #: one control standing between a password and a brute force. The critical
+    #: section is a few dict operations (microseconds); the Argon2 work that
+    #: actually costs time happens outside it, in the caller.
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def check(self, key: str) -> None:
         """Record an attempt for ``key``, refusing once the window is full.
@@ -100,17 +110,18 @@ class RateLimiter:
         proxy, rate limit there instead.
         """
         now = time.monotonic()
-        self._prune(now)
-        recent = [t for t in self._hits.get(key, []) if now - t < self.window_seconds]
-        if len(recent) >= self.limit:
-            # Not "login attempts": the same limiter now also guards the
-            # password-verifying change-password endpoint.
-            raise AuthError("too many attempts; try again shortly")
-        recent.append(now)
-        self._hits[key] = recent
+        with self._lock:
+            self._prune(now)
+            recent = [t for t in self._hits.get(key, []) if now - t < self.window_seconds]
+            if len(recent) >= self.limit:
+                # Not "login attempts": the same limiter now also guards the
+                # password-verifying change-password endpoint.
+                raise AuthError("too many attempts; try again shortly")
+            recent.append(now)
+            self._hits[key] = recent
 
     def _prune(self, now: float) -> None:
-        """Drop addresses whose attempts have all aged out.
+        """Drop addresses whose attempts have all aged out. Caller holds _lock.
 
         Without this the dict grows one entry per distinct source address for
         the process lifetime - a slow memory leak that a scanner could drive.
@@ -125,7 +136,8 @@ class RateLimiter:
         }
 
     def reset(self, key: str) -> None:
-        self._hits.pop(key, None)
+        with self._lock:
+            self._hits.pop(key, None)
 
 
 class AuthService:

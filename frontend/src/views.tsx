@@ -53,6 +53,40 @@ export function HealthBadge({ health }: { health: Health }) {
   );
 }
 
+/**
+ * Map a chassis element's SES status onto the shared Health scale, so a
+ * Critical power supply reads "failed" and not the same yellow triangle as a
+ * merely warned fan. The string arrives verbatim from sg_ses (SES-4 element
+ * status codes: OK, Critical, Noncritical, Unrecoverable, Not installed,
+ * Unknown, Unsupported, Not available, No access allowed), so match
+ * case-insensitively and share the vocabulary of classify() in
+ * backend/ktnmgr/services/state.py. Two deliberate choices: SES "Unknown"
+ * means the enclosure could not report the element's state — that is worth a
+ * look, so it is a warning, while a string this table has never seen falls to
+ * the honest "?" instead of pretending a verdict; and "Not installed" is
+ * empty, exactly as an unpopulated drive bay is (bays show the ○ badge rather
+ * than hiding the slot, and so do these rows — an absent PSU is information).
+ */
+function sesHealth(status: string): Health {
+  switch (status.trim().toLowerCase()) {
+    case "ok":
+      return "ok";
+    case "critical":
+    case "unrecoverable":
+      return "failed";
+    case "noncritical":
+    case "non-critical":
+    case "warning":
+      return "warning";
+    case "unknown":
+      return "warning";
+    case "not installed":
+      return "empty";
+    default:
+      return "unknown";
+  }
+}
+
 /** Live countdown for a timed IDENT, driven by the server's expiry stamp. */
 function Countdown({ expiresAt }: { expiresAt: string }) {
   const [now, setNow] = useState(Date.now());
@@ -403,7 +437,7 @@ export function ChassisView({ chassis }: { chassis: Chassis | null }) {
                       </td>
                       <td>{subName(e.subenclosure_id)}</td>
                       <td>
-                        <HealthBadge health={e.status === "OK" ? "ok" : "warning"} />
+                        <HealthBadge health={sesHealth(e.status)} />
                         <span className="muted"> {e.status}</span>
                       </td>
                       <td className="mono">

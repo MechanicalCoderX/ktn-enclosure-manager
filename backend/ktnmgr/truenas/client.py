@@ -230,10 +230,24 @@ class TrueNASClient:
         verify: Any = self.ca_bundle if self.ca_bundle else self.verify_tls
         async with httpx.AsyncClient(verify=verify, timeout=self.timeout) as client:
             headers = {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
-            if method == "disk.temperatures":
-                response = await client.post(f"{self.url}{path}", headers=headers, json={})
-            else:
-                response = await client.get(f"{self.url}{path}", headers=headers)
+            try:
+                if method == "disk.temperatures":
+                    response = await client.post(f"{self.url}{path}", headers=headers, json={})
+                else:
+                    response = await client.get(f"{self.url}{path}", headers=headers)
+            except httpx.HTTPError as exc:
+                # Containment, not decoration. httpx transport errors
+                # (ConnectError, TimeoutException, ...) subclass httpx.HTTPError,
+                # NOT OSError - and this is the one call site that runs outside
+                # call()'s except clause. The poll handlers in services/state.py
+                # catch (TrueNASError, OSError), so a raw httpx error would
+                # escape to the poll loop's blanket handler and abandon the
+                # whole tick, starving the unrelated SES/SMART polls at 1 Hz.
+                # The exception's own message is safe to echo: it carries the
+                # OS-level cause, never the Authorization header.
+                raise TrueNASError(
+                    f"{method}: REST request failed ({type(exc).__name__}: {exc})"
+                ) from exc
             if response.status_code == 403:
                 # Not a bad key. Role-scoped keys are authorised per method on
                 # the JSON-RPC API only; the legacy REST surface refuses them
@@ -250,7 +264,14 @@ class TrueNASClient:
                 raise TrueNASError("TrueNAS rejected the API key")
             if response.status_code >= 400:
                 raise TrueNASError(f"{method} failed: HTTP {response.status_code}")
-            return response.json()
+            try:
+                return response.json()
+            except ValueError as exc:
+                # A 200 with a non-JSON body (a proxy's HTML error page, a
+                # captive portal) raises json.JSONDecodeError - a ValueError,
+                # so it too slips past the (TrueNASError, OSError) handlers
+                # in services/state.py. Same containment as above.
+                raise TrueNASError(f"{method}: REST returned a non-JSON body") from exc
 
     # ------------------------------------------------------------------- calls
 

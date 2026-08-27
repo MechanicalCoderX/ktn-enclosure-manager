@@ -106,6 +106,89 @@ async def test_timer_clears_automatically(tmp_path: Path) -> None:
         await manager.stop()
 
 
+class FailingWriter(FakeWriter):
+    """FakeWriter whose writes raise `error` for the first `failures` calls
+    (a transient outage such as the helper restarting), or forever when
+    `failures` is None (enclosure permanently gone)."""
+
+    def __init__(self, error: Exception, failures: int | None = None) -> None:
+        super().__init__()
+        self.error = error
+        self.failures = failures
+        self.failed = 0
+
+    def write(self, enclosure_id: str, slot: int, on: bool) -> bool:
+        if self.failures is None or self.failed < self.failures:
+            self.failed += 1
+            raise self.error
+        return super().write(enclosure_id, slot, on)
+
+
+def _expired_record(ses_slot: int) -> IdentRecord:
+    return IdentRecord(
+        enclosure_id=LOGICAL_ID, ses_slot=ses_slot, created_by="admin",
+        created_at=datetime.now(UTC) - timedelta(seconds=20),
+        expires_at=datetime.now(UTC) - timedelta(seconds=10),
+    )
+
+
+async def test_expired_clear_retries_transient_failure(tmp_path: Path) -> None:
+    """A helper restart coinciding with expiry must not orphan the LED: the
+    failed auto-clear is retried, not dropped on the first LocateError."""
+    audit = AuditLog(tmp_path / "a.log")
+    writer = FailingWriter(LocateError("helper socket unreachable"), failures=2)
+    writer.state[(LOGICAL_ID, 3)] = True
+    manager = IdentManager(writer, audit, tmp_path / "i.json",
+                           tick_seconds=0.02, clear_backoff_seconds=0.01)
+    manager._records[(LOGICAL_ID, 3)] = _expired_record(3)
+    manager.start()
+    try:
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            if manager.record_for(LOGICAL_ID, 3) is None:
+                break
+    finally:
+        await manager.stop()
+    assert writer.failed == 2, "both transient failures should have been consumed"
+    assert writer.read(LOGICAL_ID, 3) is False, "third attempt should have cleared the LED"
+    assert manager.record_for(LOGICAL_ID, 3) is None
+    cleared = [e for e in audit.tail()
+               if e.user == "system:timer" and e.operation == "IDENT_OFF"
+               and e.verification == "success"]
+    assert len(cleared) == 1, "the successful auto-clear must be audited exactly once"
+
+
+async def test_expired_clear_gives_up_after_bounded_attempts(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A permanently failing clear (here a detached enclosure, which surfaces
+    as LookupError rather than LocateError) must stop after the bounded
+    attempts and drop the record with an operator-visible orphaned-LED
+    warning - not retry every tick forever, and not drop silently."""
+    from ktnmgr.enclosure.sysfs import EnclosureNotFoundError
+
+    writer = FailingWriter(EnclosureNotFoundError("enclosure detached"))
+    writer.state[(LOGICAL_ID, 4)] = True
+    manager = IdentManager(writer, AuditLog(tmp_path / "a.log"), tmp_path / "i.json",
+                           tick_seconds=0.02, clear_max_attempts=3,
+                           clear_backoff_seconds=0.01)
+    manager._records[(LOGICAL_ID, 4)] = _expired_record(4)
+    with caplog.at_level("WARNING", logger="ktnmgr.services.ident"):
+        manager.start()
+        try:
+            for _ in range(200):
+                await asyncio.sleep(0.02)
+                if manager.record_for(LOGICAL_ID, 4) is None:
+                    break
+        finally:
+            await manager.stop()
+    assert writer.failed == 3, "exactly clear_max_attempts write attempts"
+    assert manager.record_for(LOGICAL_ID, 4) is None, "record dropped after giving up"
+    give_up = [r for r in caplog.records
+               if r.levelname == "ERROR" and "LED may still be lit" in r.getMessage()]
+    assert give_up, "giving up must be loud - the LED is likely still lit"
+
+
 async def test_timer_clear_is_audited_as_system(tmp_path: Path) -> None:
     audit = AuditLog(tmp_path / "a.log")
     manager = IdentManager(FakeWriter(), audit, tmp_path / "i.json", tick_seconds=0.05)

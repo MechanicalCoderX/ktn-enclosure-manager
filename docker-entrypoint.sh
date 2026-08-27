@@ -11,6 +11,14 @@ DATA_DIR="${KTN_DATA_DIR:-/data}"
 PORT="${KTN_PORT:-8420}"
 HOST="${KTN_HOST:-0.0.0.0}"
 
+# Which proxy addresses uvicorn believes X-Forwarded-* from. This is what
+# makes the session cookie's Secure flag work behind an external TLS proxy:
+# the flag derives from the request scheme, and uvicorn only rewrites the
+# scheme from X-Forwarded-Proto when the header arrives from an address
+# listed here. The default is uvicorn's own (127.0.0.1), so a deployment
+# that sets nothing behaves exactly as before.
+FORWARDED_ALLOW_IPS="${KTN_FORWARDED_ALLOW_IPS:-127.0.0.1}"
+
 mkdir -p "$DATA_DIR"
 
 # The enclosure lock lives here, not in the data dataset - see access.py. The
@@ -85,8 +93,10 @@ if [ "$(id -u)" = "0" ]; then
     echo "dropping privileges to ktn (uid 1000) for the web process"
     exec setpriv --reuid=1000 --regid=1000 --clear-groups \
         python -m uvicorn ktnmgr.main:app --host "$HOST" --port "$PORT" \
+        --forwarded-allow-ips "$FORWARDED_ALLOW_IPS" \
         --log-level "${KTN_LOG_LEVEL:-info}"
 fi
 
 exec python -m uvicorn ktnmgr.main:app --host "$HOST" --port "$PORT" \
+    --forwarded-allow-ips "$FORWARDED_ALLOW_IPS" \
     --log-level "${KTN_LOG_LEVEL:-info}"

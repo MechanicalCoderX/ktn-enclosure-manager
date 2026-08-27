@@ -183,6 +183,17 @@ Be clear about what it opens: **everything readable**, including
 `/api/diagnostics`, the audit log, and raw `sg_ses` page output. Enable it only
 on a network you would already let read those.
 
+One consideration specific to running open: **DNS rebinding**. A malicious page
+can repoint its own hostname's DNS at this app and then read API responses as
+if they were same-origin — the browser still believes it is talking to the
+attacker's site, and the giveaway is the `Host` header, which keeps naming the
+attacker's domain. With authentication on this is moot (a request for a foreign
+hostname carries no session cookie and gets a 401), which is why the
+allowed-hosts setting (`KTN_ALLOWED_HOSTS`, a comma-separated list matched
+case- and port-insensitively) defaults to allowing every host rather than
+breaking existing bookmark-by-IP deployments. If you disable authentication,
+set `KTN_ALLOWED_HOSTS` to the names and addresses you actually browse to.
+
 **It does not open the write.** `KTN_ALLOW_ANONYMOUS_IDENT` is separate and
 stays `false` even when authentication is disabled; an anonymous Identify
 request is refused with `403` and a message naming the setting. The reason is
@@ -246,9 +257,10 @@ are unaffected — they do not use the API — and the banner names the error.
 
 ## The TrueNAS API key: use a least-privilege one
 
-The app calls exactly five read methods. It does **not** need an
-administrator key, and the default path of "create an API key" on TrueNAS
-produces one bound to whichever user you were — often `root`, which is
+The app calls exactly six read methods (the allow-list in
+`backend/ktnmgr/truenas/client.py` is the authoritative set). It does **not**
+need an administrator key, and the default path of "create an API key" on
+TrueNAS produces one bound to whichever user you were — often `root`, which is
 unrestricted.
 
 Create a dedicated account instead. Roles needed:
@@ -267,17 +279,21 @@ System -> Advanced -> Privilege: grant the group the three roles above
 Credentials -> API Keys       : create one for `ktn-readonly`
 ```
 
-**`system.info` is deliberately given up.** It accepts only `READONLY_ADMIN`
-or `SHARING_ADMIN` — no narrow role satisfies it — and taking either would let
-a leaked key read the entire appliance configuration in order to display a
-version string. The drive map, pool and vdev membership, ZFS error counters,
-temperatures and over-temperature alerts all work without it; diagnostics
-simply shows no TrueNAS version, with the reason alongside it.
+**`system.info` is deliberately given up — and it costs nothing.** It accepts
+only `READONLY_ADMIN` or `SHARING_ADMIN` — no narrow role satisfies it — and
+taking either would let a leaked key read the entire appliance configuration
+in order to display a version string. Since v1.5.1, when `system.info` is
+refused the app falls back to `system.version` (the sixth allow-listed
+method), which the middleware declares with `authorization_required=False` —
+so the displayed TrueNAS version populates on any key, this role-scoped one
+included. The drive map, pool and vdev membership, ZFS error counters,
+temperatures and over-temperature alerts all work with the three roles above;
+nothing is lost.
 
 Verified on 25.10.5: with those three roles, `pool.query`, `disk.query`,
 `disk.temperatures` and `disk.temperature_alerts` all succeed, `system.info`
-returns an error, and writes such as `pool.dataset.create` and `user.create`
-are refused.
+returns an error (the version arrives via `system.version` instead), and
+writes such as `pool.dataset.create` and `user.create` are refused.
 
 One transport note, because it costs an hour otherwise: role-based access is
 enforced on the JSON-RPC API at `/api/current`, which is what this app uses.

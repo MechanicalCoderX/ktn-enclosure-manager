@@ -27,7 +27,11 @@ from typing import Protocol, runtime_checkable
 from ktnmgr.enclosure.access import enclosure_access
 from ktnmgr.enclosure.helper_client import HelperUnavailableError, send
 from ktnmgr.enclosure.ses import SesError, SesRunner
-from ktnmgr.enclosure.ses_parser import array_slot_type_index, parse_configuration
+from ktnmgr.enclosure.ses_parser import (
+    array_slot_type_index,
+    parse_additional_element_status,
+    parse_configuration,
+)
 from ktnmgr.enclosure.sysfs import (
     DEFAULT_SETTLE_POLL,
     DEFAULT_SETTLE_TIMEOUT,
@@ -108,18 +112,44 @@ class SesLocateWriter:
     Verification still reads the sysfs `locate` attribute, which is a read and
     therefore always permitted. The same settle-polling applies: the attribute
     is refreshed only once the enclosure processor answers.
+
+    The caller's slot number and sg_ses's element index are NOT the same
+    coordinate system. The slot arriving here originates from the sysfs `slot`
+    attribute, which the kernel ses driver fills from the additional element
+    status page's vendor-assigned *device slot number*; ``--index=T,E``
+    addresses the 0-based *element index* within type descriptor T. SES-3
+    gives no guarantee the two coincide (they do on the KTN-STL3; other
+    shelves number slots 1-based or permuted), so every write translates
+    through the enclosure's own AES-page mapping - and refuses outright when
+    the mapping is absent or ambiguous, because lighting the WRONG bay's
+    "pull this disk" LED is the worst failure this application can produce.
     """
 
     def __init__(self, backend: SysfsEnclosureBackend, ses: SesRunner) -> None:
         self.backend = backend
         self.ses = ses
         self._type_index: dict[str, int] = {}
+        #: logical id -> {device slot number -> element index}, with None
+        #: marking a slot number two elements both claimed (ambiguous, so it
+        #: must never be written to). Cached for the writer's lifetime, like
+        #: _type_index: the slot->element wiring is chassis topology - which
+        #: element addresses which physical bay is baked into the backplane
+        #: and its firmware, and hot-swapping a drive changes which disk sits
+        #: in a bay, never which element the bay answers to. Replacing the
+        #: shelf itself changes the enclosure logical id, which is this
+        #: cache's key, so even that cannot serve a stale map.
+        self._slot_to_element: dict[str, dict[int, int | None]] = {}
 
     def _array_type_index(self, ref: object) -> int:
         """Which SES type descriptor holds the drive bays.
 
         It is 0 on the KTN-STL3, but that is not guaranteed elsewhere, so it is
-        read from the configuration page and cached per enclosure.
+        read from the configuration page and cached per enclosure. On modern
+        shelves this is the "Array device slot" (0x17) descriptor; on older
+        shelves array_slot_type_index() falls back to "Device slot" (0x01),
+        whose bays the kernel ses driver exposes identically - everything
+        downstream (IDENT addressing, the AES slot mapping) works on the type
+        *index*, never the type name, so both kinds are handled the same way.
         """
         logical_id = ref.logical_id  # type: ignore[attr-defined]
         if logical_id not in self._type_index:
@@ -136,6 +166,69 @@ class SesLocateWriter:
             self._type_index[logical_id] = index
         return self._type_index[logical_id]
 
+    def _slot_element_map(self, ref: object, type_index: int) -> dict[int, int | None]:
+        """Device-slot-number -> element-index map for the bay type in use.
+
+        Read from the additional element status page, because that page is the
+        enclosure's own statement of which physical bay each element occupies;
+        assuming identity instead is exactly the bug this method exists to
+        prevent. Read once per enclosure logical id (see _slot_to_element for
+        why the cache cannot go stale).
+        """
+        logical_id = ref.logical_id  # type: ignore[attr-defined]
+        if logical_id not in self._slot_to_element:
+            try:
+                page = self.ses.read_page(
+                    ref.sg_device,  # type: ignore[attr-defined]
+                    "additional_element_status",
+                )
+            except SesError as exc:
+                raise LocateError(
+                    f"could not read SES additional element status: {exc}"
+                ) from exc
+            mapping: dict[int, int | None] = {}
+            for block in parse_additional_element_status(page.stdout):
+                if block.type_index != type_index:
+                    continue
+                for element_index, entry in block.entries.items():
+                    slot_number = entry.get("device_slot_number")
+                    # An empty bay may carry no protocol descriptor and thus
+                    # no slot number at all; it simply stays unmapped and any
+                    # IDENT for it is refused rather than guessed at.
+                    if not isinstance(slot_number, int):
+                        continue
+                    mapping[slot_number] = (
+                        None if slot_number in mapping else element_index
+                    )
+            self._slot_to_element[logical_id] = mapping
+        return self._slot_to_element[logical_id]
+
+    def _element_index_for(self, ref: object, type_index: int, slot: int) -> int:
+        """Translate a sysfs slot number into the element index sg_ses needs.
+
+        Refusal is deliberate policy: with no unambiguous mapping the only
+        alternative is to pass the slot number through unmapped, and on a
+        shelf where the two coordinate systems differ that lights the wrong
+        bay - a wrong "pull this disk" indication. No LED at all is strictly
+        safer than the wrong LED.
+        """
+        mapping = self._slot_element_map(ref, type_index)
+        element_index = mapping.get(slot)
+        if element_index is not None:
+            return element_index
+        if slot in mapping:
+            raise LocateError(
+                f"refusing IDENT for slot {slot}: the enclosure reports more than "
+                f"one element with device slot number {slot}, so the bay cannot "
+                "be addressed unambiguously"
+            )
+        offered = ", ".join(str(s) for s in sorted(mapping)) or "none"
+        raise LocateError(
+            f"refusing IDENT for slot {slot}: the enclosure's additional element "
+            f"status page offers device slot numbers [{offered}], which do not "
+            f"include {slot}"
+        )
+
     def read(self, enclosure_id: str, slot: int) -> bool:
         enclosure_id, slot = validate_request(enclosure_id, slot)
         return self.backend.read_locate(self.backend.resolve(enclosure_id), slot)
@@ -144,6 +237,7 @@ class SesLocateWriter:
         enclosure_id, slot = validate_request(enclosure_id, slot)
         ref = self.backend.resolve(enclosure_id)
         type_index = self._array_type_index(ref)
+        element_index = self._element_index_for(ref, type_index, slot)
 
         # Held across the command AND its settle poll, exactly as the sysfs
         # writer does. This is the default IDENT path, so without it the
@@ -152,10 +246,18 @@ class SesLocateWriter:
         # cache a half-applied locate state for the UI to render.
         with enclosure_access(self.backend.lock_path):
             try:
-                self.ses.set_ident(ref.sg_device, type_index, slot, on)
+                self.ses.set_ident(ref.sg_device, type_index, element_index, on)
             except SesError as exc:
                 raise LocateError(f"IDENT command failed: {exc}") from exc
 
+            # The settle read-back stays keyed by the sysfs slot: the kernel's
+            # locate attribute lives under the slot directory, so it observes
+            # the same physical bay the element index was derived from. On a
+            # settle timeout the STALE value is returned rather than raising -
+            # deliberately, because IdentManager.identify() compares the
+            # returned state against the requested one, raises the
+            # verification failure itself, and audits it; returning the
+            # unsettled observation IS the failure signal.
             target = self.backend.slot_dir(ref, slot) / "locate"
             deadline = time.monotonic() + DEFAULT_SETTLE_TIMEOUT
             observed = self.backend.read_locate_at(target)
