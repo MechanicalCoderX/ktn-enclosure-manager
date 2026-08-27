@@ -1,0 +1,54 @@
+[0,-1]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+    Off=0, Actual speed=2490 rpm, Fan at third lowest speed
+[0,0]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=0
+    Off=1, Actual speed=0 rpm, Fan stopped
+[0,1]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+    Off=0, Actual speed=1200 rpm, Fan at lowest speed
+[0,2]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+    Off=0, Actual speed=1800 rpm, Fan at second lowest speed
+[0,3]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+    Off=0, Actual speed=2490 rpm, Fan at third lowest speed
+[0,4]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+    Off=0, Actual speed=3200 rpm, Fan at intermediate speed
+[0,5]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+    Off=0, Actual speed=3900 rpm, Fan at third highest speed
+[0,6]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+    Off=0, Actual speed=4600 rpm, Fan at second highest speed
+[0,7]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+    Off=0, Actual speed=5300 rpm, Fan at highest speed
+[0,8]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Off=0, Actual speed=2100 rpm
+[0,9]  Element type: Cooling
+  Enclosure Status:
+    Predicted failure=0, Disabled=0, Swap=0, status: OK
+    Ident=0, Do not remove=0, Hot swap=0, Fail=0, Requested on=1
+    Off=0, Actual speed=2700 rpm, Fan at vendor eco speed

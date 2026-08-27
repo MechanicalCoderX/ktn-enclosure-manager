@@ -38,7 +38,23 @@ _ELEMENT_RE = re.compile(r"^\[(-?\d+),(-?\d+)\]\s+Element type:\s*(.+?)\s*$")
 _STATUS_RE = re.compile(r"status:\s*([A-Za-z][A-Za-z ./-]*?)\s*$", re.MULTILINE)
 _KV_RE = re.compile(r"([A-Za-z][A-Za-z0-9 ./_-]*?)\s*=\s*([^,]+)")
 _TEMP_RE = re.compile(r"Temperature\s*=\s*(-?\d+)\s*C")
-_RPM_RE = re.compile(r"Actual speed\s*=\s*(\d+)\s*rpm")
+# The measured rpm and the speed phrase are two renderings of the SAME Cooling
+# status descriptor, so ONE match must yield both. Two independent searches
+# over the element body would pair the rpm of one line with the phrase of
+# another the moment a body carries more than one "Actual speed" line - the
+# same "facts read at different moments, joined as if simultaneous" defect
+# this release is closing elsewhere.
+#
+# The phrase group is optional and bounded by the newline: sg_ses prints the
+# rpm unconditionally but the trailing wording is firmware-dependent, and an
+# absent phrase must leave speed_code/speed_phrase absent rather than guessed.
+_FAN_SPEED_RE = re.compile(
+    r"Actual speed\s*=\s*(?P<rpm>\d+)\s*rpm(?:\s*,\s*(?P<phrase>[^\n]*))?"
+)
+# Anchored to the start of a comma-separated field so it can only match the
+# field itself, never the tail of some longer key that happens to end in
+# "Requested on".
+_REQUESTED_ON_RE = re.compile(r"(?:^|,)\s*Requested on\s*=\s*(\d+)", re.MULTILINE)
 _OVERALL_RE = re.compile(
     r"INVOP=(\d+).*?INFO=(\d+).*?NON-CRIT=(\d+).*?CRIT=(\d+).*?UNRECOV=(\d+)", re.DOTALL
 )
@@ -68,6 +84,46 @@ _AES_SLOT_RE = re.compile(r"device slot number:\s*(\d+)")
 # Anchoring at line start (after indentation) is what excludes the expander's
 # "attached SAS address:" line -- only the drive's own address may match.
 _AES_SAS_ADDR_RE = re.compile(r"^\s*SAS address:\s*(0x[0-9a-fA-F]+)\s*$")
+
+
+#: SES-3 ACTUAL SPEED CODE (3 bits of the Cooling status descriptor) keyed by
+#: the wording sg_ses prints for it. sg_ses renders the code through its own
+#: actual_speed_desc[] table and never prints the number, so the phrase is the
+#: only place the code survives into text output - which is why it is recovered
+#: by table lookup rather than derived from the rpm value (rpm is a free-running
+#: measurement; the code is the step the firmware is holding, and the two do not
+#: determine each other).
+#:
+#: Keys are the normalised form produced by _speed_code_from_phrase.
+_SPEED_CODE_BY_PHRASE: dict[str, int] = {
+    "stopped": 0,
+    "at lowest speed": 1,
+    "at second lowest speed": 2,
+    "at third lowest speed": 3,
+    "at intermediate speed": 4,
+    "at third highest speed": 5,
+    "at second highest speed": 6,
+    "at highest speed": 7,
+}
+
+
+def _speed_code_from_phrase(phrase: str) -> int | None:
+    """Map a printed fan-speed phrase back to its SES-3 speed code, or None.
+
+    Unrecognised wording returns None rather than a nearest guess. Code 0 is a
+    real status reading - the fan has stopped - so falling back to 0 would
+    manufacture a cooling failure out of a phrase this table simply has not
+    seen. The caller keeps the phrase verbatim in that case, so the operator
+    still sees what the shelf said.
+
+    Normalisation is deliberately shallow (case, whitespace, trailing
+    punctuation, and the leading "Fan" that sg_ses prefixes): anything more
+    aggressive would start matching wordings whose meaning is not established.
+    """
+    normalised = " ".join(phrase.split()).lower().strip(".,")
+    if normalised.startswith("fan "):
+        normalised = normalised[4:]
+    return _SPEED_CODE_BY_PHRASE.get(normalised)
 
 
 class TypeDescriptor:
@@ -241,9 +297,23 @@ def _finalise(element: ChassisElement, body: list[str]) -> None:
     if temperature:
         element.temperature_c = float(temperature.group(1))
 
-    rpm = _RPM_RE.search(blob)
-    if rpm:
-        element.speed_rpm = int(rpm.group(1))
+    speed = _FAN_SPEED_RE.search(blob)
+    if speed:
+        element.speed_rpm = int(speed.group("rpm"))
+        # Verbatim before derived: the shelf's own wording is recorded whether
+        # or not it maps, so an unfamiliar phrase degrades to "displayed but not
+        # comparable" instead of disappearing.
+        phrase = (speed.group("phrase") or "").strip()
+        if phrase:
+            element.speed_phrase = phrase
+            element.speed_code = _speed_code_from_phrase(phrase)
+
+    # RQSTED ON is read for every element type that prints it (Cooling and
+    # Power supply both carry the bit, with the same meaning), matching how
+    # temperature and rpm are taken from whichever elements report them.
+    requested_on = _REQUESTED_ON_RE.search(blob)
+    if requested_on:
+        element.requested_on = int(requested_on.group(1)) != 0
 
     for line in body:
         stripped = line.strip()

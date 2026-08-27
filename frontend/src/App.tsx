@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "./api";
-import type { Bay, Chassis, Enclosure, IdentDuration } from "./types";
-import { BayDetail, ChassisView, DiagnosticsView, EnclosureMap } from "./views";
+import type { Bay, BaySources, Chassis, Enclosure, IdentDuration } from "./types";
+import {
+  BayDetail,
+  ChassisView,
+  DiagnosticsView,
+  EnclosureMap,
+  FreshnessSummary,
+} from "./views";
 
 type Tab = "map" | "chassis" | "diagnostics";
 type Theme = "system" | "light" | "dark";
@@ -270,8 +276,12 @@ export function App() {
   const [tab, setTab] = useState<Tab>("map");
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [truenasError, setTruenasError] = useState<string | null>(null);
-  const [updated, setUpdated] = useState<string | null>(null);
+  // The whole freshness block, kept together rather than split into a stamp and
+  // an error string. They describe four separate clocks (§29) and every consumer
+  // - the header summary, each detail section, both degradation banners - needs
+  // to pick a different one out of it; the previous shape kept only the fastest
+  // source's timestamp and discarded the rest on arrival.
+  const [sources, setSources] = useState<BaySources | null>(null);
   const [busy, setBusy] = useState(false);
   const [authRequired, setAuthRequired] = useState(true);
   const [anonIdentAllowed, setAnonIdentAllowed] = useState(false);
@@ -308,8 +318,7 @@ export function App() {
     try {
       const response = await api.bays(selectedEnclosure);
       setBays(response.bays);
-      setTruenasError(response.sources.truenas_error);
-      setUpdated(response.sources.slots);
+      setSources(response.sources);
       setError(null);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setUser(null);
@@ -449,7 +458,15 @@ export function App() {
           <option value="dark">Dark</option>
         </select>
 
-        <span className="stamp">updated {updated ? new Date(updated).toLocaleTimeString() : "—"}</span>
+        {/* "updated <slot poll time>" used to sit here labelling five clocks at
+            once - the shelf temperature (two minutes old), the ZFS state (twenty
+            seconds) and the SAS address all wore the five-second slot poll's
+            timestamp. FreshnessSummary states the oldest of the *stamped*
+            sources instead, and expands to the per-source breakdown. Stamped is
+            the honest qualifier: /bays publishes no timestamp for the SES/AES
+            poll, so the SAS address in the detail panel rides a clock this
+            summary cannot see and says so where it renders. */}
+        <FreshnessSummary sources={sources} />
         {user ? (
           <>
             <button className="btn secondary" onClick={() => setChangingPassword(true)}>
@@ -491,10 +508,37 @@ export function App() {
 
       <main>
         {error && <div className="notice error">{error}</div>}
-        {truenasError && (
+        {/* First, because it is the more fundamental failure: TrueNAS going away
+            costs the pool columns, but the slot poll going away means the map
+            itself - presence, health, IDENT, fault - is a photograph. The rows
+            keep being served from the last good read (§37), which is right, and
+            is exactly why the page has to say so: nothing else about the screen
+            changes when the enclosure stops answering. */}
+        {sources?.slots_error && (
+          <div className="notice warn" data-testid="slots-error">
+            Enclosure not readable — the bay map below is the last good snapshot,
+            taken{" "}
+            {sources.slots
+              ? new Date(sources.slots).toLocaleTimeString()
+              : "at an unknown time"}
+            , and is not refreshing. Drive presence, health, IDENT and fault state
+            may have changed since. ({sources.slots_error})
+          </div>
+        )}
+        {sources?.truenas_error && (
           <div className="notice warn">
-            TrueNAS unavailable — pool, vdev and SMART data may be stale. Bay state below is
-            read directly from the enclosure and remains accurate. ({truenasError})
+            TrueNAS unavailable — pool, vdev and SMART data may be stale.{" "}
+            {/* The old text asserted unconditionally that "bay state below is
+                read directly from the enclosure and remains accurate". That is
+                true only while the slot poll is succeeding, and the app now
+                knows when it is not; an accuracy claim is worth nothing if it is
+                made in the one case where it is false. */}
+            {sources.slots_error
+              ? "The enclosure is not readable either — see above; nothing on " +
+                "this page is currently refreshing."
+              : "Bay state below is read directly from the enclosure and is " +
+                "still refreshing."}{" "}
+            ({sources.truenas_error})
           </div>
         )}
         {enclosures.length === 0 && (
@@ -516,6 +560,7 @@ export function App() {
             {selectedBay ? (
               <BayDetail
                 bay={selectedBay}
+                sources={sources}
                 onIdentify={identify}
                 busy={busy}
                 identDisabledReason={

@@ -73,6 +73,31 @@ export interface ChassisElement {
   fields: Record<string, string>;
   temperature_c: number | null;
   speed_rpm: number | null;
+  /**
+   * SES-3 ACTUAL SPEED CODE, the discrete step the enclosure firmware is
+   * holding this fan at: 0 = stopped, 1..6 = lowest through second highest,
+   * 7 = highest. Null when the shelf printed no speed wording, or wording the
+   * backend parser does not map.
+   *
+   * 0 and null mean OPPOSITE things — a stopped fan is a cooling failure,
+   * an unmapped one is merely unknown — so never test this with `!code`,
+   * `code ?? 0` or `code || …`. Compare against null explicitly.
+   */
+  speed_code: number | null;
+  /**
+   * The speed wording exactly as the shelf printed it, e.g. "Fan at highest
+   * speed". Kept verbatim so firmware wording the parser cannot map to a code
+   * is still shown rather than lost: this is the safe thing to display,
+   * speed_code is the safe thing to compare.
+   */
+  speed_phrase: string | null;
+  /**
+   * SES-3 RQSTED ON bit, as reported. Null when the element printed no such
+   * field, which is common — absence is not `false` (§13), so this renders as
+   * three states, never two. Populated for Power supply elements too, not only
+   * Cooling.
+   */
+  requested_on: boolean | null;
 }
 
 export interface Subenclosure {
@@ -94,14 +119,39 @@ export interface Chassis {
   stale?: boolean;
 }
 
+/**
+ * When each class of fact in a Bay was last read. These are four different
+ * clocks (§29) and the times genuinely differ by up to two minutes, so they are
+ * never collapsed into one stamp — see FreshnessSummary in views.tsx.
+ *
+ * Every field is nullable in two distinguishable ways, and the difference is
+ * the whole point of publishing them:
+ *   - a timestamp with no error  → that source is current
+ *   - a timestamp with an error  → FROZEN at that time and not refreshing
+ *   - null with an error         → configured, but it has never once succeeded
+ *   - null with no error         → not reporting at all (typically not
+ *     configured, e.g. KTN_TRUENAS_URL unset). Not a fault, and must not be
+ *     rendered as one.
+ */
+export interface BaySources {
+  /** Last SUCCESSFUL enclosure slot poll: bay contents, status, IDENT, fault. */
+  slots: string | null;
+  /**
+   * Set while slot polling is failing. `slots` does not advance meanwhile and
+   * the bay rows are last-good (§37), so the map is a frozen snapshot — this is
+   * the one signal that the enclosure half of the screen cannot be vouched for.
+   */
+  slots_error: string | null;
+  /** Last successful TrueNAS pool/vdev read: everything under ZFS. */
+  truenas: string | null;
+  truenas_error: string | null;
+  /** Last successful SMART temperature read. Much slower than the rest. */
+  smart: string | null;
+}
+
 export interface BaysResponse {
   bays: Bay[];
-  sources: {
-    slots: string | null;
-    truenas: string | null;
-    truenas_error: string | null;
-    smart: string | null;
-  };
+  sources: BaySources;
 }
 
 export interface AuditEntry {

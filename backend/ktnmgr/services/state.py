@@ -17,7 +17,7 @@ from typing import Any, Generic, TypeVar
 
 from ktnmgr import __version__
 from ktnmgr.config import Settings
-from ktnmgr.enclosure.disks import DiskInfoReader
+from ktnmgr.enclosure.disks import DiskIdentityUnreadable, DiskInfoReader
 from ktnmgr.enclosure.ses import SesError, SesRunner
 from ktnmgr.enclosure.ses_parser import (
     BAY_ELEMENT_TYPES,
@@ -50,6 +50,11 @@ from ktnmgr.truenas.correlate import (
 log = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+#: Verbatim sysfs slot statuses in which the enclosure is itself calling the
+#: bay failed. Kept next to the predicate below so the two readers of this list
+#: - health classification and the notifier's floor - cannot drift apart.
+_ENCLOSURE_FAULT_STATUSES = ("critical", "unrecoverable")
 
 
 @dataclass
@@ -92,6 +97,18 @@ class Cached(Generic[T]):
         self._monotonic = time.monotonic()
 
 
+def _enclosure_asserts_failure(status: str, fault: bool) -> bool:
+    """True when the SHELF is calling this bay failed.
+
+    Both inputs come from the enclosure's own sysfs/SES status, so this verdict
+    is independent of the disk in the bay and of any TrueNAS record keyed by a
+    transient block name. That independence is the point: it is still true when
+    the disk itself has stopped answering, which is exactly when every other
+    signal about the bay becomes unusable (§20).
+    """
+    return fault or (status or "").strip().lower() in _ENCLOSURE_FAULT_STATUSES
+
+
 def classify(
     status: str,
     fault: bool,
@@ -112,7 +129,7 @@ def classify(
     # indicator or reports Critical/Unrecoverable. Testing has_device first
     # rendered exactly that bay, the one most in need of attention, as EMPTY
     # on the shelf map.
-    if fault or normalised in ("critical", "unrecoverable"):
+    if _enclosure_asserts_failure(status, fault):
         return SlotHealth.FAILED
     if not has_device:
         return SlotHealth.EMPTY
@@ -153,6 +170,31 @@ def _identity_conflict(local: DiskIdentity, remote: DiskIdentity) -> bool:
     if local.serial and remote.serial:
         return local.serial.strip().lower() != remote.serial.strip().lower()
     return False
+
+
+def _notifiable(bay: Bay) -> bool:
+    """Whether a composed bay may drive a health notification this cycle.
+
+    Every bay may. This function exists to record why there is no exception,
+    because the obvious-looking one is a trap that was briefly implemented
+    here.
+
+    The incident this guards against was an urgent "Bay 4 FAILED" naming
+    another drive's serial, pool and 71C, persisted to notify-state.json and
+    followed by a "recovered" once the join settled. The tempting fix was to
+    withhold any bay whose live identity read failed. It is the wrong lever:
+    withholding is indistinguishable from silence at the moment the hardware
+    is worst, and an EACCES on the container's disk access takes exactly that
+    shape across every bay at once - fifteen failing drives, nothing sent.
+
+    The cause was never the alert; it was the composition. _compose_bays now
+    withholds the *identity* it cannot vouch for while keeping the failure
+    signals that describe the bay, so an alert about an unconfirmed occupant
+    names no drive it cannot prove is there - and still tells the operator
+    which bay to open the shelf and look at. Alerting must not get quieter as
+    the hardware gets worse (§20).
+    """
+    return True
 
 
 class StateService:
@@ -219,10 +261,12 @@ class StateService:
         # safe direction: it can only make bays() distrust a reading that
         # genuinely straddled one of our own writes.
         observed_at = time.monotonic()
+        discovered_ok = False
         try:
             discovered = await loop.run_in_executor(None, self.backend.discover)
             found = [e for e in discovered if self._allowed(e.logical_id)]
             self.enclosures.succeed(found)
+            discovered_ok = True
             slots = {
                 ref.logical_id: await loop.run_in_executor(None, self.backend.read_slots, ref)
                 for ref in found
@@ -230,6 +274,24 @@ class StateService:
             self.slots.succeed(slots, observed_at=observed_at)
         except OSError as exc:
             self.slots.fail(str(exc))
+            if not discovered_ok:
+                # A failed discover() used to leave the enclosure cache
+                # untouched, which cost twice. Its monotonic stamp never moved,
+                # so _loop found it perpetually due and re-entered this method
+                # every tick - each attempt taking the cross-process enclosure
+                # flock that the IDENT helper also needs, turning an unplugged
+                # shelf into contention against the one operation that must not
+                # be starved. And last_error stayed None forever - not merely
+                # undisplayed but never recorded, so no amount of looking at
+                # the diagnostics block (§35) could distinguish a shelf that
+                # was failing to discover from one that had simply never been
+                # polled. Recording the attempt fixes both; note that the
+                # `polling` block does not yet carry an `enclosures` entry, so
+                # surfacing it is a separate, API-visible decision.
+                # read_slots() failing is a different story: discover()
+                # did answer, so the enclosure cache is genuinely fresh and only
+                # the slot cache degrades (§37).
+                self.enclosures.fail(str(exc))
 
     def _allowed(self, logical_id: str) -> bool:
         allowlist = self.settings.allowed_enclosures()
@@ -255,6 +317,20 @@ class StateService:
             # Ask only about disks actually in a bay. The appliance requires an
             # explicit name list, and there is no reason to ask about the boot
             # device or anything outside the shelf.
+            #
+            # This list is derived from the slot cache, which is up to
+            # poll_slots_seconds old, and that is deliberately left alone. The
+            # staleness can only make the list *incomplete*: a drive that has
+            # since changed block name is asked about under a name that no
+            # longer resolves, so the appliance returns nothing for it and the
+            # bay shows no temperature for a cycle. It can never make the list
+            # wrong, because build_smart_index keys results by the same block
+            # name and _compose_bays independently re-checks identity before
+            # attaching anything keyed that way (§20). Absent-for-one-cycle is
+            # the failure mode this application prefers over a reading
+            # attributed to the wrong drive, so no ordering check is warranted
+            # here - unlike the slot cache's IDENT join, where the stale value
+            # would have been *served* rather than merely omitted.
             names = sorted(
                 {
                     slot.block_device
@@ -304,6 +380,10 @@ class StateService:
         loop = asyncio.get_running_loop()
         collected: dict[str, ChassisTelemetry] = dict(self.chassis.value)
         error: str | None = None
+        #: Whether this cycle actually obtained a reading from the hardware.
+        #: `collected` cannot answer that - it starts as the previous cache
+        #: carried forward, so it is non-empty after any past success.
+        read_any = False
 
         for ref in self.enclosures.value:
             if not ref.sg_device:
@@ -320,6 +400,7 @@ class StateService:
                 collected[ref.logical_id] = build_telemetry(
                     ref.logical_id, configuration.stdout, joined.stdout
                 )
+                read_any = True
             except SesError as exc:
                 error = str(exc)
                 stale = collected.get(ref.logical_id)
@@ -353,6 +434,35 @@ class StateService:
 
         if error and not collected:
             self.chassis.fail(error)
+        elif not read_any:
+            # Nothing was read: no enclosure is attached, or none of them still
+            # exposes an sg node. succeed() here stamped a cache that had just
+            # been handed back its own previous contents, so updated_at jumped
+            # to now, due() went false for a full interval, and the diagnostics
+            # freshness block reported last_success=<now> / last_error=null for
+            # telemetry of unbounded age. That block exists to tell an operator
+            # when a source stopped answering (§35); a cycle that read nothing
+            # is recorded as the failed attempt it was.
+            error = error or "no enclosure with an sg device to read"
+            # routes.chassis() serves chassis.value verbatim whenever an entry
+            # exists for the requested enclosure, and only falls back to
+            # chassis.last_error when there is none - it never separately checks
+            # the cache-level failure this branch just recorded. Without marking
+            # the RETAINED objects themselves, a shelf that stops exposing an sg
+            # node would keep serving fan speeds and temperatures of unbounded
+            # age with stale=false on the one page an operator actually looks
+            # at, while only the diagnostics block knew. Everything still in
+            # `collected` is carried-forward cache rather than a reading from
+            # this cycle, so it all gets the treatment the SesError branch above
+            # gives a single enclosure.
+            for retained in collected.values():
+                retained.stale = True
+                retained.error = error
+            self.chassis.fail(error)
+            # And the same honest-absence rule the SesError paths apply: with
+            # no enclosure contributing a reading, no address map can be
+            # rebuilt, and a kept one would show a removed drive's address.
+            self._sas_by_slot.clear()
         else:
             self.chassis.succeed(collected)
             if error:
@@ -365,11 +475,16 @@ class StateService:
         loop = asyncio.get_running_loop()
         try:
             for ref in self.enclosures.value:
-                # bays() is synchronous sysfs I/O (~7 identity attributes per
-                # disk on a cache miss), so it runs in the executor like every
-                # other blocking read reached from the poll loop.
-                composed = await loop.run_in_executor(None, self.bays, ref.logical_id)
-                await self.notifier.evaluate(composed)
+                # _compose_bays() is synchronous sysfs I/O (~7 identity
+                # attributes per disk on a cache miss), so it runs in the
+                # executor like every other blocking read reached from the poll
+                # loop.
+                composed = await loop.run_in_executor(
+                    None, self._compose_bays, ref.logical_id
+                )
+                await self.notifier.evaluate(
+                    [bay for bay, _identified in composed if _notifiable(bay)]
+                )
         except Exception:  # noqa: BLE001 - notification is best-effort
             log.exception("health notification failed")
 
@@ -377,7 +492,18 @@ class StateService:
         while True:
             try:
                 polled = False
-                if self.enclosures.due(self.settings.poll_slots_seconds) or not self.slots.value:
+                # Gated on the slot cache alone, because poll_hardware() stamps
+                # it on every path it can take - success, a read_slots()
+                # failure, a discover() failure - so it is the one clock that
+                # always advances. The gate used to be
+                # `enclosures.due(...) or not self.slots.value`, and both halves
+                # failed open together on an unplugged shelf: discover() raising
+                # left the enclosure clock frozen AND the slot cache empty, so
+                # the emptiness test re-entered this poll every single tick,
+                # taking the cross-process enclosure flock each time (§37 says
+                # degrade the section, not hammer the hardware). Freshness on
+                # the failure path is what makes a retry interval mean anything.
+                if self.slots.due(self.settings.poll_slots_seconds):
                     await self.poll_hardware()
                     polled = True
                 if self.zfs.due(self.settings.poll_truenas_seconds):
@@ -457,29 +583,96 @@ class StateService:
         return self._sas_by_slot.get(logical_id, {})
 
     def bays(self, logical_id: str) -> list[Bay]:
+        return [bay for bay, _ in self._compose_bays(logical_id)]
+
+    def _compose_bays(self, logical_id: str) -> list[tuple[Bay, bool]]:
+        """Compose each bay, paired with whether its disk identity is settled.
+
+        The flag says whether *this composition* could establish which disk
+        occupies the bay - false only while a live sysfs identity read fails.
+        It is deliberately not a field on Bay: it describes the state of our
+        knowledge for one cycle, not a property of the hardware, and the API
+        surface must not grow a field that means "distrust the neighbouring
+        fields". The one caller that needs it is the notifier (_notifiable),
+        because it is the one consumer that persists a verdict and wakes a
+        phone rather than redrawing on the next poll.
+        """
         ref = self.enclosure(logical_id)
-        composed: list[Bay] = []
+        composed: list[tuple[Bay, bool]] = []
         sas_addresses = self._sas_addresses(ref.logical_id)
 
         for slot in self.slots.value.get(ref.logical_id, []):
             device = slot.block_device
-            local = self.disk_reader.read(device)
+            try:
+                local = self.disk_reader.read(device)
+                identified = True
+            except DiskIdentityUnreadable as exc:
+                # The block node is there and will not say what it is: a SCSI
+                # re-probe in flight, or a disk failing hard enough that its
+                # own attributes EIO. Before this was distinguishable, the read
+                # came back as an *empty* identity, which is the one value
+                # _identity_conflict must answer False to (§20 - absence of
+                # data is not data), so the guard below switched itself off at
+                # the exact moment it was needed. §20 cuts both ways: a read
+                # that FAILED is no more evidence of agreement than it is of
+                # conflict, and the honest composition treats the bay as one
+                # whose occupant is unknown for this cycle.
+                log.debug("identity unreadable for %s: %s", device, exc)
+                local = DiskIdentity()
+                identified = False
+
             remote = self.remote_disks.value.get(device or "")
             zfs = self.zfs.value.get(device or "", ZfsInfo())
             smart = self.smart.value.get(device or "", SmartInfo())
-            if remote is not None and _identity_conflict(local, remote):
-                # The TrueNAS caches are keyed by transient block name, so
-                # after a swap that reuses the name the removed disk's record
-                # can wear the new disk's name for up to one poll_truenas
-                # interval. When the stable identifiers disagree, the remote
-                # record - and the ZFS state and SMART data indexed by the
-                # same name - describe the removed disk, so all three are
-                # dropped rather than merged onto the wrong drive (§20).
+            # The TrueNAS caches are keyed by transient block name, so after a
+            # swap that reuses the name the removed disk's record can wear the
+            # new disk's name for up to one poll_truenas interval. Attaching
+            # any of it requires a live read that positively places this disk
+            # in this bay: identifiers that disagree prove the record belongs
+            # to the removed disk, and identifiers that could not be read prove
+            # nothing at all. Neither may be joined, so the remote record, the
+            # ZFS state and the SMART data indexed by that name are dropped
+            # together - health included, which is what stopped a re-probing
+            # bay from being rendered FAILED with a departed drive's pool
+            # membership and 71C alert (§20).
+            # Two very different situations, and collapsing them silences the
+            # shelf. A live read that DISAGREES proves the record describes a
+            # drive that has left; dropping it is the whole point. A live read
+            # that FAILED proves nothing either way - and treating "unknown
+            # occupant" as "no failure to report" is the more dangerous
+            # mistake of the two. It made a bay reading zfs FAULTED and SMART
+            # 71C render OK and go unnotified, and because an EACCES on the
+            # container's disk access takes exactly that shape shelf-wide, it
+            # could turn 15 failing bays into 15 healthy-looking ones.
+            #
+            # So a monitoring tool fails loud: a proven swap drops the record,
+            # while an unconfirmed occupant keeps every failure signal and
+            # withholds only the IDENTITY it cannot vouch for. A false alarm
+            # naming no drive is recoverable; silence on a dying one is not.
+            swapped = remote is not None and _identity_conflict(local, remote)
+            if swapped:
                 remote = None
                 zfs = ZfsInfo()
                 smart = SmartInfo()
-            identity = merge_identity(local, remote)
-            identity.sas_address = sas_addresses.get(slot.ses_slot)
+            # merge_identity is what backfills serial/model/WWN from the
+            # name-keyed TrueNAS record, so it is gated on a live read that
+            # positively places this disk here. zfs and smart deliberately are
+            # not: they describe the BAY's condition, and an alert that names
+            # no drive still tells an operator which bay to look at.
+            identity = merge_identity(local, remote if identified else None)
+            joinable = identified and not swapped
+            if joinable:
+                # The SAS address is slot-keyed rather than name-keyed, but it
+                # is still up to poll_ses_seconds old and still describes
+                # whichever drive was in the bay when the AES page was read. It
+                # is also the field an operator uses to cross-check a bay
+                # against the physical shelf, so serving the previous drive's
+                # port address at the moment we have PROVEN the occupant
+                # changed is the worst possible time to be one poll behind. It
+                # rides the same gate as the rest: no address beats the wrong
+                # drive's address, the identical refusal poll_chassis applies
+                # when it drops the map instead of keeping a stale one.
+                identity.sas_address = sas_addresses.get(slot.ses_slot)
             # The IDENT manager gets the age of this reading, not just its
             # value, because it holds the newer evidence: a write it verified
             # by hardware read-back after this snapshot was taken supersedes
@@ -491,7 +684,7 @@ class StateService:
                 ref.logical_id, slot.ses_slot, slot.locate, self.slots.observed_monotonic
             )
 
-            composed.append(
+            composed.append((
                 Bay(
                     display_bay=slot.display_bay,
                     ses_slot=slot.ses_slot,
@@ -508,8 +701,9 @@ class StateService:
                     zfs=zfs,
                     smart=smart,
                     sysfs_path=slot.sysfs_path,
-                )
-            )
+                ),
+                identified,
+            ))
         return composed
 
     def diagnostics(self) -> dict[str, Any]:
@@ -554,6 +748,13 @@ class StateService:
                 for r in refs
             ],
             "polling": {
+                # discover() failing (an unplugged shelf, a lost cross-process
+                # lock) previously left no trace on any surface: poll_hardware
+                # records it with enclosures.fail(), but nothing read it back,
+                # so the one signal distinguishing "never polled" from "polling
+                # and failing" existed only in memory (§35). Same interval as
+                # slots: one poll_hardware() call stamps both.
+                "enclosures": _freshness(self.enclosures, self.settings.poll_slots_seconds),
                 "slots": _freshness(self.slots, self.settings.poll_slots_seconds),
                 "truenas": _freshness(self.zfs, self.settings.poll_truenas_seconds),
                 "smart": _freshness(self.smart, self.settings.poll_smart_seconds),

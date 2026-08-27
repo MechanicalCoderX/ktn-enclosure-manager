@@ -8,6 +8,7 @@ path, a command, an argument list, or a shell fragment could reach the system
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Annotated, Any
 
@@ -263,9 +264,9 @@ def list_enclosures(user: CurrentUser, service: Annotated[Any, Depends(get_state
     ]
 
 
-def _resolve(service: Any, enclosure_id: str) -> None:
+def _resolve(service: Any, enclosure_id: str) -> Any:
     try:
-        service.enclosure(enclosure_id)
+        return service.enclosure(enclosure_id)
     except EnclosureNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "enclosure not attached") from exc
 
@@ -279,6 +280,17 @@ def list_bays(
         "bays": [b.model_dump(mode="json") for b in service.bays(enclosure_id)],
         "sources": {
             "slots": service.slots.updated_at,
+            # Published for exactly the reason truenas_error is. A slot poll
+            # that fails calls Cached.fail(), which keeps the last-good rows and
+            # leaves `slots` (the last SUCCESS timestamp) untouched
+            # (StateService.poll_hardware), so the bay map looks precisely as
+            # fresh while sysfs is unreadable as it does when it is not. Without
+            # this key the failure was visible only on /api/diagnostics - a page
+            # nobody has open while staring at the shelf map - and the map
+            # asserted a freshness it did not have (§37: a degraded source must
+            # degrade visibly, not silently). Additive: `slots` keeps its
+            # meaning, so an older client reads this response unchanged.
+            "slots_error": service.slots.last_error,
             "truenas": service.zfs.updated_at,
             "truenas_error": service.zfs.last_error,
             "smart": service.smart.updated_at,
@@ -298,6 +310,65 @@ def chassis(
             "error": service.chassis.last_error or "chassis telemetry not collected yet",
         }
     return {"available": True, **telemetry.model_dump(mode="json")}
+
+
+def _bay_serial(service: Any, ref: Any, ses_slot: int) -> str | None:
+    """Serial of the disk that is in this bay *now*, or nothing at all.
+
+    Deliberately not taken from ``service.bays()``. That view joins a slot cache
+    up to poll_slots_seconds old onto a TrueNAS disk index up to
+    poll_truenas_seconds old, and the bay -> /dev/sdX half of it is the half §20
+    says is not identity: the kernel provably re-uses device names (see
+    DiskInfoReader.read), so for up to one poll interval after a swap the cached
+    mapping attributes some other bay's device name - and therefore another
+    drive's serial - to this bay.
+
+    A wrong serial in a bay tile is repainted seconds later. A wrong serial in
+    the append-only audit log (§34) outlives the glitch that produced it, and
+    the audit log is the one artifact meant to be authoritative about which
+    physical drive an operator acted on. So the bay -> device mapping is re-read
+    from sysfs here, and only the *local* identity is used: the TrueNAS record
+    could merge in only where sysfs left a gap, and it is itself keyed by the
+    transient name, so a gap it filled would be a serial attributed by a stale
+    index. DiskInfoReader re-validates the device's wwid on every call, so a
+    live name yields live identity.
+
+    ``ref`` itself is not trusted either, even though the caller already holds
+    one: it came from ``service.enclosure()``, which returns whatever
+    ``discover()`` last cached (up to poll_slots_seconds old), while the write
+    this serial is about to be attributed to goes through
+    ``SesLocateWriter``, which calls ``backend.resolve()`` immediately before
+    acting "so a changed /dev/sgX or sysfs path is picked up rather than
+    cached into a stale write" (sysfs.py, §37). Reading slots through the
+    cached ref after a re-enumeration can return an empty list for an
+    enclosure that is very much still there, silently dropping the serial from
+    the audit record exactly when the shelf state is least certain. Re-
+    resolving here mirrors the write path instead of trusting a read that may
+    already be stale.
+
+    None is a supported answer rather than a failure - the timer's own
+    IDENT_OFF rows already carry no serial, so both the log and its reader
+    handle an absent one - and it is the right answer whenever the mapping
+    cannot be re-established: absent beats wrong (§20, absence of data must not
+    be treated as data). A resolve() failure (EnclosureNotFoundError) is left
+    to propagate to the caller's existing best-effort guard around this
+    function, which already degrades to no serial rather than blocking the
+    LED write.
+    """
+    ref = service.backend.resolve(ref.logical_id)
+    for row in service.backend.read_slots(ref):
+        if row.ses_slot != ses_slot:
+            continue
+        if not row.block_device:
+            # An empty bay has no disk and so no serial. Note the residual
+            # window this does not close: the read is taken just before the
+            # write rather than inside the writer's enclosure lock, so a swap
+            # during those milliseconds is still mis-attributable. It replaces
+            # a five-second exposure with a millisecond one; closing it fully
+            # means resolving identity inside IdentManager.identify.
+            return None
+        return service.disk_reader.read(row.block_device).serial
+    return None
 
 
 @router.post("/enclosures/{enclosure_id}/slots/{ses_slot}/identify",
@@ -332,13 +403,26 @@ async def identify(
             status.HTTP_400_BAD_REQUEST,
             f"duration must be one of {[d for d in ALLOWED_DURATIONS if d]} or null",
         )
-    _resolve(service, enclosure_id)
+    ref = _resolve(service, enclosure_id)
 
-    serial = None
-    for bay in service.bays(enclosure_id):
-        if bay.ses_slot == ses_slot:
-            serial = bay.disk.serial
-            break
+    # Blocking sysfs I/O, so it goes through the executor exactly as every other
+    # hardware read reached from an async caller does (StateService.poll_hardware
+    # explains why an inline read can freeze the whole HTTP surface).
+    loop = asyncio.get_running_loop()
+    try:
+        serial = await loop.run_in_executor(None, _bay_serial, service, ref, ses_slot)
+    except Exception:  # noqa: BLE001 - an annotation must never block an actuation
+        # The serial labels the record; the LED is the operation the operator
+        # asked for. A shelf that cannot be re-read is exactly the situation in
+        # which someone is pressing Identify, so refusing the write here would
+        # break the feature at the moment it is needed. The record is still
+        # written, without a serial - the same shape a system:timer IDENT_OFF
+        # row already has.
+        log.warning(
+            "could not resolve the disk serial for %s slot %s; auditing without one",
+            enclosure_id, ses_slot, exc_info=True,
+        )
+        serial = None
 
     try:
         record = await service.ident.identify(
@@ -357,13 +441,41 @@ async def identify(
     # Refresh the slot cache immediately rather than waiting for the next poll
     # tick, so the caller's next read - and the countdown the UI starts showing
     # straight away - reflect the write that was just verified.
-    await service.poll_hardware()
+    #
+    # It is an optimisation, and it is guarded because it is only an
+    # optimisation. By this line the write is done: the hardware read-back
+    # confirmed it, the record is persisted and the audit line is on disk.
+    # poll_hardware() swallows OSError itself but nothing else, so anything
+    # else it raised - an executor shutting down mid-request, a backend bug -
+    # escaped as a 500 and told the caller that a write which had in fact
+    # succeeded had failed. That is the one lie this endpoint must not tell:
+    # the operator either retries a write that already happened, or walks to
+    # the shelf believing an LED is dark while it is lit.
+    refreshed = True
+    try:
+        await service.poll_hardware()
+    except Exception:  # noqa: BLE001 - a failed refresh is not a failed write
+        refreshed = False
+        log.warning(
+            "slot cache refresh after the IDENT write on %s slot %s failed; the write "
+            "itself was verified and stands",
+            enclosure_id, ses_slot, exc_info=True,
+        )
 
     return {
         "ok": True,
         "locate": body.on,
         "expires_at": record.expires_at if record else None,
         "origin": record.origin if record else None,
+        # The write result above is authoritative whether or not the cache
+        # could be refreshed, so a client that renders straight from this body
+        # is correct either way. A client that discards it and re-reads /bays
+        # instead is served by IdentManager.describe, which orders that read
+        # against this verified write and still reports the bay as lit - the
+        # Clear button is disabled on a bay reported dark, and a lit LED the UI
+        # cannot clear is the failure §26's server-side timers exist to avoid.
+        # This flag says which of the two the caller is looking at.
+        "refreshed": refreshed,
     }
 
 

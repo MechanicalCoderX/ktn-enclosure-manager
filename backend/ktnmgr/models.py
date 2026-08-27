@@ -158,6 +158,40 @@ class ChassisElement(BaseModel):
     fields: dict[str, str] = Field(default_factory=dict)
     temperature_c: float | None = None
     speed_rpm: int | None = None
+    # A Cooling status descriptor carries three independent facts, and rpm alone
+    # is the least informative of them: this shelf's firmware modulates its fans
+    # on its own, so the operator needs to see WHICH speed step the enclosure has
+    # chosen and whether it has been asked to run at all. All three are read here
+    # and never written - chassis management stays read-only (§15).
+    speed_code: int | None = Field(
+        default=None,
+        ge=0,
+        le=7,
+        description=(
+            "SES-3 ACTUAL SPEED CODE: 0 = fan stopped, 1..6 = lowest through second "
+            "highest, 7 = highest. None when the output printed no speed phrase or a "
+            "phrase this parser does not map. Never defaulted: on the status page 0 is "
+            "a real reading meaning the fan has stopped, so a default would be an alarm "
+            "the enclosure never raised. (The identically numbered control-page field "
+            "means 'leave at current speed' at 0; the two tables are not interchangeable "
+            "and this field is only ever the status one.)"
+        ),
+    )
+    speed_phrase: str | None = Field(
+        default=None,
+        description=(
+            "The speed wording exactly as printed, e.g. 'Fan at third lowest speed'. "
+            "Kept verbatim alongside speed_code so wording this parser cannot map is "
+            "still shown rather than lost; None when no phrase was printed."
+        ),
+    )
+    requested_on: bool | None = Field(
+        default=None,
+        description=(
+            "SES-3 RQSTED ON bit, printed for Cooling and Power supply elements. None "
+            "when the element's output did not carry it - absent is not False (§13)."
+        ),
+    )
 
 
 class Subenclosure(BaseModel):

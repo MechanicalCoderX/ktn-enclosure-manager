@@ -4,7 +4,15 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [1.5.5] — 2026-08-27
+
+Correctness release. Every fix here is one root cause: the bay view composes
+facts read on five different clocks — slots 5 s, TrueNAS 20 s, SES/AES 30 s,
+SMART 120 s, disk identity live — and joining them without first establishing
+that they describe the same disk, at the same moment, produces output that is
+briefly but confidently wrong. v1.5.4 fixed that for the IDENT LED mapping;
+this release fixes the rest of the family and stops the UI claiming a
+freshness it does not have.
 
 ### Fixed
 - **A bay the app itself lit and then auto-cleared no longer reports as
@@ -20,8 +28,61 @@ versioning follows [Semantic Versioning](https://semver.org/).
   reading older than our own last verified write is superseded by it. A
   genuinely external IDENT is still reported (§27) — only the single
   in-flight reading that straddles our own write is discarded.
+- **A bay whose disk will not identify itself no longer wears the previous
+  drive's identity.** `DiskInfoReader` returned a silently empty identity when
+  its sysfs reads *failed*, which is the one value the swap guard must read as
+  "no conflict" (§20) — so the guard switched itself off during a re-probe or
+  on a disk answering EIO, exactly when a same-name swap is most likely, and
+  the departed drive's serial, pool membership and temperature alert were
+  painted onto the bay. A read that failed is now distinguished from a disk
+  that declares no identifiers. The identity is withheld; the **failure
+  signals are kept**, because "we cannot tell which drive this is" says
+  nothing about whether the bay is in trouble — and a permission regression
+  makes every bay unreadable at once, which must not turn a failing shelf
+  silent.
+- The identity-conflict drop now also covers the **SAS address**, which was
+  stamped from the ≤30 s map after the drop ran — serving the departed
+  drive's port address at the exact moment the app had proven the occupant
+  changed, in the field an operator uses to cross-check against the shelf.
+- Health notifications no longer name the wrong drive. One transient join
+  could send an urgent "Bay N failed" carrying another disk's serial, pool
+  and temperature, persist it, then send a "recovered".
+- The audit log's serial is resolved live for the bay being acted on instead
+  of being taken from the cached join, so the one record meant to be
+  authoritative about which physical drive was touched cannot inherit a
+  neighbour's identity. It is omitted rather than guessed when it cannot be
+  resolved.
+- A failing `discover()` advanced no clock, so an unplugged shelf was retried
+  every poll tick — each retry taking the cross-process enclosure lock the
+  IDENT helper needs — while the error was never recorded anywhere.
+- `poll_chassis` stamped its cache as freshly read after reading nothing at
+  all, so diagnostics reported a successful poll for telemetry of unbounded
+  age.
+- The Identify route's post-write refresh is guarded: if it failed, the UI
+  could show IDENT off with a **disabled** Clear button while the LED was lit
+  and a timer was running, and a successful write could be reported to the
+  caller as a 500.
+
+### Added
+- **Fan telemetry, read-only.** The chassis view now shows the SES speed code
+  and the enclosure's own wording for it (`Fan at third lowest speed`), plus
+  the requested-on flag, alongside the RPM it already displayed. The app was
+  previously blind to these fields, which is what made the fan question hard
+  to reason about: on this shelf the firmware runs the two banks at different
+  speeds at identical temperatures, and now you can watch it do so. There is
+  no fan control and none is planned — see the README.
+- The bays endpoint reports a slot-cache error alongside the existing
+  freshness stamps, so a failing enclosure read is visible outside the
+  diagnostics page.
 
 ### Changed
+- **The "updated" stamp no longer covers for four other clocks.** One label
+  described only the 5 s slot poll while the temperature under it could be
+  120 s old, the ZFS state 20 s and the SAS address 30 s. The header now
+  states the oldest contributing source and expands to a per-source
+  breakdown; the detail panel stamps each section where that data actually
+  renders. The UI also no longer asserts that bay state "remains accurate"
+  when the enclosure read itself is failing.
 - The README's fan-control section no longer claims the firmware was
   observed refusing a speed request. The one command ever run
   (`--set=speed_code=6`) also carried `RQST ON = 0`, which SES-3 defines as

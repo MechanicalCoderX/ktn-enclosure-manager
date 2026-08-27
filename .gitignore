@@ -27,3 +27,4 @@ audit.log
 secrets/
 *.pem
 !tests/fixtures/**/*.pem
+.claude/worktrees/

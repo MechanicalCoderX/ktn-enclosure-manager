@@ -187,6 +187,142 @@ def test_fan_rpm_parsed(configuration_text: str, join_text: str) -> None:
     assert fan.label == "Cooling Fan B"
 
 
+def test_fan_speed_code_and_phrase_on_real_capture(
+    configuration_text: str, join_text: str
+) -> None:
+    """The captured shelf was running every fan flat out, and rpm alone cannot
+    say so: 5300 rpm is only meaningful next to the enclosure's own statement
+    that this is its highest step. Both must come off the same printed line."""
+    _, descriptors = parse_configuration(configuration_text)
+    by_key = {(e.type_index, e.element_index): e for e in parse_join(join_text, descriptors)}
+    fan = by_key[(20, 0)]
+    assert fan.element_type == "Cooling"
+    assert fan.speed_rpm == 5300
+    assert fan.speed_code == 7
+    assert fan.speed_phrase == "Fan at highest speed"
+
+
+def test_requested_on_reads_both_states_on_real_capture(
+    configuration_text: str, join_text: str
+) -> None:
+    """Bank B's two fans differ on RQSTED ON in the same capture (element 0 is
+    0, element 1 is 1), so the flag is proven to track the element rather than
+    the block."""
+    _, descriptors = parse_configuration(configuration_text)
+    by_key = {(e.type_index, e.element_index): e for e in parse_join(join_text, descriptors)}
+    assert by_key[(20, 0)].requested_on is False
+    assert by_key[(20, 1)].requested_on is True
+    assert by_key[(20, -1)].requested_on is True
+    # The bit is defined for power supplies too and is read wherever it is
+    # printed; those elements carry no speed reading at all.
+    psu = by_key[(22, 0)]
+    assert psu.requested_on is False
+    assert psu.speed_rpm is None
+    assert psu.speed_code is None
+    assert psu.speed_phrase is None
+
+
+def test_non_cooling_element_has_no_fan_fields(
+    configuration_text: str, join_text: str
+) -> None:
+    """A temperature sensor prints neither speed nor RQSTED ON. All four fields
+    stay absent rather than acquiring a zero that reads as 'fan stopped'."""
+    _, descriptors = parse_configuration(configuration_text)
+    by_key = {(e.type_index, e.element_index): e for e in parse_join(join_text, descriptors)}
+    sensor = by_key[(1, 0)]
+    assert sensor.element_type == "Temperature sensor"
+    assert sensor.speed_rpm is None
+    assert sensor.speed_code is None
+    assert sensor.speed_phrase is None
+    assert sensor.requested_on is None
+
+
+def test_every_speed_code_maps_from_its_printed_phrase() -> None:
+    """Pins SES-3's eight speed codes against the wording sg_ses prints for
+    each. The KTN-STL3 only ever emitted 'highest' and 'third lowest', so the
+    rest of the table is only ever exercised here."""
+    configuration = (SYNTHETIC / "sg_cf_cooling_codes.txt").read_text()
+    join = (SYNTHETIC / "sg_join_cooling_codes.txt").read_text()
+    _, descriptors = parse_configuration(configuration)
+    by_key = {(e.type_index, e.element_index): e for e in parse_join(join, descriptors)}
+
+    expected = {
+        0: ("Fan stopped", 0),
+        1: ("Fan at lowest speed", 1200),
+        2: ("Fan at second lowest speed", 1800),
+        3: ("Fan at third lowest speed", 2490),
+        4: ("Fan at intermediate speed", 3200),
+        5: ("Fan at third highest speed", 3900),
+        6: ("Fan at second highest speed", 4600),
+        7: ("Fan at highest speed", 5300),
+    }
+    for code, (phrase, rpm) in expected.items():
+        element = by_key[(0, code)]
+        assert element.speed_code == code, f"{phrase!r} should map to code {code}"
+        assert element.speed_phrase == phrase
+        assert element.speed_rpm == rpm
+
+    # Code 0 is a real reading, not a blank: the stopped fan is also the only
+    # one the fixture marks as not requested on.
+    assert by_key[(0, 0)].requested_on is False
+    assert by_key[(0, 1)].requested_on is True
+
+
+def test_short_and_unmapped_speed_forms_stay_absent_not_zero() -> None:
+    """Two ways the phrase can fail to yield a code, and neither may invent
+    one: firmware that prints no wording at all, and wording outside SES-3's
+    table. Code 0 means the fan has stopped, so guessing it here would report
+    a cooling failure the shelf never reported."""
+    configuration = (SYNTHETIC / "sg_cf_cooling_codes.txt").read_text()
+    join = (SYNTHETIC / "sg_join_cooling_codes.txt").read_text()
+    _, descriptors = parse_configuration(configuration)
+    by_key = {(e.type_index, e.element_index): e for e in parse_join(join, descriptors)}
+
+    short = by_key[(0, 8)]
+    assert short.speed_rpm == 2100
+    assert short.speed_phrase is None
+    assert short.speed_code is None
+    # This element also prints no RQSTED ON line at all.
+    assert short.requested_on is None
+
+    unmapped = by_key[(0, 9)]
+    assert unmapped.speed_rpm == 2700
+    assert unmapped.speed_phrase == "Fan at vendor eco speed"
+    assert unmapped.speed_code is None
+    assert unmapped.requested_on is True
+
+
+def test_speed_phrase_comes_from_the_same_line_as_its_rpm() -> None:
+    """rpm and phrase are one reading. Searching for them independently would
+    pair the first line's speed with the second line's wording and report a
+    fan at 2490 rpm as running at its highest step."""
+    text = (
+        "[0,-1]  Element type: Cooling\n"
+        "  Enclosure Status:\n"
+        "    Predicted failure=0, Disabled=0, Swap=0, status: OK\n"
+        "    Off=0, Actual speed=2490 rpm\n"
+        "    Off=0, Actual speed=5300 rpm, Fan at highest speed\n"
+    )
+    (element,) = parse_join(text, [])
+    assert element.speed_rpm == 2490
+    assert element.speed_phrase is None
+    assert element.speed_code is None
+
+
+def test_requested_on_is_not_matched_from_a_longer_key() -> None:
+    """The flag is anchored to the start of a comma-separated field, so a
+    vendor field whose name merely ends in the same words cannot set it."""
+    text = (
+        "[0,-1]  Element type: Cooling\n"
+        "  Enclosure Status:\n"
+        "    Predicted failure=0, Disabled=0, Swap=0, status: OK\n"
+        "    Last Requested on=1, Off=0, Actual speed=0 rpm, Fan stopped\n"
+    )
+    (element,) = parse_join(text, [])
+    assert element.requested_on is None
+    assert element.speed_code == 0
+
+
 def test_power_supply_flags_parsed(configuration_text: str, join_text: str) -> None:
     _, descriptors = parse_configuration(configuration_text)
     by_key = {(e.type_index, e.element_index): e for e in parse_join(join_text, descriptors)}

@@ -139,6 +139,107 @@ test.describe("identify", () => {
   });
 });
 
+test.describe("freshness", () => {
+  // The E2E backend runs with KTN_TRUENAS_URL empty, so `sources.truenas` and
+  // `sources.smart` are null with no error: those sources are OFF, not stale.
+  // That makes this suite the exact control for the trap in the fix - a summary
+  // that folded a never-polled source into "oldest" would age the header to
+  // "never" and cry fault on a healthy TrueNAS-less deployment.
+  test.beforeEach(async ({ page }) => bootstrapAndLogin(page));
+
+  test("the header dates the page to its oldest source, not its fastest", async ({ page }) => {
+    const summary = page.getByTestId("freshness").locator("summary");
+    // "as of", not "updated": the old wording claimed the slot poll's time for
+    // readings taken up to two minutes earlier.
+    await expect(summary).toContainText(/^as of \d{1,2}:\d{2}:\d{2}/);
+    // Nothing is failing here, so no degraded badge.
+    await expect(summary.locator(".badge.warning")).toHaveCount(0);
+  });
+
+  test("expanding names every source and says which are not reporting", async ({ page }) => {
+    const detail = page.getByRole("group", { name: "Data freshness by source" });
+    // Collapsed by default - this is a status line, not a dashboard.
+    await expect(detail).toBeHidden();
+
+    await page.getByTestId("freshness").locator("summary").click();
+    await expect(detail).toBeVisible();
+
+    // The enclosure is being read, so it carries a real time AND an age.
+    // Asserted separately rather than as one pattern: toLocaleTimeString renders
+    // "12:00:03" or "12:00:03 PM" depending on the browser locale, and a test
+    // that pins the punctuation of a clock fails for reasons that are not bugs.
+    await expect(detail).toContainText("Enclosure bay map");
+    await expect(detail).toContainText(/\d{1,2}:\d{2}:\d{2}/);
+    await expect(detail).toContainText(/\d+s ago/);
+
+    // TrueNAS is not configured on this harness. It must read as absent rather
+    // than as stale, and must not raise a warning.
+    await expect(detail).toContainText("TrueNAS pools and vdevs");
+    await expect(detail).toContainText("SMART temperatures");
+    await expect(detail.getByText("not reporting")).toHaveCount(2);
+    await expect(detail).not.toContainText("not refreshing");
+  });
+
+  test("each detail block is dated to the clock it actually came from", async ({ page }) => {
+    // The bug in one assertion: under a single header stamp, the ZFS block and
+    // the enclosure block claimed the same freshness. Here they cannot - the
+    // enclosure is live and TrueNAS is switched off, and the panel says so
+    // separately for each.
+    await page.getByRole("listitem", { name: /^Bay 8, / }).click();
+    const detail = page.getByTestId("bay-detail");
+
+    await expect(detail.getByTestId("section-physical")).toContainText(
+      /as of \d{1,2}:\d{2}:\d{2}/,
+    );
+    await expect(detail.getByTestId("section-zfs")).toContainText("not reporting");
+    await expect(detail.getByTestId("section-smart")).toContainText("not reporting");
+    // Disk identity is on no cache at all; it must not borrow a stamp.
+    await expect(detail.getByTestId("section-disk")).toContainText("read live");
+  });
+
+  test("a healthy page makes no slot-cache failure claim either way", async ({ page }) => {
+    // Control for the banner test below: the condition must be absent when the
+    // slot poll is fine, or "surfaces a slot-cache failure" would pass trivially.
+    await expect(page.getByTestId("slots-error")).toHaveCount(0);
+    await expect(page.locator("main")).not.toContainText("not refreshing");
+  });
+
+  test("a failing slot cache retracts the accuracy claim rather than repeating it", async ({
+    page,
+  }) => {
+    // The slot cache cannot be made to fail from outside the process - a failed
+    // poll keeps serving last-good rows, which is the whole difficulty - so the
+    // failure is injected into the response the browser actually receives. Only
+    // `sources` is rewritten; the bay rows stay exactly as the backend composed
+    // them, which is precisely the situation being tested: the map still looks
+    // completely normal.
+    await page.route("**/api/enclosures/*/bays", async (route) => {
+      const body = await (await route.fetch()).json();
+      body.sources.slots_error = "[Errno 19] No such device";
+      body.sources.truenas_error = "connection refused";
+      await route.fulfill({ json: body });
+    });
+
+    const banner = page.getByTestId("slots-error");
+    await expect(banner).toBeVisible({ timeout: 10_000 });
+    await expect(banner).toContainText("last good snapshot");
+    await expect(banner).toContainText("not refreshing");
+
+    // The regression this exists for: the TrueNAS banner used to assert
+    // unconditionally that bay state "remains accurate", which is false in
+    // exactly this state - the one state where a reader leans on it.
+    const main = page.locator("main");
+    await expect(main).toContainText("TrueNAS unavailable");
+    await expect(main).not.toContainText("remains accurate");
+    await expect(main).not.toContainText("still refreshing");
+
+    // And the header stops claiming the page is current.
+    await expect(
+      page.getByTestId("freshness").locator("summary .badge.warning"),
+    ).toBeVisible();
+  });
+});
+
 test.describe("chassis and diagnostics", () => {
   test.beforeEach(async ({ page }) => bootstrapAndLogin(page));
 
@@ -165,6 +266,36 @@ test.describe("chassis and diagnostics", () => {
     // this section would render empty while still showing its heading.
     await expect(page.getByText(/EMC Viper LCC/).first()).toBeVisible();
     await expect(page.getByText(/50060480aabbcc00/).first()).toBeVisible();
+  });
+
+  test("cooling shows the step the firmware chose, and offers no way to set it", async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop", "one backend, one poll");
+    await page.getByRole("tab", { name: "Chassis" }).click();
+    await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
+
+    const cooling = page.getByTestId("chassis-cooling");
+    // The captured KTN-STL3 pages carry four non-overall Cooling elements, all
+    // at 5300 rpm / code 7 / "Fan at highest speed".
+    await expect(cooling.getByText("Fan at highest speed")).toHaveCount(4);
+    await expect(cooling.getByText("7 of 7", { exact: true })).toHaveCount(4);
+    await expect(cooling.getByText("5300 rpm", { exact: true })).toHaveCount(4);
+
+    // Three-state RQSTED ON, which is the whole reason it is not a checkbox:
+    // in this capture one element reports the bit set and three print no such
+    // field at all. Rendering absence as "no" would invent a reading (§13).
+    await expect(cooling.getByRole("cell", { name: "yes", exact: true })).toHaveCount(1);
+    await expect(cooling.getByText("not reported")).toHaveCount(3);
+
+    // All four agree here, so the divergence line must stay silent - otherwise
+    // it would be decoration rather than news.
+    await expect(cooling).not.toContainText("different speed steps");
+
+    // Nothing on this panel may look actionable: there is no fan control in the
+    // application and none is planned (§15).
+    await expect(cooling).toContainText("never writes fan speed");
+    await expect(cooling.locator("button, select, input")).toHaveCount(0);
   });
 
   test("drive map still works when chassis telemetry is unavailable", async ({ page }) => {

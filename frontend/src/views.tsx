@@ -3,7 +3,9 @@ import { api, ApiError } from "./api";
 import type {
   AuditEntry,
   Bay,
+  BaySources,
   Chassis,
+  ChassisElement,
   Enclosure,
   Health,
   IdentDuration,
@@ -41,6 +43,204 @@ export function formatBytes(bytes: number | null): string {
 function stamp(iso: string | null | undefined): string {
   if (!iso) return "never";
   return new Date(iso).toLocaleTimeString();
+}
+
+// ------------------------------------------------------------- freshness (§29)
+
+/**
+ * How old is what I am looking at?
+ *
+ * A Bay row is composed from sources on four different clocks: the enclosure's
+ * own slot map, TrueNAS pools and vdevs, SMART temperatures, and disk identity
+ * read live on every request. One header stamp fed only by the fastest of them
+ * used to label all four, so a two-minute-old temperature and a twenty-second-
+ * old pool state both sat under "updated <five seconds ago>". That is not a
+ * cosmetic inaccuracy - it is why a support timeline could not be
+ * reconstructed, because every reading appeared to have been taken at the
+ * moment the page claimed.
+ *
+ * The header therefore states the OLDEST contributing source. "as of T" is then
+ * a true statement about every fact on the screen, which is the only thing a
+ * single number can honestly be; each panel that actually renders one source
+ * carries that source's own stamp (SectionStamp, below), because "how old is
+ * this pool state?" is asked while reading the pool state, not while reading
+ * the header.
+ *
+ * Cadences are deliberately NOT printed anywhere here. They are operator-tunable
+ * (KTN_POLL_*_SECONDS) and the response carries no copy of them, so a hard-coded
+ * "every 20s" would be a fresh instance of exactly the bug being fixed. Only the
+ * timestamps the server actually sent are shown.
+ */
+
+/** One line of the freshness breakdown. `covers` names what it is responsible for. */
+type FreshnessRow = { label: string; at: string | null; error: string | null; covers: string };
+
+function freshnessRows(sources: BaySources): FreshnessRow[] {
+  return [
+    {
+      label: "Enclosure bay map",
+      at: sources.slots,
+      error: sources.slots_error,
+      covers: "bay contents, status, IDENT and fault",
+    },
+    {
+      label: "TrueNAS pools and vdevs",
+      at: sources.truenas,
+      error: sources.truenas_error,
+      covers: "pool, vdev, ZFS state and error counters",
+    },
+    {
+      // /bays publishes no error for this source, only its last success, so a
+      // failing SMART poll shows up as a stamp that stops advancing rather than
+      // as a message. Ageing in place is still an honest signal; inventing a
+      // banner from a field the server did not send would not be.
+      label: "SMART temperatures",
+      at: sources.smart,
+      error: null,
+      covers: "disk temperature and the over-temperature alert",
+    },
+  ];
+}
+
+/**
+ * Age as a human duration. Clamped at zero: a browser clock running ahead of
+ * the appliance's must not print a reading from the future.
+ *
+ * Seconds are kept all the way to two minutes rather than the usual one,
+ * because the slowest source on this page polls on roughly that period - so its
+ * whole normal range is reported exactly, and "115s ago" never rounds down into
+ * a reassuring "1m ago". Above that the minute figure floors, which understates
+ * by under a minute; every caller prints the absolute timestamp beside this, and
+ * that value cannot round at all.
+ */
+function ageLabel(iso: string, now: number): string {
+  const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  if (seconds < 120) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ago`;
+}
+
+/**
+ * The header stamp: the oldest source, with the full breakdown one click away.
+ *
+ * A source that has neither a timestamp nor an error is NOT treated as
+ * infinitely old. With KTN_TRUENAS_URL unset that integration is simply off,
+ * its cache is never polled, and every ZFS and SMART field already renders as
+ * "-". Folding that into the summary would age the whole header to "never" and
+ * manufacture a fault on a perfectly healthy deployment (§13: absence of data
+ * must not be treated as data). Such a source is listed as "not reporting" and
+ * excluded from the oldest-of.
+ *
+ * A source that IS failing needs no special arithmetic: its timestamp freezes
+ * while the rest keep advancing, so it becomes the oldest on its own and drags
+ * the header back with it. The badge only says why.
+ */
+export function FreshnessSummary({ sources }: { sources: BaySources | null }) {
+  // No interval of its own: App re-renders on every bay poll, which is the
+  // fastest clock on the page, so the ages here can never be staler than the
+  // data they describe. When polling stops the ages freeze - which is why every
+  // row also prints the absolute time, a value that cannot go stale.
+  const now = Date.now();
+  const rows = sources ? freshnessRows(sources) : [];
+  const oldest = rows
+    .map((r) => r.at)
+    .filter((at): at is string => Boolean(at))
+    .reduce<string | null>(
+      (worst, at) =>
+        worst === null || new Date(at).getTime() < new Date(worst).getTime() ? at : worst,
+      null,
+    );
+  const degraded = Boolean(sources?.slots_error || sources?.truenas_error);
+
+  return (
+    <details data-testid="freshness" style={{ position: "relative" }}>
+      <summary
+        className="stamp"
+        style={{ cursor: "pointer", color: degraded ? "var(--warn)" : undefined }}
+        title={
+          "The oldest of the stamped sources below - not a claim about every " +
+          "reading on this page; see the SAS address note in the breakdown. " +
+          "Open for the age of each one."
+        }
+      >
+        as of {oldest ? stamp(oldest) : "—"}
+        {/* The badge carries glyph, word and colour together, so the degraded
+            state survives a monochrome or colour-blind reading (§24). */}
+        {degraded && <span className="badge warning" style={{ marginLeft: 6 }}>▲ degraded</span>}
+      </summary>
+
+      <div
+        role="group"
+        aria-label="Data freshness by source"
+        style={{
+          position: "absolute",
+          right: 0,
+          top: "calc(100% + 8px)",
+          zIndex: 30,
+          width: "max-content",
+          maxWidth: "min(360px, calc(100vw - 32px))",
+          background: "var(--panel)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          padding: "12px 14px",
+          boxShadow: "0 8px 24px rgb(0 0 0 / 22%)",
+          textAlign: "left",
+        }}
+      >
+        <div className="sub" style={{ marginBottom: 10 }}>
+          The bay map is composed from sources read on different clocks. The
+          header shows the oldest of the sources listed below - true of the
+          map tab, but not a guarantee about every reading on this page (the
+          SAS address, below, rides a separate clock and has no row here).
+        </div>
+        {rows.map((row) => (
+          <div key={row.label} style={{ marginBottom: 10 }}>
+            <div style={{ fontWeight: 600 }}>{row.label}</div>
+            <div className="stamp mono">
+              {row.error
+                ? `frozen at ${stamp(row.at)} — not refreshing`
+                : row.at
+                  ? `${stamp(row.at)} · ${ageLabel(row.at, now)}`
+                  : "not reporting"}
+            </div>
+            <div className="stamp">{row.covers}</div>
+            {row.error && <div className="stamp" style={{ color: "var(--warn)" }}>{row.error}</div>}
+          </div>
+        ))}
+        <div className="stamp" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+          Disk identity — serial, model, WWN, capacity — is revalidated
+          against the drive's WWN on every request, so a stale cache entry
+          cannot outlive a swap. The SAS address is the exception: it comes
+          from the chassis poll, whose own stamp is on the Chassis tab.
+        </div>
+      </div>
+    </details>
+  );
+}
+
+/**
+ * The stamp for one block of the bay detail, dating that block to the clock its
+ * data actually came from. Placed under the heading it belongs to: the question
+ * "how old is this?" is asked while reading the value, and by then the header
+ * is off-screen anyway.
+ */
+function SectionStamp({ at, error }: { at: string | null; error: string | null }) {
+  if (error) {
+    return (
+      <div className="stamp" style={{ marginBottom: 8, color: "var(--warn)" }}>
+        <span aria-hidden="true">▲ </span>
+        not refreshing — last good {stamp(at)}
+      </div>
+    );
+  }
+  // "not reporting" rather than "never": with the source switched off there is
+  // nothing to be stale, and the fields below already read "-".
+  return (
+    <div className="stamp" style={{ marginBottom: 8 }}>
+      {at ? `as of ${stamp(at)}` : "not reporting"}
+    </div>
+  );
 }
 
 export function HealthBadge({ health }: { health: Health }) {
@@ -185,11 +385,18 @@ export function EnclosureMap({
 
 export function BayDetail({
   bay,
+  sources,
   onIdentify,
   busy,
   identDisabledReason,
 }: {
   bay: Bay;
+  /**
+   * Freshness of each source feeding this bay. Passed in rather than derived,
+   * because the four blocks below are read on four clocks and each one has to
+   * be able to say which of them it is on.
+   */
+  sources: BaySources | null;
   onIdentify: (slot: number, on: boolean, duration: IdentDuration) => void;
   busy: boolean;
   /** Set when Identify is unavailable; explains why, instead of a dead button. */
@@ -215,8 +422,9 @@ export function BayDetail({
       )}
 
       <div className="detail-grid">
-        <section>
+        <section data-testid="section-physical">
           <h3>Physical</h3>
+          <SectionStamp at={sources?.slots ?? null} error={sources?.slots_error ?? null} />
           <dl className="kv">
             <dt>Bay</dt><dd>{bay.display_bay}</dd>
             <dt>SES slot</dt><dd>{bay.ses_slot}</dd>
@@ -236,8 +444,17 @@ export function BayDetail({
           </dl>
         </section>
 
-        <section>
+        <section data-testid="section-disk">
           <h3>Disk</h3>
+          {/* Not a SectionStamp: these fields are on no cache at all. sysfs is
+              re-read on every request and the WWN re-validated, so the identity
+              is live. What is up to one slot-poll old is which /dev node the
+              bay holds - so that half gets the slot stamp, and the SAS address,
+              which arrives on the chassis poll instead, says so itself. */}
+          <div className="stamp" style={{ marginBottom: 8 }}>
+            read live · bay-to-device mapping{" "}
+            {sources?.slots ? `as of ${stamp(sources.slots)}` : "not reporting"}
+          </div>
           <dl className="kv">
             <dt>Device</dt><dd>{bay.device ?? "—"}</dd>
             <dt>Serial</dt><dd>{bay.disk.serial ?? "—"}</dd>
@@ -245,13 +462,20 @@ export function BayDetail({
             <dt>Firmware</dt><dd>{bay.disk.firmware ?? "—"}</dd>
             <dt>Capacity</dt><dd>{formatBytes(bay.disk.size_bytes)}</dd>
             <dt>WWN</dt><dd>{bay.disk.wwn ?? "—"}</dd>
-            <dt>SAS addr</dt><dd>{bay.disk.sas_address ?? "—"}</dd>
+            <dt title="Read on the chassis poll, not with the rest of this block">
+              SAS addr
+            </dt>
+            <dd>
+              {bay.disk.sas_address ?? "—"}
+              <span className="stamp"> · from the chassis poll</span>
+            </dd>
             <dt>Transport</dt><dd>{bay.disk.transport ?? "—"}</dd>
           </dl>
         </section>
 
-        <section>
+        <section data-testid="section-zfs">
           <h3>TrueNAS / ZFS</h3>
+          <SectionStamp at={sources?.truenas ?? null} error={sources?.truenas_error ?? null} />
           <dl className="kv">
             <dt>Pool</dt><dd>{bay.zfs.pool ?? "—"}</dd>
             <dt>vdev</dt><dd>{bay.zfs.vdev ?? "—"}</dd>
@@ -264,8 +488,13 @@ export function BayDetail({
           </dl>
         </section>
 
-        <section>
+        <section data-testid="section-smart">
           <h3>SMART</h3>
+          {/* The slowest source on the page by a wide margin. Under the old
+              single header stamp a reading this old was labelled with the slot
+              poll's time, which is what made a temperature timeline
+              unreconstructable. */}
+          <SectionStamp at={sources?.smart ?? null} error={null} />
           <dl className="kv">
             <dt>Available</dt><dd>{bay.smart.available ? "yes" : "no"}</dd>
             <dt>Temp</dt>
@@ -346,6 +575,228 @@ export function BayDetail({
 
 // ------------------------------------------------------------------ chassis
 
+/**
+ * SES-3 numbers the actual-speed steps 0..7, where 0 is "the fan has stopped"
+ * and 7 is the highest step. The meter therefore has seven segments and fills
+ * `code` of them: a stopped fan shows an empty meter, a fan at 7 a full one.
+ */
+const SPEED_STEPS = 7;
+
+/**
+ * The speed step the enclosure firmware has chosen, as a meter plus the number
+ * plus the shelf's own wording.
+ *
+ * rpm and step are independent facts and neither derives from the other - rpm
+ * is a free-running measurement, the step is the discrete setting firmware is
+ * holding - which is why both columns exist.
+ *
+ * `code === 0` and `code === null` are opposite statements: a stopped fan is a
+ * cooling failure, an unmapped one is merely unreadable wording. Every test
+ * here is against null explicitly for that reason; `!code` or `code ?? 0` would
+ * silently report an alarm the shelf never raised.
+ */
+function SpeedStep({ code, phrase }: { code: number | null; phrase: string | null }) {
+  // Early return rather than a boolean flag, so the meter below is written
+  // against a `code` TypeScript has genuinely narrowed to a number. The phrase
+  // is still shown when the code is absent: unmapped firmware wording is worth
+  // reading even when nothing can be compared against it.
+  if (code === null || code === undefined) {
+    return (
+      <>
+        <span className="mono">—</span>
+        {phrase && <div className="stamp">{phrase}</div>}
+      </>
+    );
+  }
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {/* Decorative: the number and the shelf's own wording beside it carry
+            the meaning, so nothing is conveyed by the bar alone (§24). */}
+        <span aria-hidden="true" style={{ display: "inline-flex", gap: 2 }}>
+          {Array.from({ length: SPEED_STEPS }, (_, i) => (
+            <span
+              key={i}
+              style={{
+                width: 5,
+                height: 12,
+                borderRadius: 1,
+                background: i < code ? "var(--accent)" : "var(--border)",
+              }}
+            />
+          ))}
+        </span>
+        <span className="mono" style={code === 0 ? { color: "var(--warn)" } : undefined}>
+          {code} of {SPEED_STEPS}
+        </span>
+      </div>
+      {phrase && <div className="stamp">{phrase}</div>}
+    </>
+  );
+}
+
+/** The generic element table: one row per element, one reading column. */
+function ElementTable({
+  rows,
+  subName,
+}: {
+  rows: ChassisElement[];
+  subName: (id: number) => string;
+}) {
+  return (
+    <div className="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Element</th>
+            <th>Subenclosure</th>
+            <th>Status</th>
+            <th>Reading</th>
+            <th>Flags</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((e) => (
+            <tr key={`${e.type_index}-${e.element_index}`}>
+              <td>
+                {e.label}
+                <span className="muted mono"> [{e.type_index},{e.element_index}]</span>
+              </td>
+              <td>{subName(e.subenclosure_id)}</td>
+              <td>
+                <HealthBadge health={sesHealth(e.status)} />
+                <span className="muted"> {e.status}</span>
+              </td>
+              <td className="mono">
+                {e.temperature_c !== null && `${e.temperature_c} °C`}
+                {e.speed_rpm !== null && `${e.speed_rpm} rpm`}
+              </td>
+              <td className="mono muted">
+                {Object.entries(e.fields)
+                  .filter(([, v]) => v !== "0")
+                  .slice(0, 4)
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join(", ")}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Cooling elements, which carry three facts the generic table cannot show.
+ *
+ * This shelf's firmware modulates its fan banks on its own and never tells the
+ * host it has done so. rpm was the only one of the three the app rendered, and
+ * it is the least interpretable: it moves continuously, so nothing about a
+ * reading of 4600 says whether the enclosure is holding a middle step or on its
+ * way somewhere. The step code does say that, and it is what makes a bank at 4
+ * next to a bank at 7 legible as the firmware doing something rather than as
+ * noise - which is the whole reason for showing any of this.
+ *
+ * Nothing here is settable. There is no fan control in this application and
+ * none is planned: chassis management is read-only (§15), so the panel says so
+ * rather than leaving an operator hunting for the control these numbers imply.
+ */
+function CoolingTable({
+  rows,
+  subName,
+}: {
+  rows: ChassisElement[];
+  subName: (id: number) => string;
+}) {
+  // Only steps actually reported. Unmapped wording contributes nothing, rather
+  // than collapsing to 0 and inventing a disagreement between the banks. Both
+  // absent forms are excluded: an older backend omits the key entirely, and an
+  // undefined that slipped through would sort as NaN.
+  const steps = [
+    ...new Set(
+      rows
+        .map((e) => e.speed_code)
+        .filter((c): c is number => c !== null && c !== undefined),
+    ),
+  ].sort((a, b) => a - b);
+
+  return (
+    <>
+      <div className="sub">
+        Read-only. This application never writes fan speed and offers no control
+        to do so — the enclosure firmware picks the step and these are the values
+        it reports back. &ldquo;Requested on&rdquo; is the SES RQSTED ON bit
+        exactly as printed: a fan can report it clear while running at full
+        speed, and most elements do not print it at all.
+      </div>
+      {steps.length > 1 && (
+        // Only rendered when it is news. All banks agreeing is the normal case
+        // and needs no line of its own.
+        <div className="notice info">
+          The banks are at different speed steps (
+          {steps.map((s) => `${s} of ${SPEED_STEPS}`).join(", ")}). The firmware
+          modulates them independently.
+        </div>
+      )}
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Fan</th>
+              <th>Subenclosure</th>
+              <th>Status</th>
+              <th>Measured</th>
+              <th>Step</th>
+              <th>Requested on</th>
+              <th>Flags</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((e) => (
+              <tr key={`${e.type_index}-${e.element_index}`}>
+                <td>
+                  {e.label}
+                  <span className="muted mono"> [{e.type_index},{e.element_index}]</span>
+                </td>
+                <td>{subName(e.subenclosure_id)}</td>
+                <td>
+                  <HealthBadge health={sesHealth(e.status)} />
+                  <span className="muted"> {e.status}</span>
+                </td>
+                <td className="mono">
+                  {e.speed_rpm !== null ? `${e.speed_rpm} rpm` : "—"}
+                </td>
+                <td>
+                  <SpeedStep code={e.speed_code} phrase={e.speed_phrase} />
+                </td>
+                <td>
+                  {e.requested_on === null || e.requested_on === undefined ? (
+                    <span className="muted">not reported</span>
+                  ) : e.requested_on ? (
+                    "yes"
+                  ) : (
+                    "no"
+                  )}
+                </td>
+                <td className="mono muted">
+                  {Object.entries(e.fields)
+                    // Both of these now have a column of their own; repeating
+                    // them here in the raw wording would show one fact twice in
+                    // two formats and invite the reader to reconcile them.
+                    .filter(([k, v]) => v !== "0" && k !== "Actual speed" && k !== "Requested on")
+                    .slice(0, 4)
+                    .map(([k, v]) => `${k}=${v}`)
+                    .join(", ")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 export function ChassisView({ chassis }: { chassis: Chassis | null }) {
   if (!chassis) return <div className="panel">Loading chassis telemetry&hellip;</div>;
   if (!chassis.available) {
@@ -366,12 +817,16 @@ export function ChassisView({ chassis }: { chassis: Chassis | null }) {
   const subName = (id: number) =>
     chassis.subenclosures?.find((s) => s.subenclosure_id === id)?.product ?? `sub ${id}`;
 
-  const sections: { title: string; types: string[] }[] = [
+  const sections: { title: string; types: string[]; kind?: "cooling" }[] = [
     { title: "Enclosure / LCC", types: ["Enclosure"] },
     { title: "Controllers", types: ["Enclosure services controller electronics"] },
     { title: "SAS expanders", types: ["SAS expander"] },
     { title: "Power supplies", types: ["Power supply"] },
-    { title: "Cooling", types: ["Cooling"] },
+    // Cooling is the one type whose status descriptor carries more than a single
+    // reading, so it gets a renderer of its own rather than three extra columns
+    // that would be empty on every other section. Tagged rather than matched on
+    // the title, so retitling the panel cannot silently drop the fan fields.
+    { title: "Cooling", types: ["Cooling"], kind: "cooling" },
     { title: "Temperatures", types: ["Temperature sensor"] },
   ];
 
@@ -411,51 +866,23 @@ export function ChassisView({ chassis }: { chassis: Chassis | null }) {
         </div>
       </div>
 
-      {sections.map(({ title, types }) => {
+      {sections.map(({ title, types, kind }) => {
         const rows = types.flatMap(group);
         if (rows.length === 0) return null;
+        // Only the cooling panel is addressable: the generic panels are several
+        // and would share one id, which no test could then scope to.
         return (
-          <div className="panel" key={title}>
+          <div
+            className="panel"
+            key={title}
+            data-testid={kind === "cooling" ? "chassis-cooling" : undefined}
+          >
             <h2>{title}</h2>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Element</th>
-                    <th>Subenclosure</th>
-                    <th>Status</th>
-                    <th>Reading</th>
-                    <th>Flags</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((e) => (
-                    <tr key={`${e.type_index}-${e.element_index}`}>
-                      <td>
-                        {e.label}
-                        <span className="muted mono"> [{e.type_index},{e.element_index}]</span>
-                      </td>
-                      <td>{subName(e.subenclosure_id)}</td>
-                      <td>
-                        <HealthBadge health={sesHealth(e.status)} />
-                        <span className="muted"> {e.status}</span>
-                      </td>
-                      <td className="mono">
-                        {e.temperature_c !== null && `${e.temperature_c} °C`}
-                        {e.speed_rpm !== null && `${e.speed_rpm} rpm`}
-                      </td>
-                      <td className="mono muted">
-                        {Object.entries(e.fields)
-                          .filter(([, v]) => v !== "0")
-                          .slice(0, 4)
-                          .map(([k, v]) => `${k}=${v}`)
-                          .join(", ")}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {kind === "cooling" ? (
+              <CoolingTable rows={rows} subName={subName} />
+            ) : (
+              <ElementTable rows={rows} subName={subName} />
+            )}
           </div>
         );
       })}

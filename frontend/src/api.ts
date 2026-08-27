@@ -75,11 +75,21 @@ export const api = {
   // addressing a different route than intended.
   bays: (id: string) => request<BaysResponse>(`/api/enclosures/${enc(id)}/bays`),
   chassis: (id: string) => request<Chassis>(`/api/enclosures/${enc(id)}/chassis`),
+  // `refreshed` reports whether the slot cache was successfully re-read after
+  // the write. False does NOT mean the write failed - the LED was verified by
+  // hardware read-back, persisted and audited before this field was decided -
+  // it means a /bays read taken right now is still served from the pre-write
+  // snapshot. Typed here so the contract is visible; the app does not branch on
+  // it, because it re-reads /bays and IdentManager.describe() already orders
+  // that read against the verified write.
   identify: (id: string, slot: number, on: boolean, duration_seconds: IdentDuration) =>
-    post<{ ok: boolean; locate: boolean; expires_at: string | null; origin: string | null }>(
-      `/api/enclosures/${enc(id)}/slots/${slot}/identify`,
-      { on, duration_seconds },
-    ),
+    post<{
+      ok: boolean;
+      locate: boolean;
+      expires_at: string | null;
+      origin: string | null;
+      refreshed: boolean;
+    }>(`/api/enclosures/${enc(id)}/slots/${slot}/identify`, { on, duration_seconds }),
 
   diagnostics: () => request<Record<string, unknown>>("/api/diagnostics"),
   audit: (limit = 100) => request<AuditEntry[]>(`/api/audit?limit=${limit}`),

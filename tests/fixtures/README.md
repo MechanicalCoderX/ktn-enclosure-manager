@@ -45,3 +45,9 @@ textless type descriptors (`sg_cf_textless.txt`), bays reported as plain
 device slot numbers are permuted/1-based relative to element indexes
 (`sg_aes_permuted.txt`) — the case where Identify must translate, and where
 an unmapped slot must be refused.
+
+`sg_cf_cooling_codes.txt` / `sg_join_cooling_codes.txt` walk a Cooling type
+descriptor through all eight SES-3 speed codes plus two failure-to-map forms
+(no phrase printed, and a phrase outside the table). The KTN-STL3 has only
+ever been observed at `Fan at highest speed` and `Fan at third lowest speed`,
+so the other six codes exist nowhere in the capture.
