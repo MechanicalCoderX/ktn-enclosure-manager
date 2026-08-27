@@ -28,6 +28,7 @@ from ktnmgr.enclosure.access import enclosure_access
 from ktnmgr.enclosure.helper_client import HelperUnavailableError, send
 from ktnmgr.enclosure.ses import SesError, SesRunner
 from ktnmgr.enclosure.ses_parser import (
+    BAY_ELEMENT_TYPES,
     array_slot_type_index,
     parse_additional_element_status,
     parse_configuration,
@@ -128,7 +129,7 @@ class SesLocateWriter:
     def __init__(self, backend: SysfsEnclosureBackend, ses: SesRunner) -> None:
         self.backend = backend
         self.ses = ses
-        self._type_index: dict[str, int] = {}
+        self._type_index: dict[str, tuple[int, int]] = {}
         #: logical id -> {device slot number -> per-type element index}, with
         #: None marking a slot that cannot be addressed unambiguously (claimed
         #: twice, claimed across bay-type blocks, or its block failed the
@@ -142,16 +143,20 @@ class SesLocateWriter:
         #: cache's key, so even that cannot serve a stale map.
         self._slot_to_element: dict[str, dict[int, int | None]] = {}
 
-    def _array_type_index(self, ref: object) -> int:
-        """Which SES type descriptor holds the drive bays.
+    def _array_type_index(self, ref: object) -> tuple[int, int]:
+        """Which SES type descriptor holds the drive bays, and how many.
 
-        It is 0 on the KTN-STL3, but that is not guaranteed elsewhere, so it is
-        read from the configuration page and cached per enclosure. On modern
-        shelves this is the "Array device slot" (0x17) descriptor; on older
-        shelves array_slot_type_index() falls back to "Device slot" (0x01),
-        whose bays the kernel ses driver exposes identically - everything
-        downstream (IDENT addressing, the AES slot mapping) works on the type
-        *index*, never the type name, so both kinds are handled the same way.
+        Returns (type index, declared element count), both read from the
+        configuration page and cached per enclosure. The index is 0 on the
+        KTN-STL3, but that is not guaranteed elsewhere. On modern shelves
+        this is the "Array device slot" (0x17) descriptor; on older shelves
+        array_slot_type_index() falls back to "Device slot" (0x01), whose
+        bays the kernel ses driver exposes identically - everything
+        downstream (IDENT addressing, the AES slot mapping) works on the
+        type *index*, never the type name, so both kinds are handled the
+        same way. The count is the AES integrity anchor: a bay block whose
+        descriptor count disagrees with the configuration page has been
+        shifted or truncated, and its positions cannot address anything.
         """
         logical_id = ref.logical_id  # type: ignore[attr-defined]
         if logical_id not in self._type_index:
@@ -162,13 +167,16 @@ class SesLocateWriter:
                 page = self.ses.read_page(device, "configuration")
             except SesError as exc:
                 raise LocateError(f"could not read SES configuration: {exc}") from exc
-            index = array_slot_type_index(parse_configuration(page.stdout)[1])
+            descriptors = parse_configuration(page.stdout)[1]
+            index = array_slot_type_index(descriptors)
             if index is None:
                 raise LocateError("enclosure reports no array device slot elements")
-            self._type_index[logical_id] = index
+            self._type_index[logical_id] = (index, descriptors[index].count)
         return self._type_index[logical_id]
 
-    def _slot_element_map(self, ref: object, type_index: int) -> dict[int, int | None]:
+    def _slot_element_map(
+        self, ref: object, type_index: int, expected_count: int
+    ) -> dict[int, int | None]:
         """Device-slot-number -> element-index map for the bay type in use.
 
         Read from the additional element status page, because that page is the
@@ -189,58 +197,91 @@ class SesLocateWriter:
                     f"could not read SES additional element status: {exc}"
                 ) from exc
             mapping = self._build_slot_map(
-                parse_additional_element_status(page.stdout), type_index
+                parse_additional_element_status(page.stdout), type_index, expected_count
             )
-            if not mapping:
+            if not any(element is not None for element in mapping.values()):
                 # Not cached, mirroring _array_type_index's raise-without-
                 # cache: an anomalous one-off read (truncated output, a
-                # firmware hiccup) must not pin every future IDENT to
-                # refusal until restart. A genuinely mapless enclosure just
-                # pays a page re-read per attempt.
+                # firmware hiccup, a failed integrity check) must not pin
+                # every future IDENT to refusal until restart. A genuinely
+                # mapless enclosure just pays a page re-read per attempt.
                 raise LocateError(
                     "refusing IDENT: the enclosure's additional element status "
-                    "page maps no device slot numbers for the bay type in use"
+                    "page maps no addressable device slot numbers for the bay "
+                    "type in use (absent, ambiguous, or failed integrity checks)"
                 )
             self._slot_to_element[logical_id] = mapping
         return self._slot_to_element[logical_id]
 
     @staticmethod
-    def _build_slot_map(blocks: list, type_index: int) -> dict[int, int | None]:
-        """Fold AES bay blocks into {device slot number -> per-type index}.
+    def _build_slot_map(
+        blocks: list, type_index: int, expected_count: int
+    ) -> dict[int, int | None]:
+        """Fold AES blocks into {device slot number -> per-type index}.
 
         The element index sg_ses needs is the entry's POSITION within its
-        block (see AdditionalElementBlock: one descriptor per individual
-        element, in element order), never the printed global index. A slot
-        number is addressable only when exactly one element anywhere on the
-        page claims it AND that element sits in the type descriptor IDENT
-        addresses; every other claim pattern maps to None (refused):
+        block, never the printed global index - but position is only
+        trustworthy when the page passes every checkable invariant, because
+        sg_ses's own print loop consumes descriptors positionally and can
+        misattribute them when firmware omits an optional block or a
+        descriptor. Refusal, never a guess, on any of:
 
-        - claimed twice within the block, or by a second block of the same
-          type index (a second subenclosure restarts positions, so neither
-          claim is trustworthy);
-        - claimed by the chosen block AND another bay-type block - the
-          kernel builds sysfs slots from every bay type, so the sysfs slot
-          number cannot say which block's bay it means;
-        - claimed only by a foreign block: absent from the map entirely,
-          refused as unmapped rather than mis-addressed.
-
-        A block whose printed element indexes repeat or regress (sg_ses
-        itself carries a workaround for firmware emitting bogus repeated
-        ei=0) fails the cross-check and poisons every slot it claims: if the
-        firmware cannot number its own elements consistently, its descriptor
-        ORDER cannot be trusted to be status-page order either.
+        - **misattribution proof**: a ``device slot number`` inside a
+          non-bay block. Expander/ESC/port descriptor formats never carry
+          that field, so its presence means a bay descriptor was printed
+          under the wrong header and every position on the page is suspect
+          - the whole page is refused (empty map);
+        - **count mismatch**: the chosen block's descriptor count differs
+          from the configuration page's declared element count for that
+          type descriptor (shifted, sparse, or truncated block);
+        - **index/position offset drift**: within the chosen block, every
+          printed index must sit at one constant offset from its list
+          position (true under every EIIOE convention within one block,
+          and undisturbed by interleaved eip=0 descriptors); an omitted or
+          repeated descriptor shifts the offset mid-block. Vacuous for
+          all-eip=0 blocks, which is what the count check is for;
+        - **malformed block**: an unrecognised element header occupied a
+          position (see AdditionalElementBlock.malformed);
+        - a slot claimed twice, claimed by a second same-type-index block
+          (a second subenclosure restarts positions), or claimed by the
+          chosen block AND a foreign bay block - the kernel builds sysfs
+          slots from every bay type, so the number cannot say which bay it
+          means. A slot claimed only by a foreign bay block is left out
+          entirely: refused as unmapped, it is not this descriptor's bay.
         """
+        for block in blocks:
+            if block.element_type in BAY_ELEMENT_TYPES:
+                continue
+            if any("device_slot_number" in entry for entry in block.entries):
+                return {}
+
         first_chosen_seen = False
         claims: dict[int, list[tuple[bool, bool, int]]] = {}
         for block in blocks:
-            chosen = block.type_index == type_index and not first_chosen_seen
-            if block.type_index == type_index:
+            if block.element_type not in BAY_ELEMENT_TYPES:
+                continue
+            same_ti = block.type_index == type_index
+            chosen = same_ti and not first_chosen_seen
+            if same_ti:
                 first_chosen_seen = True
 
-            printed = [
-                e["element_index"] for e in block.entries if "element_index" in e
-            ]
-            ordered = all(b > a for a, b in zip(printed, printed[1:], strict=False))
+            # Printed indexes, where present, must sit at a single constant
+            # offset from their position: one omitted or repeated descriptor
+            # shifts everything after it, and the offset changing mid-block
+            # is exactly that signature. Computed as a set difference so
+            # interleaved eip=0 descriptors (no index at all) do not break
+            # the invariant for their indexed neighbours.
+            offsets = {
+                e["element_index"] - position
+                for position, e in enumerate(block.entries)
+                if isinstance(e.get("element_index"), int)
+            }
+            trusted = (
+                chosen
+                and len(offsets) <= 1
+                and not block.malformed
+                and len(block.entries) == expected_count
+            )
 
             for position, entry in enumerate(block.entries):
                 slot_number = entry.get("device_slot_number")
@@ -249,24 +290,24 @@ class SesLocateWriter:
                 # refused rather than guessed at.
                 if not isinstance(slot_number, int):
                     continue
-                claims.setdefault(slot_number, []).append(
-                    (chosen, chosen and ordered, position)
-                )
+                claims.setdefault(slot_number, []).append((same_ti, trusted, position))
 
         mapping: dict[int, int | None] = {}
         for slot_number, claim_list in claims.items():
             if len(claim_list) == 1 and claim_list[0][1]:
                 mapping[slot_number] = claim_list[0][2]
-            elif any(chosen for chosen, _, _ in claim_list) or len(claim_list) > 1:
-                # Ambiguous (or the chosen block failed the ordering
-                # cross-check): recorded as None so the refusal names the
-                # duplicate rather than reporting the slot as unknown.
+            elif any(same_ti for same_ti, _, _ in claim_list) or len(claim_list) > 1:
+                # Ambiguous or integrity-failed: recorded as None so the
+                # refusal names the problem rather than reporting the slot
+                # as unknown.
                 mapping[slot_number] = None
             # A single claim from a foreign bay block: left out entirely,
             # refused as unmapped - it is not this type descriptor's bay.
         return mapping
 
-    def _element_index_for(self, ref: object, type_index: int, slot: int) -> int:
+    def _element_index_for(
+        self, ref: object, type_index: int, expected_count: int, slot: int
+    ) -> int:
         """Translate a sysfs slot number into the element index sg_ses needs.
 
         Refusal is deliberate policy: with no unambiguous mapping the only
@@ -275,7 +316,7 @@ class SesLocateWriter:
         bay - a wrong "pull this disk" indication. No LED at all is strictly
         safer than the wrong LED.
         """
-        mapping = self._slot_element_map(ref, type_index)
+        mapping = self._slot_element_map(ref, type_index, expected_count)
         element_index = mapping.get(slot)
         if element_index is not None:
             return element_index
@@ -300,8 +341,8 @@ class SesLocateWriter:
     def write(self, enclosure_id: str, slot: int, on: bool) -> bool:
         enclosure_id, slot = validate_request(enclosure_id, slot)
         ref = self.backend.resolve(enclosure_id)
-        type_index = self._array_type_index(ref)
-        element_index = self._element_index_for(ref, type_index, slot)
+        type_index, expected_count = self._array_type_index(ref)
+        element_index = self._element_index_for(ref, type_index, expected_count, slot)
 
         # Held across the command AND its settle poll, exactly as the sysfs
         # writer does. This is the default IDENT path, so without it the

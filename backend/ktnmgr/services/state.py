@@ -20,6 +20,7 @@ from ktnmgr.config import Settings
 from ktnmgr.enclosure.disks import DiskInfoReader
 from ktnmgr.enclosure.ses import SesError, SesRunner
 from ktnmgr.enclosure.ses_parser import (
+    BAY_ELEMENT_TYPES,
     array_slot_type_index,
     build_telemetry,
     parse_additional_element_status,
@@ -546,9 +547,22 @@ def _slot_sas_addresses(configuration_text: str, aes_text: str) -> dict[int, str
     type_index = array_slot_type_index(parse_configuration(configuration_text)[1])
     if type_index is None:
         return {}
+    blocks = parse_additional_element_status(aes_text)
+    # A device slot number under a non-bay block is proof sg_ses printed a
+    # bay descriptor under the wrong header (an omitted optional AES block
+    # shifts its positional print loop); every attribution on such a page is
+    # suspect, so no addresses are served from it - the same page-level
+    # refusal the IDENT path applies. Slot and address ride the same
+    # descriptor, so this is the only positional failure that can reach the
+    # display join.
+    for block in blocks:
+        if block.element_type in BAY_ELEMENT_TYPES:
+            continue
+        if any("device_slot_number" in entry for entry in block.entries):
+            return {}
     first_chosen_seen = False
     claimed: dict[int, tuple[bool, str | None] | None] = {}
-    for block in parse_additional_element_status(aes_text):
+    for block in blocks:
         chosen = block.type_index == type_index and not first_chosen_seen
         if block.type_index == type_index:
             first_chosen_seen = True

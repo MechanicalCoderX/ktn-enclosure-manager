@@ -129,7 +129,7 @@ def stl3(tmp_path: Path) -> tuple[SesLocateWriter, FakeSes]:
 @pytest.fixture
 def permuted(tmp_path: Path) -> tuple[SesLocateWriter, FakeSes]:
     pages = {
-        "configuration": (SYNTHETIC / "sg_cf_device_slot.txt").read_text(),
+        "configuration": (SYNTHETIC / "sg_cf_device_slot4.txt").read_text(),
         "additional_element_status": (SYNTHETIC / "sg_aes_permuted.txt").read_text(),
     }
     # Per the fixture's AES page: element 0 sits in bay 4, element 1 in bay 1,
@@ -207,11 +207,11 @@ def test_duplicate_slot_numbers_are_refused(tmp_path: Path) -> None:
     """Two elements claiming the same device slot number cannot be addressed
     unambiguously; the writer must refuse rather than pick one."""
     pages = {
-        "configuration": (SYNTHETIC / "sg_cf_device_slot.txt").read_text(),
+        "configuration": (SYNTHETIC / "sg_cf_device_slot2.txt").read_text(),
         "additional_element_status": DUPLICATE_SLOT_AES,
     }
     writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [2], {})
-    with pytest.raises(LocateError, match="cannot address device slot number 2"):
+    with pytest.raises(LocateError, match="maps no addressable device slot numbers"):
         writer.write(PERMUTED_ID, 2, True)
     assert ses.ident_calls == []
 
@@ -269,7 +269,7 @@ def test_eiioe1_shelf_ignores_the_shifted_printed_index(tmp_path: Path) -> None:
     """Under eiioe=1 the printed index additionally counts overall elements,
     so the first bay prints 1. Position stays the truth: bay 0 is element 0."""
     pages = {
-        "configuration": (SYNTHETIC / "sg_cf_device_slot.txt").read_text(),
+        "configuration": (SYNTHETIC / "sg_cf_device_slot4.txt").read_text(),
         "additional_element_status": (SYNTHETIC / "sg_aes_eiioe1.txt").read_text(),
     }
     writer, ses = _writer(tmp_path, EIIOE1_ID, pages, [0, 1, 2, 3], {n: n for n in range(4)})
@@ -281,7 +281,7 @@ def test_eip0_descriptor_is_addressable_by_position(tmp_path: Path) -> None:
     """An eip=0 descriptor ('Element N descriptor', no index field) still
     occupies a position; the bay it claims must be addressable."""
     pages = {
-        "configuration": (SYNTHETIC / "sg_cf_device_slot.txt").read_text(),
+        "configuration": (SYNTHETIC / "sg_cf_device_slot3.txt").read_text(),
         "additional_element_status": (SYNTHETIC / "sg_aes_eip0.txt").read_text(),
     }
     writer, ses = _writer(tmp_path, EIP0_ID, pages, [10, 11, 12], {0: 10, 1: 11, 2: 12})
@@ -297,11 +297,11 @@ def test_inconsistent_element_numbering_poisons_the_block(tmp_path: Path) -> Non
     broken = DUPLICATE_SLOT_AES.replace("device slot number: 2", "device slot number: 5", 1)
     broken = broken.replace("Element index: 1", "Element index: 0")
     pages = {
-        "configuration": (SYNTHETIC / "sg_cf_device_slot.txt").read_text(),
+        "configuration": (SYNTHETIC / "sg_cf_device_slot2.txt").read_text(),
         "additional_element_status": broken,
     }
     writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [2, 5], {})
-    with pytest.raises(LocateError, match="cannot address device slot number 5"):
+    with pytest.raises(LocateError, match="maps no addressable device slot numbers"):
         writer.write(PERMUTED_ID, 5, True)
     assert ses.ident_calls == []
 
@@ -333,9 +333,209 @@ def test_empty_slot_map_is_not_cached(tmp_path: Path) -> None:
         "additional_element_status": empty_aes,
     }
     writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [0], {})
-    with pytest.raises(LocateError, match="maps no device slot numbers"):
+    with pytest.raises(LocateError, match="maps no addressable device slot numbers"):
         writer.write(PERMUTED_ID, 0, True)
-    with pytest.raises(LocateError, match="maps no device slot numbers"):
+    with pytest.raises(LocateError, match="maps no addressable device slot numbers"):
         writer.write(PERMUTED_ID, 0, True)
     assert ses.page_reads.count("additional_element_status") == 2
     assert ses.ident_calls == []
+
+
+# --------------------------------------------- page-integrity refusals
+#
+# sg_ses's own print loop consumes AES descriptors positionally and detects an
+# omitted optional block only via a first-descriptor window check, so its
+# output can misattribute bay descriptors (proven against sg_ses 2.89 source;
+# the KTN-STL3 is immune - bays first, full coverage). Every case below must
+# REFUSE; none may reach the enclosure.
+
+#: Scenario A: firmware conformantly omits the AES block for a 1-element ESC
+#: electronics descriptor that precedes the bays; sg_ses prints bay 0's
+#: descriptor under the ESC header and the bay block shifts by one. The
+#: tell-tale is the device slot number under a non-bay header.
+SHIFTED_PAGE_AES = """\
+  ACME      SES Shelf         0001
+  Primary enclosure logical identifier (hex): 5000000000000002
+Additional element status diagnostic page:
+  generation code: 0x1
+  additional element status descriptor list
+    Element type: Enclosure services controller electronics, subenclosure id: 0 [ti=0]
+      Element index: 1  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 1
+        SAS address: 0x5000ffff00000001
+    Element type: Device slot, subenclosure id: 0 [ti=1]
+      Element index: 2  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 2
+        SAS address: 0x5000ffff00000002
+      Element index: 3  eiioe=0
+        Transport protocol: SAS
+        number of phys: 1, not all phys: 1, device slot number: 3
+        SAS address: 0x5000ffff00000003
+"""
+
+
+def _cf(count: int) -> str:
+    return (SYNTHETIC / f"sg_cf_device_slot{count}.txt").read_text()
+
+
+def test_slot_number_under_non_bay_block_refuses_the_whole_page(tmp_path: Path) -> None:
+    """Expander/ESC/port descriptor formats never carry a device slot number;
+    one appearing under such a header proves sg_ses misattributed a bay
+    descriptor, so every position on the page is suspect - including ones
+    that look internally consistent."""
+    pages = {"configuration": _cf(2), "additional_element_status": SHIFTED_PAGE_AES}
+    writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [2], {})
+    with pytest.raises(LocateError, match="maps no addressable device slot numbers"):
+        writer.write(PERMUTED_ID, 2, True)
+    assert ses.ident_calls == []
+
+
+def test_index_gap_poisons_the_block(tmp_path: Path) -> None:
+    """Printed indexes 0,1,3,4 - the signature of firmware emitting AES
+    descriptors only for populated bays - shift every position after the
+    gap. The constant-offset cross-check must refuse the block, not map
+    slots after the gap to position-1."""
+    gap = "\n".join(
+        [
+            "    Element type: Device slot, subenclosure id: 0 [ti=0]",
+        ]
+        + [
+            f"      Element index: {index}  eiioe=0\n"
+            "        Transport protocol: SAS\n"
+            f"        number of phys: 1, not all phys: 1, device slot number: {index}"
+            for index in (0, 1, 3, 4)
+        ]
+    )
+    pages = {"configuration": _cf(4), "additional_element_status": gap}
+    writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [3], {})
+    with pytest.raises(LocateError, match="maps no addressable device slot numbers"):
+        writer.write(PERMUTED_ID, 3, True)
+    assert ses.ident_calls == []
+
+
+def test_unrecognised_element_header_poisons_the_block(tmp_path: Path) -> None:
+    """An element header the parser cannot classify still occupied a
+    position; dropping it silently would shift every later position, so the
+    block must be refused instead."""
+    malformed = (
+        "    Element type: Device slot, subenclosure id: 0 [ti=0]\n"
+        "      Element index: 0  eiioe=0\n"
+        "        number of phys: 1, not all phys: 1, device slot number: 0\n"
+        "      Element weird form 1\n"
+        "        number of phys: 1, not all phys: 1, device slot number: 1\n"
+        "      Element index: 2  eiioe=0\n"
+        "        number of phys: 1, not all phys: 1, device slot number: 2\n"
+    )
+    pages = {"configuration": _cf(3), "additional_element_status": malformed}
+    writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [0], {})
+    with pytest.raises(LocateError, match="maps no addressable device slot numbers"):
+        writer.write(PERMUTED_ID, 0, True)
+    assert ses.ident_calls == []
+
+
+def test_count_mismatch_poisons_an_unindexed_block(tmp_path: Path) -> None:
+    """A sparse all-eip=0 block offers no printed indexes to cross-check, so
+    the configuration page's declared element count is the only integrity
+    anchor: fewer descriptors than declared means unknowable positions."""
+    sparse = (
+        "    Element type: Device slot, subenclosure id: 0 [ti=0]\n"
+        "      Element 0 descriptor\n"
+        "        number of phys: 1, not all phys: 1, device slot number: 0\n"
+        "      Element 1 descriptor\n"
+        "        number of phys: 1, not all phys: 1, device slot number: 2\n"
+    )
+    pages = {"configuration": _cf(3), "additional_element_status": sparse}
+    writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [0], {})
+    with pytest.raises(LocateError, match="maps no addressable device slot numbers"):
+        writer.write(PERMUTED_ID, 0, True)
+    assert ses.ident_calls == []
+
+
+def test_second_same_ti_block_claims_are_poisoned(tmp_path: Path) -> None:
+    """A second block sharing the chosen type index (a second subenclosure)
+    restarts positions, so its claims cannot be trusted - but they must
+    poison rather than vanish, and the first block keeps working."""
+    two_blocks = (
+        "    Element type: Device slot, subenclosure id: 0 [ti=0]\n"
+        "      Element index: 0  eiioe=0\n"
+        "        number of phys: 1, not all phys: 1, device slot number: 1\n"
+        "      Element index: 1  eiioe=0\n"
+        "        number of phys: 1, not all phys: 1, device slot number: 2\n"
+        "    Element type: Device slot, subenclosure id: 1 [ti=0]\n"
+        "      Element index: 0  eiioe=0\n"
+        "        number of phys: 1, not all phys: 1, device slot number: 9\n"
+    )
+    pages = {"configuration": _cf(2), "additional_element_status": two_blocks}
+    writer, ses = _writer(tmp_path, PERMUTED_ID, pages, [1, 2, 9], {0: 1, 1: 2})
+    assert writer.write(PERMUTED_ID, 1, True) is True
+    assert ses.ident_calls[-1] == ("/dev/sg16", 0, 0, True)
+    with pytest.raises(LocateError, match="cannot address device slot number 9"):
+        writer.write(PERMUTED_ID, 9, True)
+
+
+# ------------------------------------------------------- deployment contract
+
+
+def test_helper_writer_timeout_covers_the_cold_cache_pipeline() -> None:
+    """The default must cover the helper's worst-case write: two page reads
+    (20s each), the 30s flock wait, the IDENT command (20s) and the settle
+    poll - giving up earlier can strand a lit LED the client never hears
+    about. A regression to a small default ships the stranded-LED bug."""
+    from ktnmgr.enclosure.locate import HelperLocateWriter
+
+    assert HelperLocateWriter(Path("/nonexistent")).timeout >= 92.0
+
+
+def test_slot_maps_are_isolated_per_enclosure(tmp_path: Path) -> None:
+    """One writer serving two shelves must never answer one shelf's IDENT
+    with the other's map - the caches key on the enclosure logical id."""
+    shelf_a = SimpleNamespace(logical_id=PERMUTED_ID, sg_device="/dev/sg16")
+    shelf_b = SimpleNamespace(logical_id=BAYS_SECOND_ID, sg_device="/dev/sg17")
+
+    class TwoShelfBackend(FakeBackend):
+        def __init__(self, root: Path) -> None:
+            self.refs = {PERMUTED_ID: shelf_a, BAYS_SECOND_ID: shelf_b}
+            self.dirs = {}
+            for slot in (1, 2, 3, 4):
+                slot_dir = root / str(slot)
+                slot_dir.mkdir()
+                (slot_dir / "locate").write_text("0")
+                self.dirs[slot] = slot_dir
+
+        def resolve(self, enclosure_id: str) -> SimpleNamespace:
+            return self.refs[enclosure_id]
+
+    class TwoShelfSes(FakeSes):
+        def __init__(self, by_device: dict[str, dict[str, str]]) -> None:
+            super().__init__({}, {})
+            self.by_device = by_device
+
+        def read_page(self, device: str, page: str) -> SesResult:
+            self.page_reads.append(page)
+            return SesResult(page=page, stdout=self.by_device[device][page], returncode=0)
+
+    ses = TwoShelfSes(
+        {
+            "/dev/sg16": {
+                "configuration": (SYNTHETIC / "sg_cf_device_slot4.txt").read_text(),
+                "additional_element_status": (SYNTHETIC / "sg_aes_permuted.txt").read_text(),
+            },
+            "/dev/sg17": {
+                "configuration": (SYNTHETIC / "sg_cf_bays_second.txt").read_text(),
+                "additional_element_status": (SYNTHETIC / "sg_aes_bays_second.txt").read_text(),
+            },
+        }
+    )
+    writer = SesLocateWriter(TwoShelfBackend(tmp_path), ses)  # type: ignore[arg-type]
+
+    # Shelf A (permuted): bay 4 is element 0 of type 0. (No wiring in this
+    # fake, so the settle observation is False; the map isolation is what
+    # the ident_calls assert.)
+    writer.write(PERMUTED_ID, 4, True)
+    assert ses.ident_calls[-1] == ("/dev/sg16", 0, 0, True)
+    # Shelf B (bays second): bay 4 is element 3 of type 1 - answered from its
+    # OWN map, not shelf A's.
+    writer.write(BAYS_SECOND_ID, 4, True)
+    assert ses.ident_calls[-1] == ("/dev/sg17", 1, 3, True)

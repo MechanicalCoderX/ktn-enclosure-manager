@@ -17,8 +17,11 @@ affected).
 ### Fixed
 - **Identify addresses bays through a device-slot→element-index map** built
   from the enclosure's Additional Element Status page (already on the
-  helper's read-only allow-list), cached per enclosure. A slot the page does
-  not map unambiguously is refused with a clear error instead of guessed at.
+  helper's read-only allow-list), cached per enclosure. The map is positional
+  and guarded by page-integrity checks (misattribution tell-tales, element
+  counts against the configuration page, printed-index offset consistency);
+  a slot the page does not map unambiguously — or a page failing any check —
+  is refused with a clear error instead of guessed at.
 - The SES configuration-page parser no longer mis-attributes a descriptor's
   element count and label when a type descriptor carries no text line (a
   normal sg_ses variant).

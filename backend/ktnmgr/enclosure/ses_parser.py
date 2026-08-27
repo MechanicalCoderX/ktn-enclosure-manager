@@ -56,10 +56,13 @@ _AES_ELEMENT_RE = re.compile(r"^\s*Element index:\s*(\d+)(?:\s+eiioe=(\d+))?\s*$
 # anything, so it is not captured - the descriptor's position in the block
 # is what identifies the element (see parse_additional_element_status).
 _AES_ELEMENT_NOIDX_RE = re.compile(r"^\s*Element\s+\d+\s+descriptor\s*$")
+# A type header line that failed the full header regex (typically missing
+# its [ti=N]): the block it opens cannot be identified, so everything under
+# it must be dropped rather than attributed to the previous block.
+_AES_TYPEHDR_GUARD_RE = re.compile(r"^\s*Element type:")
 # Any other line that opens with "Element" at descriptor indentation is an
-# element header this parser does not understand; it must reset the current
-# entry rather than let the unknown element's fields bleed into the previous
-# entry's dict.
+# element header this parser does not understand; it occupied a position, so
+# the enclosing block's positions become untrustworthy (malformed).
 _AES_ELEMENT_GUARD_RE = re.compile(r"^\s*Element\b")
 _AES_SLOT_RE = re.compile(r"device slot number:\s*(\d+)")
 # Anchoring at line start (after indentation) is what excludes the expander's
@@ -317,52 +320,68 @@ def array_slot_type_index(descriptors: list[TypeDescriptor]) -> int | None:
 
 
 class AdditionalElementBlock:
-    """One bay-type block of the additional element status page.
+    """One block of the additional element status page, any eligible type.
 
     ``entries`` is the block's descriptors in file order, one dict per
-    element. **The list position is the element's 0-based index within its
-    type descriptor** - the coordinate ``sg_ses --index=T,E`` addresses.
-    That identification is structural, not parsed: SES-3 returns exactly one
-    AES descriptor per individual element of each eligible type, in status
-    page order, and sg_ses prints them in that order. It therefore holds for
-    eip=0 descriptors (which carry no index field at all) and regardless of
-    EIIOE.
+    element. For a bay-type block, **the list position is the element's
+    0-based index within its type descriptor** - the coordinate ``sg_ses
+    --index=T,E`` addresses - PROVIDED the block passes the integrity checks
+    the consumers apply. The identification is positional because SES-3
+    returns AES descriptors in status-page element order and sg_ses prints
+    them in that order (covering eip=0 descriptors, which carry no index
+    field, and every EIIOE convention). It is NOT unconditional: AES
+    descriptors are optional for three eligible types (the SCSI port types
+    and ESC electronics), and sg_ses's positional print loop can misattribute
+    descriptors when a block is omitted or sparse - which is why non-bay
+    blocks are returned too (a ``device slot number`` appearing under one is
+    proof of misattribution), why ``malformed`` exists, and why consumers
+    must cross-check printed indexes and element counts and REFUSE on any
+    inconsistency rather than trust position alone.
 
     The printed ``ELEMENT INDEX`` field, when present, is kept as
     ``element_index`` **for cross-checking only**: it is a global index
-    across all type descriptors (the KTN-STL3 capture proves it - the ti=4
+    across type descriptors (the KTN-STL3 capture proves it - the ti=4
     expander prints 42, the sum of the four preceding types' counts), whose
     zero point additionally shifts with EIIOE. Feeding it to ``--index`` is
-    exactly the wrong-bay bug the AES mapping exists to prevent; it is only
-    equal to the per-type position on shelves whose bay descriptor happens
-    to come first, such as the KTN-STL3.
+    exactly the wrong-bay bug the AES mapping exists to prevent.
 
     Other fields per entry: ``device_slot_number`` (int), ``sas_address``
     (str, the drive's own address as printed, e.g. ``0x5000cca0e0000002``)
     and ``eiioe`` (int); a field the output did not carry is simply absent.
     """
 
-    __slots__ = ("element_type", "subenclosure_id", "type_index", "entries")
+    __slots__ = ("element_type", "subenclosure_id", "type_index", "entries", "malformed")
 
     def __init__(self, element_type: str, subenclosure_id: int, type_index: int) -> None:
         self.element_type = element_type
         self.subenclosure_id = subenclosure_id
         self.type_index = type_index
         self.entries: list[dict[str, int | str]] = []
+        #: True when a line inside this block looked like an element header
+        #: but matched no known form: an uncounted element means every later
+        #: position may be shifted, so the whole block's positions are
+        #: untrustworthy and consumers must refuse its claims.
+        self.malformed: bool = False
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return (
             f"AdditionalElementBlock(type={self.element_type!r}, "
             f"sub={self.subenclosure_id}, ti={self.type_index}, "
-            f"n={len(self.entries)})"
+            f"n={len(self.entries)}, malformed={self.malformed})"
         )
 
 
 def parse_additional_element_status(text: str) -> list[AdditionalElementBlock]:
-    """Parse ``sg_ses -p aes`` into per-bay slot/address mappings.
+    """Parse ``sg_ses -p aes`` into per-block element lists.
 
-    Only bay-type blocks (see BAY_ELEMENT_TYPES) are returned; expander and
-    controller blocks carry no drive information this app needs.
+    EVERY block with a well-formed type header is returned, not just the
+    bay-type ones: sg_ses's positional print loop can attribute a bay
+    descriptor to a preceding non-bay block when firmware omits an optional
+    block, and the tell-tale - a ``device slot number`` line under an
+    expander/ESC/port header, whose descriptor formats never carry that
+    field - is only visible if the non-bay blocks are parsed too. Consumers
+    filter to BAY_ELEMENT_TYPES for addressing and use the rest for
+    integrity checking.
 
     The page exists because element index and physical bay are not the same
     thing: the ``device slot number`` field is the enclosure's own statement
@@ -379,19 +398,21 @@ def parse_additional_element_status(text: str) -> list[AdditionalElementBlock]:
         header = _AES_TYPEDESC_RE.match(line)
         if header:
             current_entry = None
-            element_type = header.group(1).strip()
-            if element_type in BAY_ELEMENT_TYPES:
-                current_block = AdditionalElementBlock(
-                    element_type=element_type,
-                    subenclosure_id=int(header.group(2)),
-                    type_index=int(header.group(3)),
-                )
-                blocks.append(current_block)
-            else:
-                # Setting None here is what stops a non-bay block's lines
-                # (e.g. the expander's phy table) from being attributed to
-                # the previous bay block.
-                current_block = None
+            current_block = AdditionalElementBlock(
+                element_type=header.group(1).strip(),
+                subenclosure_id=int(header.group(2)),
+                type_index=int(header.group(3)),
+            )
+            blocks.append(current_block)
+            continue
+        if _AES_TYPEHDR_GUARD_RE.match(line):
+            # A type header missing its [ti=N] (or otherwise unparseable):
+            # the block it opens cannot be identified, so its descriptors
+            # must be dropped entirely - attributing them to the PREVIOUS
+            # block would shift that block's positions, a wrong bay
+            # downstream.
+            current_entry = None
+            current_block = None
             continue
 
         if current_block is None:
@@ -411,11 +432,13 @@ def parse_additional_element_status(text: str) -> list[AdditionalElementBlock]:
             current_block.entries.append(current_entry)
             continue
         if _AES_ELEMENT_GUARD_RE.match(line):
-            # An element header this parser does not recognise. Detaching
-            # current_entry means the unknown element's fields are dropped
-            # instead of silently attributed to the previous element - a
-            # wrong attribution here is a wrong bay downstream.
+            # An element header this parser does not recognise. It still
+            # occupied a position in the block, so silently dropping it
+            # would shift every later element's position - the block's
+            # positions can no longer be trusted at all, which the
+            # malformed flag tells consumers to refuse on.
             current_entry = None
+            current_block.malformed = True
             continue
 
         if current_entry is None:

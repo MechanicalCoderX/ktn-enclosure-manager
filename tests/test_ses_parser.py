@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from ktnmgr.enclosure.ses_parser import (
+    BAY_ELEMENT_TYPES,
     array_slot_type_index,
     build_telemetry,
     parse_additional_element_status,
@@ -259,15 +260,27 @@ def aes_text() -> str:
     return (FIXTURES / "sg_aes.txt").read_text()
 
 
-def test_aes_returns_only_bay_blocks(aes_text: str) -> None:
+def _bays(blocks: list) -> list:
+    return [b for b in blocks if b.element_type in BAY_ELEMENT_TYPES]
+
+
+def test_aes_returns_every_block_for_integrity_checking(aes_text: str) -> None:
+    """All eligible blocks come back, not just the bays: a device slot number
+    under a non-bay block is the consumers' proof of sg_ses misattribution
+    (an omitted optional AES block shifting the positional print), which is
+    only visible if the non-bay blocks are parsed too."""
     blocks = parse_additional_element_status(aes_text)
-    # The capture also carries SAS expander and controller blocks (ti=4, 5,
-    # 13, 14); none of them is a bay, so none may be returned.
-    assert len(blocks) == 1
-    block = blocks[0]
-    assert block.element_type == "Array device slot"
-    assert block.subenclosure_id == 0
-    assert block.type_index == 0
+    bays = [b for b in blocks if b.element_type in BAY_ELEMENT_TYPES]
+    assert len(bays) == 1
+    assert (bays[0].element_type, bays[0].subenclosure_id, bays[0].type_index) == (
+        "Array device slot", 0, 0,
+    )
+    # The capture's expander block is returned too, and its descriptors must
+    # carry no device slot number (the misattribution tell-tale).
+    others = [b for b in blocks if b.element_type not in BAY_ELEMENT_TYPES]
+    assert others, "the capture carries a SAS expander block"
+    for block in others:
+        assert all("device_slot_number" not in e for e in block.entries)
 
 
 def test_aes_slot_identity_on_ktn_stl3(aes_text: str) -> None:
@@ -277,7 +290,7 @@ def test_aes_slot_identity_on_ktn_stl3(aes_text: str) -> None:
     zero), not of SES -- which is why the mapping must be positional and read
     from the page instead of assumed (the fixtures below are the
     counterexamples)."""
-    (block,) = parse_additional_element_status(aes_text)
+    (block,) = _bays(parse_additional_element_status(aes_text))
     assert len(block.entries) == 15
     for position, entry in enumerate(block.entries):
         assert entry["element_index"] == position
@@ -286,7 +299,7 @@ def test_aes_slot_identity_on_ktn_stl3(aes_text: str) -> None:
 
 
 def test_aes_takes_drive_address_not_attached(aes_text: str) -> None:
-    (block,) = parse_additional_element_status(aes_text)
+    (block,) = _bays(parse_additional_element_status(aes_text))
     addresses = {entry["sas_address"] for entry in block.entries}
     assert len(addresses) == 15
     # 0x50060480aabbcc01 is the expander the drives attach through; a parser
@@ -299,7 +312,7 @@ def test_aes_permuted_slot_numbers() -> None:
     """Synthetic shelf whose slot numbering is 1-based and permuted relative
     to element positions, with one empty bay carrying no phy list at all."""
     text = (SYNTHETIC / "sg_aes_permuted.txt").read_text()
-    (block,) = parse_additional_element_status(text)
+    (block,) = _bays(parse_additional_element_status(text))
     assert block.element_type == "Device slot"
     assert block.subenclosure_id == 0
     assert block.type_index == 0
@@ -327,8 +340,7 @@ def test_aes_printed_index_is_global_not_per_type() -> None:
     positions and printed indexes separate -- position identifies the
     element within its type; the printed value is a cross-check only."""
     text = (SYNTHETIC / "sg_aes_bays_second.txt").read_text()
-    # The expander block is filtered out (non-bay); only the bay block returns.
-    (bays,) = parse_additional_element_status(text)
+    (bays,) = _bays(parse_additional_element_status(text))
     assert (bays.element_type, bays.type_index) == ("Array device slot", 1)
     assert [e["element_index"] for e in bays.entries] == [1, 2, 3, 4]
     assert [e["device_slot_number"] for e in bays.entries] == [1, 2, 3, 4]
@@ -339,7 +351,7 @@ def test_aes_eip0_descriptor_form_counts_positionally() -> None:
     they still occupy a position and their fields must attach to a fresh
     entry, not bleed into the previous element's."""
     text = (SYNTHETIC / "sg_aes_eip0.txt").read_text()
-    (block,) = parse_additional_element_status(text)
+    (block,) = _bays(parse_additional_element_status(text))
     assert len(block.entries) == 3
     assert block.entries[0]["device_slot_number"] == 10
     assert "element_index" not in block.entries[1]
