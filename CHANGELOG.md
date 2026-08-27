@@ -74,6 +74,11 @@ affected).
   negative-path auth tests and new E2E flows.
 
 ### Changed
+- **The image applies Debian security point-releases at build time.** Both
+  base images stay digest-pinned, but Docker Hub rebuilds slim images on its
+  own schedule, so a pinned digest can carry an already-fixed CVE for days —
+  this release ships with the openssl fix for CVE-2026-14456, which the
+  newest published digest still lacked.
 - Release workflows: single tag trigger with a concurrency group, `latest`
   only for the highest semver tag, third-party actions pinned to commit
   SHAs, and the arm64 image now passes the Trivy gate before publish.
