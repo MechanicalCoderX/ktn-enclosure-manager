@@ -9,7 +9,7 @@
 # ---------------------------------------------------------------- frontend
 # Pinned by digest: a floating tag makes today's build and next month's differ
 # silently, and hides a tampered upstream. Dependabot bumps these.
-FROM node:26-slim@sha256:5758d367d7b4f48b73a9bb3530e687e47efb289f3b43f9c0450a25225ae0db5d AS frontend
+FROM node:26-slim@sha256:c0753125a3789977aefe869cbebccf70e3cfd7ea84ca48547458f02e4f1d7146 AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
 # Neither --omit=optional nor --ignore-scripts here: rollup resolves its native
