@@ -171,6 +171,35 @@ jobs:
           cache-from: type=gha,scope=image-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
 
+          # The runtime stage is rebuilt every run. Its inputs never change -
+          # same base digest, same RUN string - so buildx reuses that layer
+          # indefinitely and the `apt-get -y upgrade` inside it stays frozen at
+          # whatever Debian shipped the day the layer was first built. The
+          # upgrade line exists precisely to pick up security point-releases
+          # between base-image rebuilds; the cache silently cancels it, and the
+          # scan below then passes or fails on packages nobody is still shipping.
+          #
+          # Measured on 2026-09-22, same commit, one variable: a cached build
+          # held gzip 1.13-1, libpcre2-8-0 10.46-1~deb13u1, libsqlite3-0
+          # 3.46.1-7+deb13u1 and perl-base 5.40.1-6 and failed with 13 findings
+          # (perl-base CVE-2026-13221 is CRITICAL); a --no-cache build of that
+          # identical commit produced the +deb13u1/u2 security versions and
+          # scanned clean. So the 13 findings were the cache, not the base
+          # image. Bumping the pinned digest only appears to fix it, because a
+          # new digest busts the cache - the findings return once that layer
+          # goes stale in turn.
+          #
+          # This is the v1.3.3 failure in a different stage: a cached layer
+          # meant a gate never ran on what actually shipped.
+          #
+          # Only `runtime` is uncached. The frontend stage is keyed on
+          # package-lock.json and the sources it copies, so it invalidates
+          # correctly on its own and `npm ci` stays cached. publish-image.yml
+          # deliberately does NOT set this: it has to push the exact layers
+          # scanned here, and a fresh apt run there could resolve a different
+          # package set minutes later.
+          no-cache-filters: runtime
+
       - name: Scan image for known vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
