@@ -20,7 +20,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ----------------------------------------------------------------- runtime
-FROM python:3.14-slim@sha256:83ff1d245a3d57d04152252d3ef9cb361494d0b3395abd65a5ebe91c401c8e83 AS runtime
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS runtime
 
 # sg3-utils: read-only chassis telemetry.
 # util-linux: setpriv, used to drop privileges for the web process.
