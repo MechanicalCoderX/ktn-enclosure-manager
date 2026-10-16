@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
-import tomllib
 from ktnmgr import __version__
 
 ROOT = Path(__file__).resolve().parent.parent
