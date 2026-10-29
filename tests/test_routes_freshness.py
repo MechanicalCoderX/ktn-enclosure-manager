@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -323,6 +324,40 @@ def test_the_slot_cache_error_clears_when_polling_recovers(
     assert auth_client.get(
         f"/api/enclosures/{LOGICAL_ID}/bays"
     ).json()["sources"]["slots_error"] is None
+
+
+# -------------------- a timed IDENT's expiry must be readable on another clock
+
+
+def test_bays_carries_the_server_clock_an_ident_expiry_is_measured_on(
+    auth_client: TestClient,
+) -> None:
+    """The UI stops a timed IDENT marker locally at ``ident_expires_at``. That
+    stamp is on the server's clock and the browser's may differ by any amount,
+    so the response has to say what time the server thought it was, or the
+    browser can only compare against its own clock and go dark early or late
+    by the skew. Additive: ``bays`` and ``sources`` are untouched."""
+    response = auth_client.post(
+        f"/api/enclosures/{LOGICAL_ID}/slots/0/identify",
+        json={"on": True, "duration_seconds": 30},
+        headers=CSRF,
+    )
+    assert response.status_code == 200, response.text
+
+    before = datetime.now(UTC)
+    body = auth_client.get(f"/api/enclosures/{LOGICAL_ID}/bays").json()
+    after = datetime.now(UTC)
+
+    generated = datetime.fromisoformat(body["generated_at"])
+    assert generated.tzinfo is not None, "a naive stamp cannot be compared across clocks"
+    assert before <= generated <= after
+
+    bay = next(b for b in body["bays"] if b["ses_slot"] == 0)
+    assert bay["locate"] is True
+    remaining = (datetime.fromisoformat(bay["ident_expires_at"]) - generated).total_seconds()
+    # The duration the browser schedules against: never more than asked for,
+    # and still positive this soon after the write.
+    assert 0 < remaining <= 30
 
 
 # ----------------------- #11: a failed refresh is not a failed write (§26, §37)

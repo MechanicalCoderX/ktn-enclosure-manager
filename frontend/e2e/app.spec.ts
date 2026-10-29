@@ -139,6 +139,195 @@ test.describe("identify", () => {
   });
 });
 
+test.describe("identify expiry", () => {
+  // Reported 2026-10-29: after a 30 s Identify on Bay 15 the map's marker kept
+  // blinking for about two seconds after the LED went out, because the map only
+  // learned of the server's clear on the next five-second bay poll.
+  //
+  // The browser's clock is faked (page.clock) and /bays is rewritten so that
+  // Bay 15's IDENT, the server's clock and the server's clear are all under the
+  // test's control. Nothing here waits in real time for a poll; time moves only
+  // when the test moves it, and it is paused in between.
+  const BAY = 15;
+  const SLOT = 14;
+  const POLL_MS = 5000; // POLL_BAYS_MS in App.tsx
+  const STEP_MS = 100;
+  // The audit log of the report: system:timer IDENT_OFF landed 0.59 s after
+  // the expiry (a one-second timer tick plus the write). The fake server keeps
+  // reporting the bay lit for that long after expiry, as the real one does.
+  const SERVER_CLEAR_LAG_MS = 600;
+  const SENT_AT_HEADER = "x-e2e-sent-at";
+
+  type FakeServer = {
+    /** The paused browser clock, as last advanced by the test. */
+    browserNow: number;
+    /** Server clock minus browser clock. */
+    skewMs: number;
+    lit: boolean;
+    /** Bay 15's expiry on the SERVER's clock; null = "until cleared". */
+    expiresAt: number | null;
+    /** Browser time at which each /bays request was sent. */
+    requests: number[];
+  };
+
+  async function fakeServer(page: Page, skewMs: number): Promise<FakeServer> {
+    const fake: FakeServer = { browserNow: 0, skewMs, lit: false, expiresAt: null, requests: [] };
+    let template: { bays: Record<string, unknown>[] } | null = null;
+    await page.route("**/api/enclosures/*/bays", async (route) => {
+      // Stamped by the page itself (see beforeEach), so it is the instant the
+      // request left, not whenever this handler happened to run.
+      const sentAt = Number(route.request().headers()[SENT_AT_HEADER]);
+      fake.requests.push(sentAt);
+      // One real response for the shape; after that answer at once, so the
+      // response lands while the page clock is still paused at sentAt.
+      template ??= await (await route.fetch()).json();
+      const body = structuredClone(template!) as Record<string, unknown> & {
+        bays: Record<string, unknown>[];
+      };
+      const serverNow = sentAt + fake.skewMs;
+      const lit =
+        fake.lit &&
+        (fake.expiresAt === null || serverNow < fake.expiresAt + SERVER_CLEAR_LAG_MS);
+      for (const bay of body.bays) {
+        // Other bays are blanked so a LED left lit by an earlier test cannot
+        // schedule a timer of its own and add requests to the count.
+        const mine = bay.ses_slot === SLOT && lit;
+        bay.locate = mine;
+        bay.ident_origin = mine ? "app" : null;
+        bay.ident_expires_at =
+          mine && fake.expiresAt !== null ? new Date(fake.expiresAt).toISOString() : null;
+      }
+      body.generated_at = new Date(serverNow).toISOString();
+      await route.fulfill({ json: body });
+    });
+    return fake;
+  }
+
+  /** Move the paused browser clock to `target` in small steps, letting each
+   *  step's responses land before the next, so a response is received at the
+   *  browser time the fake server stamped it with. */
+  async function advanceTo(page: Page, fake: FakeServer, target: number, step = STEP_MS) {
+    while (fake.browserNow < target) {
+      const next = Math.min(fake.browserNow + step, target);
+      const delta = next - fake.browserNow;
+      fake.browserNow = next;
+      await page.clock.runFor(delta);
+      await page.waitForTimeout(10); // real time; the page clock stays paused
+    }
+  }
+
+  const requestsIn = (fake: FakeServer, from: number, to: number) =>
+    fake.requests.filter((t) => t > from && t <= to).length;
+
+  /** Pause the clock, learn the poll's phase, and return a deadline that sits
+   *  midway between two polls - so no poll can land near it and any request
+   *  seen there is the expiry refetch and nothing else. */
+  async function start(page: Page, fake: FakeServer): Promise<number> {
+    const t0 = Math.ceil((Date.now() + 60_000) / 1000) * 1000;
+    fake.browserNow = t0;
+    await page.clock.pauseAt(t0);
+    await advanceTo(page, fake, t0 + POLL_MS);
+    // Exactly one interval tick falls in any one-interval window.
+    const ticks = fake.requests.filter((t) => t > t0);
+    expect(ticks, "expected exactly one bay poll in one poll interval").toHaveLength(1);
+    return ticks[0] + 3 * POLL_MS + POLL_MS / 2;
+  }
+
+  test.beforeEach(async ({ page }) => {
+    // Every request the page makes carries its own (fake) send time. Test
+    // instrumentation only: the app neither sends nor reads this header.
+    await page.addInitScript((header) => {
+      const realFetch = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        const headers = new Headers(init?.headers);
+        headers.set(header, String(Date.now()));
+        return realFetch(input, { ...init, headers });
+      };
+    }, SENT_AT_HEADER);
+    await page.clock.install();
+    await bootstrapAndLogin(page);
+  });
+
+  // Both directions of skew, 45 s each way. With the server's clock AHEAD, a
+  // fix that compared ident_expires_at against the browser's clock would leave
+  // the marker lit 45 s past expiry; with it BEHIND, it would put the marker
+  // out 45 s early - in fact on arrival.
+  for (const skewMs of [45_000, -45_000]) {
+    test(`the marker goes out at expiry, without waiting for a poll (server clock ${
+      skewMs > 0 ? "ahead" : "behind"
+    })`, async ({ page }) => {
+      const fake = await fakeServer(page, skewMs);
+      const deadline = await start(page, fake);
+      fake.lit = true;
+      fake.expiresAt = deadline + skewMs;
+
+      await advanceTo(page, fake, deadline - 500);
+      await expect(identDot(page, BAY)).toHaveCount(1);
+
+      // At expiry: dark, while the server still reports the bay lit (it clears
+      // SERVER_CLEAR_LAG_MS later) and the next poll is still 2.5 s away.
+      await advanceTo(page, fake, deadline + 300);
+      await expect(identDot(page, BAY)).toHaveCount(0);
+      await expect(
+        page.getByRole("listitem", { name: new RegExp(`^Bay ${BAY},.*identify active`, "i") }),
+      ).toHaveCount(0);
+      // Exactly one refetch, fired at the expiry itself ...
+      expect(requestsIn(fake, deadline - STEP_MS, deadline + 300)).toBe(1);
+
+      // ... and not a loop: it came back still lit with a lapsed expiry, which
+      // must neither relight the marker nor arm another refetch.
+      await advanceTo(page, fake, deadline + 2000);
+      expect(requestsIn(fake, deadline + 300, deadline + 2000)).toBe(0);
+      await expect(identDot(page, BAY)).toHaveCount(0);
+
+      // The next ordinary poll carries the server's clear; still dark.
+      await advanceTo(page, fake, deadline + 3000);
+      await expect(identDot(page, BAY)).toHaveCount(0);
+    });
+  }
+
+  test("a later expiry from the server cancels the pending local stop", async ({ page }) => {
+    const skewMs = 45_000;
+    const fake = await fakeServer(page, skewMs);
+    const deadline = await start(page, fake);
+    fake.lit = true;
+    fake.expiresAt = deadline + skewMs;
+    await advanceTo(page, fake, deadline - 2 * POLL_MS);
+    await expect(identDot(page, BAY)).toHaveCount(1);
+
+    // Identify is re-triggered: the server's expiry moves ten seconds later,
+    // and the poll 2.5 s before the old deadline carries it.
+    const extended = deadline + 2 * POLL_MS;
+    fake.expiresAt = extended + skewMs;
+
+    await advanceTo(page, fake, deadline + 1000);
+    await expect(identDot(page, BAY)).toHaveCount(1);
+    expect(requestsIn(fake, deadline - STEP_MS, deadline + 1000), "stale timer fired").toBe(0);
+
+    await advanceTo(page, fake, extended - 500);
+    await expect(identDot(page, BAY)).toHaveCount(1);
+    await advanceTo(page, fake, extended + 300);
+    await expect(identDot(page, BAY)).toHaveCount(0);
+    expect(requestsIn(fake, extended - STEP_MS, extended + 300)).toBe(1);
+  });
+
+  test("'until cleared' has no expiry and keeps blinking", async ({ page }) => {
+    const fake = await fakeServer(page, 45_000);
+    await start(page, fake);
+    fake.lit = true;
+    fake.expiresAt = null;
+    await advanceTo(page, fake, fake.browserNow + POLL_MS);
+    await expect(identDot(page, BAY)).toHaveCount(1);
+
+    // Past the longest timed duration (5 min) and then some, in poll-sized
+    // steps: still lit, and only ordinary polls were made.
+    const before = fake.requests.length;
+    await advanceTo(page, fake, fake.browserNow + 6 * 60_000, POLL_MS);
+    await expect(identDot(page, BAY)).toHaveCount(1);
+    expect(fake.requests.length - before).toBeLessThanOrEqual((6 * 60_000) / POLL_MS);
+  });
+});
+
 test.describe("freshness", () => {
   // The E2E backend runs with KTN_TRUENAS_URL empty, so `sources.truenas` and
   // `sources.smart` are null with no error: those sources are OFF, not stale.

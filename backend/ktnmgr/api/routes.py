@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import (
@@ -295,6 +296,15 @@ def list_bays(
             "truenas_error": service.zfs.last_error,
             "smart": service.smart.updated_at,
         },
+        # The server's own clock at the moment this response was composed -
+        # after the bays above, so it is never earlier than any stamp in them.
+        # Every expiry in the payload (`ident_expires_at`) is on this clock,
+        # and the browser's clock can differ from it by any amount. The UI
+        # stops a timed IDENT marker at expiry without waiting for a poll, and
+        # needs this to do that on the right instant rather than a skewed one:
+        # (ident_expires_at - generated_at) is a duration, which survives
+        # crossing between two clocks; a bare timestamp does not.
+        "generated_at": datetime.now(UTC),
     }
 
 
