@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.6.1] — 2026-10-29
 
 ### Fixed
 - **Dark theme: the bay numbers on the Drive map were near-black on the dark
