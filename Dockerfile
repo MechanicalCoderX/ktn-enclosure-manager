@@ -51,6 +51,11 @@ RUN pip install --no-cache-dir /app/backend \
  && pip uninstall -y pip 2>/dev/null || true
 COPY helper/ /app/helper/
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+# Opt-in TLS (KTN_TLS_ENABLED): the pair check the entrypoint runs before
+# serving, the healthcheck that follows the port and scheme, and the boolean
+# spelling table the entrypoint shares with the app.
+COPY docker-healthcheck.py docker-tlscheck.py /app/
+COPY scripts/tls-bool.sh /app/scripts/tls-bool.sh
 COPY --from=frontend /build/dist /app/frontend/dist
 
 RUN chmod +x /app/docker-entrypoint.sh
@@ -68,7 +73,9 @@ ENV PYTHONPATH=/app/backend \
 EXPOSE 8420
 VOLUME ["/data"]
 
+# A script rather than an inline URL: it reads KTN_PORT and KTN_TLS_ENABLED,
+# so a changed port or a TLS deployment is probed where it actually listens.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8420/healthz',timeout=4).status==200 else 1)"
+  CMD python /app/docker-healthcheck.py
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

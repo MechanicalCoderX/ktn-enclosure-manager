@@ -28,6 +28,13 @@ x-portals:
     host: 0.0.0.0
     port: 8420
     path: /
+    #
+    # With the optional TLS block below enabled, use instead
+    #     scheme: https
+    #     host: <the name on the certificate>   (not 0.0.0.0: it covers only that name)
+    # keeping port an unquoted integer - a schema failure silently drops every
+    # portal. Then run truenas/fix-custom-app-metadata.py: app.update does not
+    # refresh a custom app's portal.
 
 # Shown on the app's page in the TrueNAS Apps UI, the same way catalog apps
 # present their notes. Read back out of the rendered compose config.
@@ -60,7 +67,7 @@ x-notes: |
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.5.7
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.6.0
     container_name: ktn-enclosure-manager
     restart: unless-stopped
 
@@ -73,6 +80,24 @@ services:
       # Create it first, then:  chown -R 1000:1000 /mnt/<pool>/apps/ktn-enclosure-manager
       # The app refuses to start if this is not writable by uid 1000.
       - /mnt/YOURPOOL/apps/ktn-enclosure-manager:/data
+
+      # Optional: TLS with the TrueNAS certificate (also uncomment the three
+      # KTN_TLS_* lines under environment). Paths come from
+      #   midclt call certificate.query '[]' '{"select":["name","certificate_path","privatekey_path"]}'
+      # Read SECURITY.md first: this shares the TrueNAS UI's private key.
+      #
+      # LONG SYNTAX ONLY. The short "- src:dst:ro" form creates a missing source
+      # as a directory - at /etc/certificates that breaks TrueNAS's own UI TLS.
+      # - type: bind
+      #   source: /etc/certificates/YOURCERT.crt
+      #   target: /tls/fullchain.pem
+      #   read_only: true
+      #   bind: {create_host_path: false}
+      # - type: bind
+      #   source: /etc/certificates/YOURCERT.key
+      #   target: /tls/privkey.pem
+      #   read_only: true
+      #   bind: {create_host_path: false}
 
     devices:
       # ### EDIT ### your SES device.  Find it with:  lsscsi -g | grep enclosu
@@ -110,6 +135,8 @@ services:
       # retained CAP_SETGID), so the web process can connect without the
       # container holding CAP_CHOWN. The 2770 mode here is defence in depth,
       # not the mechanism - nothing depends on the directory's setgid bit.
+      # With TLS on, the served key copy lives here too (RAM only); the app
+      # refuses to start with TLS on and this line missing.
       - /run/ktn:mode=2770,uid=0,gid=1000
 
     environment:
@@ -143,6 +170,14 @@ services:
       # X-Forwarded-Proto is trusted for the cookie's Secure flag.
       # KTN_ALLOWED_HOSTS: "nas.example.lan,192.0.2.10"
       # KTN_FORWARDED_ALLOW_IPS: "127.0.0.1"
+
+      # Optional: serve HTTPS with the certificate mounted above. Off by
+      # default. Fails closed - a bad or missing file stops the app; it never
+      # falls back to plain HTTP. Once on, the port speaks TLS only: use
+      # https://, and update any http:// bookmarks or monitors.
+      # KTN_TLS_ENABLED: "true"
+      # KTN_TLS_CERTFILE: /tls/fullchain.pem
+      # KTN_TLS_KEYFILE: /tls/privkey.pem
 
       # Optional: restrict management to one enclosure.
       # Find yours with:  cat /sys/class/enclosure/*/id

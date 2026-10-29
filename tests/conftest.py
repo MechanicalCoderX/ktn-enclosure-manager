@@ -15,7 +15,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolate_ktn_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Remove every KTN_* variable so ambient config cannot reach a test."""
+    """Remove every KTN_* variable so ambient config cannot reach a test.
+
+    Any case: pydantic-settings matches names case-insensitively, so a
+    lowercase ktn_* reaches the settings just as well.
+    """
     for key in list(os.environ):
-        if key.startswith("KTN_"):
+        if key.upper().startswith("KTN_"):
             monkeypatch.delenv(key, raising=False)

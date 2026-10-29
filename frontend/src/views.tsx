@@ -287,14 +287,21 @@ function sesHealth(status: string): Health {
   }
 }
 
-/** Live countdown for a timed IDENT, driven by the server's expiry stamp. */
-function Countdown({ expiresAt }: { expiresAt: string }) {
+/**
+ * Live countdown for a timed IDENT, driven by the server's expiry stamp moved
+ * onto the browser's clock (`clockOffsetMs`, browser minus server) - the same
+ * instant the map marker goes out on, so the two cannot disagree under skew.
+ */
+function Countdown({ expiresAt, clockOffsetMs }: { expiresAt: string; clockOffsetMs: number }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const remaining = Math.max(0, Math.round((new Date(expiresAt).getTime() - now) / 1000));
+  const remaining = Math.max(
+    0,
+    Math.round((new Date(expiresAt).getTime() + clockOffsetMs - now) / 1000),
+  );
   const minutes = Math.floor(remaining / 60);
   const seconds = remaining % 60;
   return <span className="mono">{minutes}:{String(seconds).padStart(2, "0")}</span>;
@@ -386,6 +393,7 @@ export function EnclosureMap({
 export function BayDetail({
   bay,
   sources,
+  clockOffsetMs = 0,
   onIdentify,
   busy,
   identDisabledReason,
@@ -397,6 +405,8 @@ export function BayDetail({
    * be able to say which of them it is on.
    */
   sources: BaySources | null;
+  /** Browser clock minus server clock; `ident_expires_at` is on the server's. */
+  clockOffsetMs?: number;
   onIdentify: (slot: number, on: boolean, duration: IdentDuration) => void;
   busy: boolean;
   /** Set when Identify is unavailable; explains why, instead of a dead button. */
@@ -435,7 +445,8 @@ export function BayDetail({
               {bay.locate ? "on" : "off"}
               {bay.ident_expires_at && (
                 <>
-                  {" "}(<Countdown expiresAt={bay.ident_expires_at} />)
+                  {" "}(<Countdown expiresAt={bay.ident_expires_at}
+                                   clockOffsetMs={clockOffsetMs} />)
                 </>
               )}
             </dd>

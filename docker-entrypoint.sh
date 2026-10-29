@@ -44,6 +44,104 @@ if ! su -s /bin/sh -c "test -w '$DATA_DIR'" ktn 2>/dev/null; then
     exit 1
 fi
 
+# ------------------------------------------------------------- optional TLS
+# Off unless KTN_TLS_ENABLED says otherwise. When on, uvicorn serves the
+# copies made here, and every failure below exits: there is no fallback to
+# plain HTTP, because a deployment that asked for TLS and silently got
+# cleartext is worse than one that visibly does not start.
+#
+# Done before the helper starts, so a refusal leaves nothing half-running.
+# Anything left in "$@" becomes extra uvicorn arguments, so clear it first.
+set --
+# KTN_TLS_ACTIVE tells the app that TLS really was set up here. It is
+# exported below only after the --ssl-* arguments are built, and never
+# inherited from the caller. The app refuses to start when it disagrees with
+# its own KTN_TLS_ENABLED: the app's settings match variable NAMES in any
+# case, this script only in exact upper case, so ktn_tls_enabled=true would
+# otherwise mean "TLS on" to the app while uvicorn served plain HTTP.
+unset KTN_TLS_ACTIVE
+APP_DIR="$(dirname "$0")"
+. "$APP_DIR/scripts/tls-bool.sh"
+
+tls_refuse() {
+    echo "ERROR: $1" >&2
+    echo "       To run without TLS instead, set KTN_TLS_ENABLED=false." >&2
+    exit 1
+}
+
+if ! TLS_ENABLED="$(ktn_bool "${KTN_TLS_ENABLED:-}")"; then
+    tls_refuse "KTN_TLS_ENABLED='${KTN_TLS_ENABLED:-}' is not one of 1/true/yes/on or 0/false/no/off"
+fi
+
+if [ "$TLS_ENABLED" = "true" ]; then
+    TLS_DIR="${KTN_TLS_RUNTIME_DIR:-/run/ktn/tls}"
+    export KTN_TLS_RUNTIME_DIR="$TLS_DIR"
+    TLS_CERT="${KTN_TLS_CERTFILE:-}"
+    TLS_KEY="${KTN_TLS_KEYFILE:-}"
+    if [ -z "$TLS_CERT" ] || [ -z "$TLS_KEY" ]; then
+        tls_refuse "TLS is enabled but KTN_TLS_CERTFILE and KTN_TLS_KEYFILE are not both set"
+    fi
+
+    # The key copy must live in RAM only. Without the /run/ktn tmpfs it would
+    # land on the container's writable layer, on the host's disk.
+    TLS_FS="$(stat -f -c %T "$(dirname "$TLS_DIR")" 2>/dev/null || echo missing)"
+    if [ "$TLS_FS" != "tmpfs" ]; then
+        tls_refuse "TLS is enabled but $(dirname "$TLS_DIR") is not a tmpfs ($TLS_FS);
+       add the tmpfs line to the compose file:  - /run/ktn:mode=2770,uid=0,gid=1000"
+    fi
+
+    # The mounted key is root-only (TrueNAS: root:root 0400). Root reads it
+    # through its owner bit - no capability involved - and pipes it to a
+    # uid-1000 writer, which creates the copy 1000:1000 0600 without the
+    # container needing CAP_CHOWN. Not root (a deployment run with --user):
+    # the sources must already be readable by this uid.
+    as_ktn() {
+        if [ "$(id -u)" = "0" ]; then
+            setpriv --reuid=1000 --regid=1000 --clear-groups "$@"
+        else
+            "$@"
+        fi
+    }
+    tls_copy() {  # SOURCE NAME
+        # shellcheck disable=SC2016 # $1/$2 are the inner sh's arguments
+        as_ktn sh -c 'umask 077; mkdir -p "$1" && cat > "$1/$2.tmp" && mv -f "$1/$2.tmp" "$1/$2"' \
+            sh "$TLS_DIR" "$2" < "$1"
+    }
+
+    # Retried because TrueNAS rewrites the certificate and then the key, not
+    # atomically: a start inside that window sees a mismatched pair once.
+    tls_ok=false
+    attempt=1
+    while [ "$attempt" -le 10 ]; do
+        if [ -r "$TLS_CERT" ] && [ -r "$TLS_KEY" ] \
+            && tls_copy "$TLS_CERT" cert.pem && tls_copy "$TLS_KEY" key.pem \
+            && as_ktn python "$APP_DIR/docker-tlscheck.py" "$TLS_DIR/cert.pem" "$TLS_DIR/key.pem"
+        then
+            tls_ok=true
+            break
+        fi
+        attempt=$((attempt + 1))
+        if [ "$attempt" -le 10 ]; then
+            sleep 1
+        fi
+    done
+
+    if [ "$tls_ok" != "true" ]; then
+        as_ktn rm -f "$TLS_DIR/cert.pem" "$TLS_DIR/key.pem" 2>/dev/null || true
+        # Paths only. Never the content of either file.
+        if [ ! -r "$TLS_CERT" ]; then
+            tls_refuse "TLS is enabled but $TLS_CERT is unreadable"
+        elif [ ! -r "$TLS_KEY" ]; then
+            tls_refuse "TLS is enabled but $TLS_KEY is unreadable"
+        fi
+        tls_refuse "TLS is enabled but $TLS_CERT / $TLS_KEY is invalid or mismatched (see above)"
+    fi
+
+    echo "serving HTTPS with $TLS_CERT (copied to $TLS_DIR)"
+    set -- --ssl-certfile "$TLS_DIR/cert.pem" --ssl-keyfile "$TLS_DIR/key.pem"
+    export KTN_TLS_ACTIVE=1
+fi
+
 if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
     SOCK_DIR="$(dirname "$KTN_IDENT_HELPER_SOCKET")"
     mkdir -p "$SOCK_DIR"
@@ -95,9 +193,9 @@ if [ "$(id -u)" = "0" ]; then
     exec setpriv --reuid=1000 --regid=1000 --clear-groups \
         python -m uvicorn ktnmgr.main:app --host "$HOST" --port "$PORT" \
         --forwarded-allow-ips "$FORWARDED_ALLOW_IPS" \
-        --log-level "${KTN_LOG_LEVEL:-info}"
+        --log-level "${KTN_LOG_LEVEL:-info}" "$@"
 fi
 
 exec python -m uvicorn ktnmgr.main:app --host "$HOST" --port "$PORT" \
     --forwarded-allow-ips "$FORWARDED_ALLOW_IPS" \
-    --log-level "${KTN_LOG_LEVEL:-info}"
+    --log-level "${KTN_LOG_LEVEL:-info}" "$@"

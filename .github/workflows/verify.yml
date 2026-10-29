@@ -208,3 +208,160 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+
+  # The only container-level test. Everything above checks the Python and
+  # shell pieces of opt-in TLS on their own; this runs the built image the way
+  # TrueNAS does - root entrypoint holding only SETUID/SETGID, a root:root
+  # 0400 key bound read-only with the long (--mount) syntax, the /run/ktn
+  # tmpfs, unless-stopped - which is the one place the root-to-uid-1000 key
+  # copy, the HEALTHCHECK script and the renew-and-restart path are exercised
+  # together. Certificates are throwaway, generated here, never printed.
+  tls-smoke:
+    name: TLS container smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build (no push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ktn-enclosure-manager:smoke
+          # Reads the amd64 image job's cache and writes none: this job only
+          # needs a runnable image, and must not race that job's cache scope.
+          cache-from: type=gha,scope=image-amd64
+
+      - name: Prepare certificates and data directories
+        run: |
+          set -euo pipefail
+          mkdir -p smoke/gen smoke/tls smoke/data-tls smoke/data-bad smoke/data-plain
+          gen() {
+            openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+              -keyout "smoke/gen/$1.key" -out "smoke/gen/$1.crt" -days 30 \
+              -subj "/CN=ktn-smoke.test" -addext "subjectAltName=DNS:ktn-smoke.test" 2>/dev/null
+          }
+          gen first; gen second; gen other
+          # TrueNAS's modes: the chain world-readable, the key root:root 0400.
+          sudo install -o root -g root -m 0644 smoke/gen/first.crt smoke/tls/fullchain.pem
+          sudo install -o root -g root -m 0400 smoke/gen/first.key smoke/tls/privkey.pem
+          sudo install -o root -g root -m 0400 smoke/gen/other.key smoke/tls/otherkey.pem
+          sudo chown 1000:1000 smoke/data-tls smoke/data-bad smoke/data-plain
+
+      - name: TLS container starts healthy and serves only HTTPS
+        run: |
+          source .github/tls-smoke-lib.sh
+          docker run -d --name ktn-tls --restart unless-stopped "${HARDENING[@]}" \
+            --mount "type=bind,src=$PWD/smoke/tls/fullchain.pem,dst=/tls/fullchain.pem,readonly" \
+            --mount "type=bind,src=$PWD/smoke/tls/privkey.pem,dst=/tls/privkey.pem,readonly" \
+            -v "$PWD/smoke/data-tls:/data" -p 127.0.0.1:18443:8420 \
+            -e KTN_TLS_ENABLED=true \
+            -e KTN_TLS_CERTFILE=/tls/fullchain.pem -e KTN_TLS_KEYFILE=/tls/privkey.pem \
+            -e KTN_TLS_RELOAD_CHECK_SECONDS=60 -e KTN_TLS_RELOAD_SETTLE_SECONDS=5 \
+            "$IMAGE"
+          wait_healthy ktn-tls
+
+          code=$("${HTTPS[@]}" -o /dev/null -w '%{http_code}' https://ktn-smoke.test:18443/healthz)
+          [ "$code" = 200 ] || fail "https /healthz returned $code"
+          "${HTTPS[@]}" https://ktn-smoke.test:18443/healthz | grep -q '"tls":{"enabled":true' \
+            || fail "/healthz has no tls block"
+          if curl -sS --max-time 10 -o /dev/null http://127.0.0.1:18443/healthz; then
+            fail "plain http answered on the TLS port"
+          fi
+
+          body='{"username":"admin","password":"smoke-test-password"}'
+          "${HTTPS[@]}" -o /dev/null -H 'X-KTN-Request: 1' -H 'Content-Type: application/json' \
+            -d "$body" https://ktn-smoke.test:18443/api/auth/bootstrap
+          "${HTTPS[@]}" -o /dev/null -D smoke/login.headers -H 'X-KTN-Request: 1' \
+            -H 'Content-Type: application/json' -d "$body" https://ktn-smoke.test:18443/api/auth/login
+          grep -i '^set-cookie: ktn_session=' smoke/login.headers | grep -qi '; *secure' \
+            || fail "session cookie is not Secure over https"
+
+      - name: The key stays root-only; the served copy is uid 1000, 0600, on tmpfs
+        run: |
+          source .github/tls-smoke-lib.sh
+          if docker exec -u 1000 ktn-tls test -r /tls/privkey.pem; then
+            fail "uid 1000 can read the mounted key"
+          fi
+          # Control: the same uid reads the world-readable chain beside it.
+          docker exec -u 1000 ktn-tls test -r /tls/fullchain.pem
+          # As uid 1000: /run/ktn/tls is 0700 and container root has no
+          # CAP_DAC_READ_SEARCH to look inside it. Metadata only.
+          [ "$(docker exec -u 1000 ktn-tls stat -f -c %T /run/ktn/tls)" = tmpfs ] \
+            || fail "/run/ktn/tls is not on tmpfs"
+          meta=$(docker exec -u 1000 ktn-tls stat -c '%u:%g %a' /run/ktn/tls/key.pem)
+          [ "$meta" = "1000:1000 600" ] || fail "served key copy is $meta"
+
+      - name: An in-place renewal restarts the container onto the new certificate
+        run: |
+          source .github/tls-smoke-lib.sh
+          [ "$(docker inspect -f '{{.RestartCount}}' ktn-tls)" = 0 ] || fail "restarted early"
+          inode=$(stat -c %i smoke/tls/fullchain.pem)
+          # As TrueNAS writes them: truncate and rewrite the same inode, cert first.
+          sudo sh -c 'cat smoke/gen/second.crt > smoke/tls/fullchain.pem'
+          sudo sh -c 'cat smoke/gen/second.key > smoke/tls/privkey.pem'
+          [ "$(stat -c %i smoke/tls/fullchain.pem)" = "$inode" ] || fail "rewrite changed the inode"
+
+          # Check interval 60 s + settle 5 s + restart, with margin.
+          for _ in $(seq 1 120); do
+            [ "$(docker inspect -f '{{.RestartCount}}' ktn-tls)" = 1 ] && break
+            sleep 1
+          done
+          [ "$(docker inspect -f '{{.RestartCount}}' ktn-tls)" = 1 ] || fail "no restart after renewal"
+          wait_healthy ktn-tls
+          docker logs ktn-tls 2>&1 | grep -q 'renewed TLS certificate detected' \
+            || fail "the watcher did not log the renewal"
+
+          expected=$(fingerprint < smoke/gen/second.crt)
+          served=$(openssl s_client -connect 127.0.0.1:18443 -servername ktn-smoke.test \
+                     </dev/null 2>/dev/null | fingerprint)
+          [ "$served" = "$expected" ] || fail "served $served, expected $expected"
+
+      - name: A mismatched key refuses to start, with no plain-http fallback
+        run: |
+          source .github/tls-smoke-lib.sh
+          docker run -d --name ktn-bad --restart no "${HARDENING[@]}" \
+            --mount "type=bind,src=$PWD/smoke/tls/fullchain.pem,dst=/tls/fullchain.pem,readonly" \
+            --mount "type=bind,src=$PWD/smoke/tls/otherkey.pem,dst=/tls/privkey.pem,readonly" \
+            -v "$PWD/smoke/data-bad:/data" -p 127.0.0.1:18444:8420 \
+            -e KTN_TLS_ENABLED=true \
+            -e KTN_TLS_CERTFILE=/tls/fullchain.pem -e KTN_TLS_KEYFILE=/tls/privkey.pem \
+            "$IMAGE"
+          for _ in $(seq 1 60); do
+            [ "$(docker inspect -f '{{.State.Status}}' ktn-bad)" = exited ] && break
+            sleep 1
+          done
+          [ "$(docker inspect -f '{{.State.Status}}' ktn-bad)" = exited ] || fail "still running"
+          [ "$(docker inspect -f '{{.State.ExitCode}}' ktn-bad)" != 0 ] || fail "exit code 0"
+          docker logs ktn-bad 2>&1 | grep -q 'ERROR: TLS' || fail "no TLS error logged"
+          if docker logs ktn-bad 2>&1 | grep -q -- '-----BEGIN'; then fail "PEM text in logs"; fi
+          if curl -sS --max-time 5 -o /dev/null http://127.0.0.1:18444/healthz; then
+            fail "plain http answered"
+          fi
+          if curl -sSk --max-time 5 -o /dev/null https://127.0.0.1:18444/healthz; then
+            fail "https answered"
+          fi
+
+      - name: Back-compat control - TLS unset is plain HTTP, healthy
+        run: |
+          source .github/tls-smoke-lib.sh
+          docker run -d --name ktn-plain --restart unless-stopped "${HARDENING[@]}" \
+            -v "$PWD/smoke/data-plain:/data" -p 127.0.0.1:18420:8420 "$IMAGE"
+          wait_healthy ktn-plain
+          code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:18420/healthz)
+          [ "$code" = 200 ] || fail "plain /healthz returned $code"
+          if curl -sS --max-time 10 http://127.0.0.1:18420/healthz | grep -q '"tls"'; then
+            fail "a plain install reports a tls block"
+          fi
+
+      - name: Container logs
+        if: always()
+        run: |
+          for name in ktn-tls ktn-bad ktn-plain; do
+            echo "::group::$name"
+            docker logs "$name" 2>&1 || true
+            echo "::endgroup::"
+          done

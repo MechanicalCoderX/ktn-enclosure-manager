@@ -4,6 +4,93 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-10-29
+
+Opt-in HTTPS. Nothing changes for an install that does not turn it on.
+
+### Added
+- **`KTN_TLS_ENABLED` serves HTTPS directly from uvicorn** - typically with
+  the TrueNAS UI's own certificate, bound read-only into the container, so
+  `https://<that name>:8420` opens with no warning. Off by default. The
+  entrypoint (root, holding only `SETUID`/`SETGID`) reads the root-only key
+  through its owner bit and hands it to a uid-1000 writer on the `/run/ktn`
+  tmpfs, so the served copy is `1000:1000 0600` and lives in RAM only; it
+  refuses to start if that directory is not a tmpfs. Settings:
+  `KTN_TLS_CERTFILE`, `KTN_TLS_KEYFILE` (absolute, distinct, required when
+  on), `KTN_TLS_RELOAD_CHECK_SECONDS` (3600; `0` off; else at least 60) and
+  `KTN_TLS_RELOAD_SETTLE_SECONDS` (60; at least 5). `KTN_TLS_ENABLED` accepts
+  only `1/true/yes/on` and `0/false/no/off`/empty; the app and the entrypoint
+  share that table and a test runs both over it.
+- **Fail closed.** With TLS on, a missing, unreadable, unparsable or
+  mismatched pair exits with an `ERROR: TLS ...` line naming the paths (never
+  their content) and the recovery. It never falls back to plain HTTP. The pair
+  check (`docker-tlscheck.py`) retries for ten seconds, because TrueNAS writes
+  the certificate and the key non-atomically. An expired certificate is served
+  with a warning rather than refused.
+- **Renewals are picked up automatically.** The app hashes the mounted
+  certificate hourly against the copy it serves - content, never mtime:
+  TrueNAS rewrites its certificate files in place every day whether or not
+  anything renewed - and on a change that is stable for the settle period and
+  parses, audits `tls.reload` (fingerprints only) and shuts down gracefully;
+  `unless-stopped` restarts it and the entrypoint installs the new pair.
+- **`/healthz` reports `tls`** (`not_after`, `days_left`, `reload_pending`)
+  when TLS is on. It never turns non-200 for TLS state.
+- **A container-level CI test** (`tls-smoke`): the built image run with the
+  TrueNAS-style hardening and a root `0400` key on a long-syntax bind -
+  healthy over https, plain http refused, `Secure` cookie, key unreadable to
+  uid 1000, an in-place renewal restarting it onto the new certificate, a
+  mismatched key refusing to start with nothing listening, and plain HTTP
+  unchanged when TLS is unset.
+
+### Changed
+- **The image HEALTHCHECK is a script** (`docker-healthcheck.py`) that
+  follows `KTN_PORT` and `KTN_TLS_ENABLED`. The old inline command probed
+  `http://127.0.0.1:8420` whatever the port, and would have marked a TLS
+  deployment unhealthy forever.
+
+### Fixed
+- **`truenas/fix-custom-app-metadata.py` now refreshes the Web UI portal.**
+  For a custom app `app.update` never recomputes it, and the script preserved
+  the stale value, so a changed `x-portals` (http to https, say) never reached
+  the button. After the versions rename it now recomputes portals and notes
+  with the middleware's own `get_portals_and_app_notes`, keeping the stored
+  ones if that import is unavailable, and prints the resulting URLs only -
+  never the rendered compose, which carries the API key. Its docstring and
+  INSTALL-TRUENAS.md no longer claim `app.update` merges portals into the
+  metadata file.
+- **Pre-release review fixes.** The app refuses to start when its
+  `KTN_TLS_ENABLED` disagrees with what the entrypoint set up (a lowercase
+  `ktn_tls_enabled` used to turn TLS "on" in the app while uvicorn served
+  plain HTTP); the entrypoint now exports `KTN_TLS_ACTIVE=1` only after
+  building the TLS arguments. A failing audit write can no longer stop the
+  renewal restart. The fix script refuses to rename onto an existing
+  `versions/<tag>` (it used to nest the directory), keeps the stored portals
+  and notes when `x-portals` fails validation, writes its YAML atomically at
+  `0600`, takes its backup under umask `077`, and prints the correct rollback
+  (remove the dir, then extract).
+
+### Security
+- SECURITY.md names the trade plainly: the key served is the TrueNAS UI's
+  own, so compromising the KTN web process would let an attacker impersonate
+  the appliance UI by name on the LAN. A second certificate for the same name
+  does not reduce that; only a different hostname would.
+- No HSTS is sent by KTN with TLS on either, and there is no http-to-https
+  redirect (the port speaks TLS only; a same-port redirect is a possible later
+  opt-in, `KTN_TLS_HTTP_REDIRECT`, not implemented). Update `http://`
+  bookmarks and monitors to `https://`.
+
+### Fixed (also in 1.6.0)
+- **A timed Identify's marker now goes out on time.** The map learned of the
+  server's clear only on the next 5 s bay poll, so the marker kept blinking
+  for up to five seconds after the LED went dark (reported on Bay 15 after a
+  30 s Identify). The map now puts the marker out at `ident_expires_at` and
+  re-reads `/bays` once at that moment; a later expiry from the server cancels
+  the pending stop, and "Until cleared" is unchanged. The detail panel still
+  shows the server's state, so Clear stays available if the server's clear is
+  being retried. `/bays` now carries `generated_at` (the server's clock), so
+  the expiry is scheduled correctly when the browser's clock is skewed; the
+  countdown uses the same correction.
+
 ## [1.5.7] — 2026-10-29
 
 ### Security

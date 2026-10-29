@@ -110,7 +110,7 @@ def test_allowed_hosts_refuses_a_foreign_host(tmp_path: Path) -> None:
 
 
 def test_allowed_hosts_always_answers_loopback(tmp_path: Path) -> None:
-    """The image's own HEALTHCHECK probes http://127.0.0.1:8420/healthz, so a
+    """The image's own HEALTHCHECK probes http(s)://127.0.0.1:$KTN_PORT/healthz, so a
     hardened container would report permanently unhealthy if the allow-list
     could exclude loopback. It cannot: a rebound request's Host names the
     attacker's domain, never loopback, so the standing exemption costs the

@@ -65,6 +65,60 @@ function usePolling(callback: () => void, intervalMs: number, active: boolean): 
 }
 
 /**
+ * When a bay's timed IDENT ends, on the browser's clock - or null when it has
+ * no timer ("until cleared", an external LED, or no IDENT at all).
+ *
+ * `ident_expires_at` is on the server's clock. `clockOffsetMs` (browser minus
+ * server, measured from the response's own `generated_at`) moves it onto this
+ * one, so a browser clock that runs fast cannot darken the marker early and one
+ * that runs slow cannot leave it lit late. An unparseable stamp yields NaN,
+ * which every comparison below treats as "no timer": the server's word stands.
+ */
+function identDeadline(bay: Bay, clockOffsetMs: number): number | null {
+  if (!bay.locate || !bay.ident_expires_at) return null;
+  return Date.parse(bay.ident_expires_at) + clockOffsetMs;
+}
+
+/**
+ * Stop a timed IDENT marker at its expiry rather than on the next poll.
+ *
+ * The server clears the LED on its own timer, but the map only learned of it on
+ * the first bay poll afterwards - up to POLL_BAYS_MS late, so the marker kept
+ * blinking after the shelf had gone dark. Instead this schedules one timeout
+ * for the earliest pending expiry; when it fires the caller hides every lapsed
+ * marker and re-reads /bays once, so the server is still the authority on what
+ * happens next. A new payload that moves an expiry later (Identify re-triggered
+ * or extended) recomputes the deadline and cancels the pending timeout, so a
+ * marker is never put out early.
+ *
+ * Returns the instant lapsed markers are judged against. `expiredThrough`
+ * covers a timeout that fires a millisecond before Date.now() reaches its
+ * deadline, which would otherwise leave the marker lit until the next poll.
+ */
+function useIdentExpiry(bays: Bay[], clockOffsetMs: number, onExpire: () => void): number {
+  const [expiredThrough, setExpiredThrough] = useState(0);
+  const now = Math.max(Date.now(), expiredThrough);
+  const next = bays.reduce<number | null>((soonest, bay) => {
+    const at = identDeadline(bay, clockOffsetMs);
+    // Only future deadlines: a payload that still reports an already-lapsed
+    // timer (the server clears on a ~1 s tick) must not re-arm a refetch loop.
+    if (at === null || !(at > now)) return soonest;
+    return soonest === null || at < soonest ? at : soonest;
+  }, null);
+
+  useEffect(() => {
+    if (next === null) return;
+    const timer = window.setTimeout(() => {
+      setExpiredThrough(next);
+      onExpire();
+    }, next - Date.now());
+    return () => clearTimeout(timer);
+  }, [next, onExpire]);
+
+  return now;
+}
+
+/**
  * Change the signed-in account's password.
  *
  * The endpoint and the API client for this existed from the start but nothing
@@ -282,6 +336,9 @@ export function App() {
   // to pick a different one out of it; the previous shape kept only the fastest
   // source's timestamp and discarded the rest on arrival.
   const [sources, setSources] = useState<BaySources | null>(null);
+  // Browser clock minus server clock, from the last /bays response. Zero when
+  // the server did not say (the browser's clock is then the only one there is).
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [busy, setBusy] = useState(false);
   const [authRequired, setAuthRequired] = useState(true);
   const [anonIdentAllowed, setAnonIdentAllowed] = useState(false);
@@ -317,8 +374,14 @@ export function App() {
     if (!selectedEnclosure) return;
     try {
       const response = await api.bays(selectedEnclosure);
+      const receivedAt = Date.now();
+      const serverNow = Date.parse(response.generated_at ?? "");
       setBays(response.bays);
       setSources(response.sources);
+      // Includes the response's transit time, so on a LAN the local deadline
+      // lands a few milliseconds after the server's - still ahead of the
+      // server's own clear, which runs on a one-second tick plus the write.
+      setClockOffsetMs(Number.isFinite(serverNow) ? receivedAt - serverNow : 0);
       setError(null);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setUser(null);
@@ -331,6 +394,8 @@ export function App() {
     POLL_BAYS_MS,
     Boolean(user && selectedEnclosure),
   );
+
+  const identNow = useIdentExpiry(bays, clockOffsetMs, refreshBays);
 
   const loadChassis = useCallback(() => {
     if (!selectedEnclosure) return;
@@ -398,6 +463,14 @@ export function App() {
 
   const enclosure = enclosures.find((e) => e.logical_id === selectedEnclosure) ?? null;
   const selectedBay = bays.find((b) => b.ses_slot === selectedSlot) ?? null;
+  // Only the map's marker is put out locally. The detail panel keeps the
+  // server's word - "on (0:00)" until the clear is confirmed - so that if the
+  // server's clear is failing and being retried, Clear stays enabled and the
+  // panel does not claim a dark LED nobody has verified.
+  const mapBays = bays.map((b) => {
+    const deadline = identDeadline(b, clockOffsetMs);
+    return deadline !== null && deadline <= identNow ? { ...b, locate: false } : b;
+  });
 
   return (
     <div className="app">
@@ -552,7 +625,7 @@ export function App() {
           <>
             <EnclosureMap
               enclosure={enclosure}
-              bays={bays}
+              bays={mapBays}
               selected={selectedSlot}
               onSelect={(slot) => setSelectedSlot(slot === selectedSlot ? null : slot)}
               query={query}
@@ -561,6 +634,7 @@ export function App() {
               <BayDetail
                 bay={selectedBay}
                 sources={sources}
+                clockOffsetMs={clockOffsetMs}
                 onIdentify={identify}
                 busy={busy}
                 identDisabledReason={

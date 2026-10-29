@@ -60,17 +60,18 @@ you create the administrator in the browser.
 > Catalog apps show the same `0.0.0.0` in the API for the same reason.
 >
 > The portal is recorded when the app is **installed**. Adding or correcting
-> `x-portals` on an app that already exists does not backfill it: `app.update`
-> re-renders the compose file but leaves the cached metadata `app.query` reads,
-> so the Apps list keeps showing the old link. You do not have to reinstall —
-> refresh the cache from a shell:
+> `x-portals` on an app that already exists does not backfill it: for a custom
+> app, `app.update` re-renders the compose file but never recomputes the
+> portal, so the Apps list keeps showing the old link. You do not have to
+> reinstall — run
+> [`truenas/fix-custom-app-metadata.py`](../truenas/fix-custom-app-metadata.py)
+> (below), which recomputes the portal and notes from the rendered compose with
+> the middleware's own helper and prints the resulting URL.
 >
-> ```bash
-> midclt call app.metadata.generate
-> ```
->
-> That rebuilds each app's entry from its own metadata, and the corrected portal
-> (and `x-notes`) appear immediately. Verified on 25.10.5.
+> An earlier revision of this document said `midclt call app.metadata.generate`
+> alone refreshes it (observed on 25.10.5). On 25.10.7 the middleware source
+> shows that call only copies each app's stored metadata into the cache; it
+> does not recompute the portal. The script does both.
 >
 > This is worth knowing generally: a custom app whose `x-portals` names
 > `0.0.0.0` shows a **Web UI** button that cannot work, and several published
@@ -85,9 +86,10 @@ you create the administrator in the browser.
 > metadata was ignored; that was wrong — the edit only appears to be ignored
 > until `app.metadata.generate` is run, because the WebUI reads a collective
 > cache rather than the per-app file. The display fields live in
-> `/mnt/.ix-apps/app_configs/<app>/metadata.yaml`, `app.update` merges only
-> portals over that file (preserving the rest), and regenerating the cache
-> makes the WebUI pick them up. Verified on 25.10.6: title, icon and displayed
+> `/mnt/.ix-apps/app_configs/<app>/metadata.yaml`; for a custom app
+> `app.update` does not touch that file at all (so the edits survive, and so
+> does a stale portal), and regenerating the cache makes the WebUI pick them
+> up. Verified on 25.10.6: title, icon and displayed
 > version all render. The details page additionally reads
 > `metadata.version` and `metadata.app_version`; `metadata.version` names the
 > `versions/<dir>` the middleware reads config from, so fixing it means
@@ -95,15 +97,142 @@ you create the administrator in the browser.
 > full `app.update` cycle afterwards. Run
 > [`truenas/fix-custom-app-metadata.py`](../truenas/fix-custom-app-metadata.py)
 > on the appliance to apply all of it; it takes a full tar backup first and
-> prints the rollback. Re-run after a reinstall or after updating to a new
-> image tag (normal app updates do not revert the title or icon).
+> prints the rollback. That rollback is **remove `app_configs/<app>`, extract
+> the backup, then `app.metadata.generate`** - never extract over the existing
+> directory, which leaves the renamed `versions/<tag>` behind (the script now
+> refuses to run onto such a leftover). The backup holds the rendered compose,
+> API key included: it is created `0600`; delete it once you have checked the
+> result. To roll back an app *update*, use `app.update` with the previous
+> YAML and re-run the script; do not use the tar backup for that. Re-run
+> after a reinstall, after updating to a new image tag, or after changing
+> `x-portals` (normal app updates do not revert
+> the title or icon).
 
 ### Privileges this asks for
 
 One device node — your enclosure — and nothing else. The container is not
-privileged, mounts no host path besides its own data dataset, keeps Docker's
+privileged, mounts no host path besides its own data dataset (plus, only with
+the optional HTTPS below, two read-only certificate files), keeps Docker's
 default AppArmor profile, and drops every capability except the two used to
 drop the web process to uid 1000. See [SECURITY.md](../SECURITY.md).
+
+### Serving HTTPS with the TrueNAS certificate
+
+Optional, off by default (since 1.6.0). If the TrueNAS UI already has a
+certificate for a name - for example a Let's Encrypt one from its ACME
+integration - KTN can serve that same certificate on its own port, so
+`https://<that name>:8420` opens with no warning. Read the
+[blast-radius note in SECURITY.md](../SECURITY.md#serving-https-with-the-truenas-certificate-opt-in)
+first: the key you share is the TrueNAS UI's own.
+
+**1. Find the certificate's paths** (they follow the certificate's *name*):
+
+```bash
+midclt call certificate.query '[]' '{"select":["name","certificate_path","privatekey_path"]}'
+```
+
+Use the entry your UI uses (System → General → GUI → certificate), typically
+`/etc/certificates/<name>.crt` and `/etc/certificates/<name>.key`. Check both
+exist (`ls -l`) before editing the YAML.
+
+**2. Edit the app's YAML** (Apps → the app → Edit). Uncomment the TLS block in
+[`install-via-yaml.yaml`](../truenas/install-via-yaml.yaml):
+
+```yaml
+    volumes:
+      - type: bind
+        source: /etc/certificates/<name>.crt
+        target: /tls/fullchain.pem
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: /etc/certificates/<name>.key
+        target: /tls/privkey.pem
+        read_only: true
+        bind: {create_host_path: false}
+
+    environment:
+      KTN_TLS_ENABLED: "true"
+      KTN_TLS_CERTFILE: /tls/fullchain.pem
+      KTN_TLS_KEYFILE: /tls/privkey.pem
+```
+
+Spell the variable names exactly as shown, in upper case. The app's own
+settings would accept `ktn_tls_enabled`, but the container entrypoint only
+reads `KTN_TLS_ENABLED`; since 1.6.0 the app refuses to start (naming the
+problem) rather than run with the two disagreeing.
+
+> **Use this long syntax only.** The short form
+> (`- /etc/certificates/<name>.key:/tls/privkey.pem:ro`) creates a missing
+> source path as a *directory*. If the key were ever absent when the container
+> is created, Docker would make a directory at `/etc/certificates/<name>.key`,
+> and TrueNAS's own certificate writer would then fail on it - breaking the
+> appliance UI's TLS, not just this app's. `create_host_path: false` makes a
+> missing file a clear container-create error instead.
+
+Keep the `/run/ktn` tmpfs line: the key copy lives there, in RAM, and the app
+refuses to start without it. Change the portal to the name on the certificate
+so the **Web UI** button opens it over https (an integer port, never quoted -
+a schema failure silently drops every portal):
+
+```yaml
+x-portals:
+  - name: Web UI
+    scheme: https
+    host: <name on the certificate>
+    port: 8420
+    path: /
+```
+
+`host: 0.0.0.0` would follow the address you browsed the TrueNAS UI by, which
+is wrong here: the certificate covers only its name. Setting
+`KTN_ALLOWED_HOSTS` to that name and the NAS's IP address is a good idea too.
+
+**3. Refresh the button.** `app.update` does not recompute a custom app's
+portal, so run the fix script afterwards; it prints the resulting portal URL,
+which should now be `https://<name>:8420/`:
+
+```bash
+python3 fix-custom-app-metadata.py
+```
+
+**Using it:**
+
+- Open it with the **Web UI** button, or type `https://<name>:8420`. A browser
+  that has opened the TrueNAS UI by name before rewrites `<name>:8420` to
+  https by itself (HSTS); one that **never** has, typing the address without
+  `https://`, gets an empty-response error ("didn't send any data"). There is
+  no http-to-https redirect: the port speaks TLS only.
+- **Update any `http://` bookmarks, dashboards and monitors** to `https://`.
+  Plain HTTP to the port gets an empty reply once TLS is on.
+- **If the certificate ever expires**, the browser refuses the name with no
+  click-through (HSTS). Use `https://<NAS-IP>:8420` instead - the name
+  mismatch there is an ordinary warning you can accept, because HSTS does not
+  apply to IP addresses. `/healthz` reports `tls.days_left`, and the log warns
+  from 14 days out.
+
+**Renewal is automatic.** TrueNAS rewrites the files in place; KTN checks the
+certificate's content hourly and, on a real change, restarts itself (a few
+seconds of downtime) so the entrypoint can install the new pair. That relies
+on the app's restart policy, `unless-stopped` in the YAML. Confirm the logs
+show `renewed TLS certificate detected` after a renewal, or restart the app
+by hand.
+
+**If it will not start**, the log has an `ERROR: TLS ...` line naming the
+file. It never falls back to plain HTTP. To get back in immediately, set
+`KTN_TLS_ENABLED: "false"` (the two read-only mounts are harmless when off),
+set the portal back to `http`, rerun the fix script, and use
+`http://<NAS-IP>:8420` - by name, HSTS keeps upgrading it to https.
+
+**If a renewal leaves the container restarting** every few seconds, the
+renewed pair does not load (for example only the certificate was replaced,
+or the key write failed on the host). The app can check only the new
+certificate before restarting, not the key, and after the restart it refuses
+the pair, so the restart policy loops. Set `KTN_TLS_ENABLED: "false"` with
+**Apps → Edit** (that is an `app.update`) to get back in over plain HTTP, then
+fix the certificate in TrueNAS and turn TLS back on. Roll back with
+`app.update` only - never by extracting the fix script's tar backup over the
+app's config directory.
 
 ---
 

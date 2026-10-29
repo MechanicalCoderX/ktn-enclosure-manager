@@ -93,9 +93,10 @@ cat /sys/class/enclosure/*/id     # -> 0x...  (put in KTN_ENCLOSURE_ALLOWLIST)
 ### Privileges
 
 The container is **not** privileged, mounts no host path other than its own data
-directory, runs under the default AppArmor profile, and drops every capability
-except `SETUID`/`SETGID` (used once, to drop the web process to uid 1000). Its
-only hardware access is the SES device node.
+directory (plus, only if you turn on HTTPS, two read-only certificate files),
+runs under the default AppArmor profile, and drops every capability except
+`SETUID`/`SETGID` (used once, to drop the web process to uid 1000). Its only
+hardware access is the SES device node.
 
 The Identify LED is driven by a SCSI command rather than a sysfs write, which is
 what makes that possible — see [SECURITY.md](SECURITY.md).
@@ -123,6 +124,7 @@ annotated list. The essentials:
 | `KTN_ALERT_STYLE` | `ntfy` (plain text + headers) or `json` |
 | `KTN_AUTH_REQUIRED` | defaults to `true`. `false` runs it as an open read-only dashboard, like scrutiny |
 | `KTN_ALLOW_ANONYMOUS_IDENT` | defaults to `false`, and stays false when auth is off. Permits the LED write with no account |
+| `KTN_TLS_ENABLED` | defaults to `false`. Serve HTTPS directly, e.g. with the TrueNAS UI's own certificate bound read-only (long bind syntax only) — see [INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md#serving-https-with-the-truenas-certificate) and the key note in [SECURITY.md](SECURITY.md#serving-https-with-the-truenas-certificate-opt-in). Fails closed, no plain-http fallback or redirect: use `https://`, update `http://` bookmarks and monitors; a browser that never opened the TrueNAS UI by name gets an empty response without `https://`; if the cert expires, `https://<NAS-IP>:8420` is the click-through fallback |
 
 One backend poll serves every connected browser; expensive `sg_ses` and SMART
 reads are cached and never run per client.
