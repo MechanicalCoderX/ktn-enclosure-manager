@@ -31,7 +31,7 @@
 
 services:
   ktn-enclosure-manager:
-    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.5.7
+    image: ghcr.io/mechanicalcoderx/ktn-enclosure-manager:1.6.0
     build:
       context: .
       dockerfile: Dockerfile
@@ -45,6 +45,24 @@ services:
       # Application state: accounts, session key, IDENT timers, audit log.
       # Must be writable by uid 1000; the app refuses to start otherwise.
       - ${KTN_DATA_PATH:-./data}:/data
+
+      # Optional: TLS with the TrueNAS certificate (or any PEM pair). Also
+      # uncomment the KTN_TLS_* lines below; read SECURITY.md first - on
+      # TrueNAS this shares the appliance UI's private key. LONG SYNTAX ONLY:
+      # the short "- src:dst:ro" form creates a missing source as a directory,
+      # which at /etc/certificates breaks TrueNAS's own UI TLS. If you also
+      # publish a portal (x-portals), switch it to scheme https and the name
+      # on the certificate.
+      # - type: bind
+      #   source: /etc/certificates/YOURCERT.crt
+      #   target: /tls/fullchain.pem
+      #   read_only: true
+      #   bind: {create_host_path: false}
+      # - type: bind
+      #   source: /etc/certificates/YOURCERT.key
+      #   target: /tls/privkey.pem
+      #   read_only: true
+      #   bind: {create_host_path: false}
 
     devices:
       - "${KTN_SG_DEVICE:-/dev/sg16}:${KTN_SG_DEVICE:-/dev/sg16}:rw"
@@ -88,6 +106,11 @@ services:
       # See .env.example for both.
       KTN_ALLOWED_HOSTS: ${KTN_ALLOWED_HOSTS:-}
       KTN_FORWARDED_ALLOW_IPS: ${KTN_FORWARDED_ALLOW_IPS:-127.0.0.1}
+      # Optional HTTPS, with the two mounts above. Off by default; fails
+      # closed (never falls back to plain HTTP). See .env.example.
+      # KTN_TLS_ENABLED: "true"
+      # KTN_TLS_CERTFILE: /tls/fullchain.pem
+      # KTN_TLS_KEYFILE: /tls/privkey.pem
       KTN_ALERT_WEBHOOK_URL: ${KTN_ALERT_WEBHOOK_URL:-}
       KTN_ALERT_STYLE: ${KTN_ALERT_STYLE:-ntfy}
       KTN_ALERT_ON_RECOVERY: ${KTN_ALERT_ON_RECOVERY:-true}
@@ -101,5 +124,7 @@ services:
       # retained CAP_SETGID), so no CAP_CHOWN is needed. The 2770 mode here is
       # defence in depth, not the mechanism - nothing depends on the
       # directory's setgid bit (an entrypoint chmod would silently strip it
-      # anyway: no CAP_FSETID; see docker-entrypoint.sh).
+      # anyway: no CAP_FSETID; see docker-entrypoint.sh). With TLS on, the
+      # served key copy lives here as well, in RAM only - the app refuses to
+      # start with TLS on and no tmpfs here.
       - /run/ktn:mode=2770,uid=0,gid=1000

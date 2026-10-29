@@ -126,9 +126,11 @@ legitimate needs relaxing), `frame-ancestors 'none'` and `X-Frame-Options: DENY`
 so another page cannot frame the UI and trick a click onto Identify, plus
 `nosniff`, `Referrer-Policy: no-referrer` and a restrictive `Permissions-Policy`.
 
-HSTS is deliberately omitted: this app is normally served over plain HTTP on a
-LAN, and a stray HSTS header would pin a hostname the operator cannot serve over
-TLS.
+HSTS is deliberately omitted, with or without `KTN_TLS_ENABLED`: this app is
+normally served over plain HTTP on a LAN, where a stray HSTS header would pin a
+hostname the operator cannot serve over TLS, and an HSTS policy covers every
+port of a host - so with TLS on it would be setting policy for whatever else
+answers on that name (on TrueNAS, the appliance UI already sends its own).
 
 ## Supply chain
 
@@ -147,8 +149,10 @@ below rather than left implicit.
   administrator is created in the browser. Bootstrap refuses once any account
   exists.
 - Session cookies are signed, `HttpOnly`, `SameSite=Strict`, and `Secure` when
-  served over HTTPS, with a fixed expiry. Behind a TLS-terminating reverse
-  proxy, set `KTN_FORWARDED_ALLOW_IPS` to the proxy's address so the app sees
+  served over HTTPS, with a fixed expiry. With `KTN_TLS_ENABLED` the app itself
+  serves HTTPS and the cookie is `Secure` with nothing else to set (see
+  [Serving HTTPS](#serving-https-with-the-truenas-certificate-opt-in)).
+  Behind a TLS-terminating reverse proxy, set `KTN_FORWARDED_ALLOW_IPS` to the proxy's address so the app sees
   the HTTPS scheme and marks the cookie `Secure`. Name only the actual proxy:
   a trusted peer also controls `X-Forwarded-For` — the address login rate
   limiting keys on — so `'*'` (or a proxy other clients can reach) lets a
@@ -234,6 +238,94 @@ touching the password, and a password change does the same while also
 replacing the credential. Before v1.5.0 the password change was the only
 option, which forced a credential rotation on anyone who merely suspected a
 stolen cookie.
+
+## Serving HTTPS with the TrueNAS certificate (opt-in)
+
+Off by default. With `KTN_TLS_ENABLED` unset or `false` the app serves plain
+HTTP exactly as before, and every new setting below is ignored.
+
+When it is on, uvicorn serves TLS itself, using the certificate TrueNAS
+already manages for its own UI. The pair reaches the container as two
+**read-only, single-file bind mounts** of `/etc/certificates/<name>.crt` and
+`.key`, and nothing on the host is changed. Install steps are in
+[docs/INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md#serving-https-with-the-truenas-certificate).
+
+**The key's blast radius - accept this before turning it on.** The key you
+mount is the TrueNAS web UI's own private key. Anyone who gets code execution
+in the KTN web process (uid 1000) can read the copy it serves, and with it
+impersonate the TrueNAS UI by name to anyone on your LAN they can intercept -
+a man-in-the-middle on the appliance's administration login. Issuing KTN a
+second certificate for the same name does not help: any valid certificate for
+that name impersonates it just as well. The only real isolation is a
+different hostname with its own certificate (for example `ktn.<your domain>`),
+which this feature deliberately does not do. If that trade is not acceptable,
+leave TLS off, or terminate TLS in a reverse proxy that holds a separate
+certificate for a separate name.
+
+What limits that exposure:
+
+- **The key copy lives in RAM only.** The entrypoint (root, with no
+  capability beyond `SETUID`/`SETGID`) reads the root-only `0400` key through
+  its owner bit and pipes it to a uid-1000 writer, which creates
+  `/run/ktn/tls/key.pem` as `1000:1000 0600` on the `/run/ktn` tmpfs. It
+  refuses to start if that directory is not a tmpfs, so the key never lands on
+  the container's writable layer or in a snapshotted dataset. The mounted
+  original stays unreadable to uid 1000 (the CI smoke test asserts both).
+- **The web process never opens the mounted key**, and never logs or serves
+  either key. The renewal watcher hashes only the certificate.
+- **Fail closed.** If TLS is on and the files are missing, unreadable,
+  unparsable or do not match, the container exits with an `ERROR: TLS ...`
+  line naming the paths (never their content) and the recovery,
+  `KTN_TLS_ENABLED=false`. It **never falls back to plain HTTP**: a deployment
+  that asked for TLS and silently got cleartext is worse than one that visibly
+  does not start. An *expired* certificate is the exception - it is served,
+  with a warning in the logs and in `/healthz` (`tls.days_left`), because
+  refusing it would only turn a browser warning into an outage.
+- **Long-syntax binds only** (`type: bind`, `read_only: true`,
+  `bind: {create_host_path: false}`). The short `- /etc/certificates/x.key:/tls/...`
+  form creates a missing source as a *directory*; if that ever happened at
+  `/etc/certificates/<name>.key`, TrueNAS's own certificate writer would fail
+  on it and break the appliance UI's TLS.
+- **TLS 1.2 is the floor** (Python's default server context; a TLS 1.1 client
+  is refused, which the test suite asserts against a control).
+
+Renewal: TrueNAS rewrites the files in place, daily, renewed or not. KTN
+compares the mounted certificate's *content* hash with the served copy every
+`KTN_TLS_RELOAD_CHECK_SECONDS` (default 3600; `0` disables), and when a change
+has stayed unchanged for `KTN_TLS_RELOAD_SETTLE_SECONDS` (default 60) and
+parses, it audits `tls.reload` (fingerprints only) and shuts itself down
+gracefully. The container's restart policy (`unless-stopped`) brings it back,
+and the root entrypoint copies and checks the new pair. That is a few seconds
+of outage per renewal. A deployment without a restart policy simply stops -
+restart it by hand, or set the check to `0` and restart after each renewal.
+
+No HTTP listener remains when TLS is on, and there is **no http-to-https
+redirect**: uvicorn cannot speak both on one port, and a same-port redirect
+would mean replacing its listener with custom code on the component that
+decides whether the app is reachable at all. Plain HTTP to the TLS port gets
+an empty response. A redirect could be added later as its own opt-in
+(`KTN_TLS_HTTP_REDIRECT`, not implemented) if real need appears. Consequences
+to know:
+
+- Browsers that have opened the TrueNAS UI by name hold its HSTS policy for
+  that host, and rewrite `http://<name>:8420` to `https://<name>:8420`
+  themselves. A browser that has **never** opened the TrueNAS UI by name, typed
+  as `<name>:8420` without `https://`, sends plain HTTP and shows an
+  empty-response error. Use the Web UI button or type `https://`.
+- If the certificate ever expires, HSTS makes the name **non-bypassable**: the
+  browser offers no click-through. Reach the app by IP instead,
+  `https://<NAS-IP>:8420`, where the name mismatch is an ordinary warning you
+  can click through (HSTS does not apply to IP addresses) - or set
+  `KTN_TLS_ENABLED=false` and use `http://<NAS-IP>:8420`.
+- Update any `http://` bookmarks, dashboards and monitors to `https://`; they
+  stop working the moment TLS is on.
+
+The session cookie is unchanged in name and attributes (`HttpOnly`,
+`SameSite=Strict`, now always `Secure`). Cookies are not isolated by port, so
+it is also sent to the TrueNAS UI on the same name, and theirs to KTN;
+`SameSite` gives no CSRF protection between them. The defence against that
+remains the mandatory `X-KTN-Request` header on every mutating request, and
+KTN sending no CORS headers.
 
 ## TLS: connect by the name on the certificate
 

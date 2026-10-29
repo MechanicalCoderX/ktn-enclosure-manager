@@ -7,10 +7,42 @@ serialised to the browser (spec §21).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+#: Where the container entrypoint puts the copies uvicorn actually serves. It
+#: sits on the private /run/ktn tmpfs so the key copy only ever lives in RAM.
+TLS_RUNTIME_DIR = Path("/run/ktn/tls")
+
+#: The only spellings KTN_TLS_ENABLED accepts. scripts/tls-bool.sh implements
+#: the same table for the entrypoint, and a test runs both over the same
+#: inputs: if they drifted, the entrypoint could start uvicorn without TLS
+#: while the app believed it was on (or the reverse).
+TLS_BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
+TLS_BOOL_FALSE = frozenset({"0", "false", "no", "off", ""})
+
+
+def parse_tls_bool(value: str) -> bool:
+    """KTN_TLS_ENABLED's spelling rules; ValueError on anything else.
+
+    Narrower than pydantic's own bool parsing on purpose (no 't', 'y', 'f'
+    or 'n'), so a shell ``case`` can match it exactly. ASCII only, because
+    ``str.lower()`` maps a few non-ASCII letters onto ASCII ones and the shell
+    would not.
+    """
+    if value.isascii():
+        lowered = value.lower()
+        if lowered in TLS_BOOL_TRUE:
+            return True
+        if lowered in TLS_BOOL_FALSE:
+            return False
+    raise ValueError(
+        "KTN_TLS_ENABLED must be one of 1/true/yes/on or 0/false/no/off (or empty)"
+    )
 
 
 class Settings(BaseSettings):
@@ -43,6 +75,60 @@ class Settings(BaseSettings):
             "entrypoint (--forwarded-allow-ips), not by the app."
         ),
     )
+
+    # --- TLS (opt-in; off by default) -------------------------------------
+    #: Serve HTTPS directly from uvicorn. Off by default, so an install that
+    #: sets nothing keeps serving plain HTTP exactly as before. When on, the
+    #: container entrypoint copies the two files below onto the /run/ktn
+    #: tmpfs and refuses to start if they are missing, unparsable or do not
+    #: match - it never falls back to plain HTTP.
+    tls_enabled: bool = False
+    #: The mounted full-chain certificate PEM (the source, e.g. TrueNAS's
+    #: /etc/certificates/<name>.crt bound read-only). Watched for renewal.
+    tls_certfile: Path | None = None
+    #: The mounted private key. Only the root entrypoint ever opens this path
+    #: (uid 1000 cannot); uvicorn loads the tmpfs copy once, at startup, and
+    #: the app's own code never opens either key file.
+    tls_keyfile: Path | None = None
+    #: How often the mounted certificate is compared with the served copy.
+    #: 0 disables the watcher; otherwise at least 60.
+    tls_reload_check_seconds: int = 3600
+    #: How long a changed certificate must stay unchanged before the app
+    #: restarts to pick it up (TrueNAS writes the cert, then the key).
+    tls_reload_settle_seconds: int = 60
+    #: Internal: where the served copies live. Only tests change it.
+    tls_runtime_dir: Path = TLS_RUNTIME_DIR
+
+    @field_validator("tls_enabled", mode="before")
+    @classmethod
+    def _tls_enabled_spelling(cls, value: Any) -> Any:
+        return parse_tls_bool(value) if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def _tls_rules(self) -> Settings:
+        if self.tls_reload_check_seconds != 0 and self.tls_reload_check_seconds < 60:
+            raise ValueError("KTN_TLS_RELOAD_CHECK_SECONDS must be 0 (off) or at least 60")
+        if self.tls_reload_settle_seconds < 5:
+            raise ValueError("KTN_TLS_RELOAD_SETTLE_SECONDS must be at least 5")
+        if not self.tls_enabled:
+            return self
+        cert, key = self.tls_certfile, self.tls_keyfile
+        for name, value in (("CERTFILE", cert), ("KEYFILE", key)):
+            if value is None:
+                raise ValueError(f"KTN_TLS_ENABLED is true but KTN_TLS_{name} is not set")
+            if not value.is_absolute():
+                raise ValueError(f"KTN_TLS_{name} must be an absolute path")
+        if os.path.normpath(str(cert)) == os.path.normpath(str(key)):
+            raise ValueError("KTN_TLS_CERTFILE and KTN_TLS_KEYFILE must be different files")
+        return self
+
+    @property
+    def tls_served_certfile(self) -> Path:
+        return self.tls_runtime_dir / "cert.pem"
+
+    @property
+    def tls_served_keyfile(self) -> Path:
+        return self.tls_runtime_dir / "key.pem"
 
     # --- storage ----------------------------------------------------------
     data_dir: Path = Path("/data")

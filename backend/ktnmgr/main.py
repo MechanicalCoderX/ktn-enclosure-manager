@@ -26,6 +26,7 @@ from ktnmgr.services.auth import AuthService
 from ktnmgr.services.ident import IdentManager
 from ktnmgr.services.notify import HealthNotifier
 from ktnmgr.services.state import StateService
+from ktnmgr.services.tls_watch import TlsWatcher
 from ktnmgr.truenas.client import TrueNASClient
 
 log = logging.getLogger(__name__)
@@ -122,6 +123,18 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         rate_window=settings.login_rate_window_seconds,
     )
 
+    # Built whenever TLS is on, so /healthz can report the served
+    # certificate's expiry even with the reload check switched off (0).
+    tls_watcher: TlsWatcher | None = None
+    if settings.tls_enabled and settings.tls_certfile is not None:
+        tls_watcher = TlsWatcher(
+            source=settings.tls_certfile,
+            served=settings.tls_served_certfile,
+            interval=settings.tls_reload_check_seconds,
+            settle=settings.tls_reload_settle_seconds,
+            audit=audit,
+        )
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
@@ -134,9 +147,17 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         )
         if auth.needs_bootstrap:
             log.warning("no administrator account yet - open the UI to create one")
+        if tls_watcher is not None:
+            tls_watcher.refresh_expiry()
+            if tls_watcher.interval > 0:
+                tls_watcher.start()
+            else:
+                log.info("TLS reload check disabled (KTN_TLS_RELOAD_CHECK_SECONDS=0)")
         try:
             yield
         finally:
+            if tls_watcher is not None:
+                await tls_watcher.stop()
             await service.stop()
 
     app = FastAPI(
@@ -215,9 +236,12 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         response.headers.setdefault(
             "Permissions-Policy", "geolocation=(), microphone=(), camera=(), usb=()"
         )
-        # Only meaningful over TLS, and harmless otherwise; omitted deliberately
-        # because this app is normally served over plain HTTP on a LAN and a
-        # stray HSTS header would pin a hostname the user cannot serve over TLS.
+        # HSTS is omitted deliberately, with TLS on as well as off. Most
+        # installs serve plain HTTP on a LAN, where a stray header would pin a
+        # hostname the user cannot serve over TLS; and an HSTS policy applies
+        # to every port of the host, so with KTN_TLS_ENABLED it would be
+        # setting policy for whatever else answers on that name (on TrueNAS,
+        # the appliance UI already sends its own).
         return response
 
     app.state.settings = settings
@@ -236,8 +260,14 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         with nothing supervising it, so a helper that died would otherwise
         leave the container Healthy while the app silently lost half its
         function. Probing it here is what makes the healthcheck honest.
+
+        TLS state is reported but never makes this non-200: an unhealthy
+        container cannot renew a certificate, and an expired one is still
+        served (refusing it would only turn a warning into an outage).
         """
         body: dict[str, Any] = {"ok": True, "enclosures": len(service.enclosures.value)}
+        if tls_watcher is not None:
+            body["tls"] = tls_watcher.status()
         socket_path = settings.ident_helper_socket
         if socket_path:
             try:
