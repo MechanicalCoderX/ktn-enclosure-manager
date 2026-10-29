@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.7] — 2026-10-29
+
+### Security
+- **The alert webhook URL no longer reaches the logs.** For ntfy the topic, or
+  an `?auth=` token, is the credential. httpx logged `HTTP Request: POST <full
+  url>` at INFO on every alert, and the app itself logged the URL when a
+  webhook answered 4xx/5xx; `KTN_LOG_LEVEL` did not affect either. The `httpx`
+  and `httpcore` loggers are now held at WARNING, the app logs scheme and host
+  only, and the URL is scrubbed from delivery-error text. Tests drive a real
+  httpx client and assert the secret is absent at DEBUG on the success, 3xx,
+  4xx, 5xx and exception paths.
+
+### Fixed
+- **A 3xx from the webhook is no longer counted as delivered.** The client does
+  not follow redirects, so a 301/308 (a moved topic, an http-to-https proxy)
+  committed the alert as sent and never retried it. Only 2xx is delivery now.
+
 ## [1.5.6] — 2026-10-29
 
 Maintenance release.
