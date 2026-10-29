@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.6] — 2026-10-29
+
+Maintenance release.
+
+### Changed
+- **Base image refreshed** (`python:3.14-slim` digest `a2b82f3`), plus the
+  frontend build toolchain and CI action bumps merged since 1.5.5.
+- **The entrypoint waits up to 15 s, not 5 s, for the IDENT helper socket**
+  before warning that it did not appear.
+
+### Documentation
+- The fan question is recorded as closed: the firmware latches the fans high,
+  and a 2026-10-26 power cycle did not release it (5300 RPM at +47 h).
+
 ## [1.5.5] — 2026-08-27
 
 Correctness release. Every fix here is one root cause: the bay view composes

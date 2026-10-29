@@ -182,6 +182,10 @@ observed. Anything checking only the exit status would report a working fan
 controller while nothing changed. Read the actual speed back, twice, seconds
 apart.
 
+**Status: closed.** On this shelf the firmware latches the fans high. A power
+cycle on 2026-10-26 did not release it: bank readings were still 5300 RPM at
++47 h. No speed control is offered, and none is planned.
+
 **There is no non-SES path, and that one is permanent.** The Linux `ses`
 driver enumerates only `ENCLOSURE_COMPONENT_DEVICE` and
 `ENCLOSURE_COMPONENT_ARRAY_DEVICE` (`drivers/scsi/ses.c`), so cooling

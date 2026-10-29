@@ -71,9 +71,10 @@ if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
         --enclosure-lock "$KTN_ENCLOSURE_LOCK" &
     HELPER_PID=$!
 
-    # Wait briefly for the socket so the first request cannot race startup.
+    # Wait for the socket so the first request cannot race startup. 15 s, not
+    # 5: a cold start after a host reboot can take longer than 5 s to bind it.
     i=0
-    while [ ! -S "$KTN_IDENT_HELPER_SOCKET" ] && [ "$i" -lt 50 ]; do
+    while [ ! -S "$KTN_IDENT_HELPER_SOCKET" ] && [ "$i" -lt 150 ]; do
         sleep 0.1
         i=$((i + 1))
     done
