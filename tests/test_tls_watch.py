@@ -224,3 +224,37 @@ def test_the_watcher_never_opens_the_key(world: World, monkeypatch: pytest.Monke
     world.clock.advance(60)
     world.watcher.check()
     assert opened and set(opened) <= {str(world.source), str(world.served)}
+
+
+class BrokenAudit:
+    """An audit backend failing with something other than OSError.
+
+    AuditLog.record swallows OSError itself, so this is hard to reach in
+    practice - but if it ever happens, it must not cost the renewal.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def record(self, **_: object) -> None:
+        self.calls += 1
+        raise RuntimeError("audit backend broke")
+
+
+def test_a_failing_audit_still_restarts_onto_the_renewal(world: World) -> None:
+    """Review L1: the one-shot flag used to be set before the audit call, so
+    an exception there skipped restart() and every later check returned early
+    - the renewal was never installed for the rest of the process's life."""
+    broken = BrokenAudit()
+    world.watcher.audit = broken  # type: ignore[assignment]
+    world.rewrite_in_place(world.renewed_cert())
+    world.watcher.check()            # change seen: settle starts
+    world.clock.advance(60)
+    world.watcher.check()            # settled: audit raises, restart must still run
+    assert broken.calls == 1
+    assert world.restarts == 1
+    # Still one-shot afterwards.
+    for _ in range(3):
+        world.clock.advance(3600)
+        world.watcher.check()
+    assert world.restarts == 1

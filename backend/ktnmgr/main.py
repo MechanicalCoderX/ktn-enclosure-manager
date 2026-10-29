@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ktnmgr import __version__
 from ktnmgr.api.routes import router
-from ktnmgr.config import Settings, get_settings
+from ktnmgr.config import Settings, check_tls_marker, get_settings
 from ktnmgr.enclosure.disks import DiskInfoReader
 from ktnmgr.enclosure.helper_client import HelperUnavailableError
 from ktnmgr.enclosure.helper_client import send as helper_send
@@ -67,6 +67,9 @@ def configure_logging() -> None:
 def build_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging()
+    # Before anything else is built: the app must not run believing TLS is on
+    # while uvicorn serves plain HTTP (or the reverse). See check_tls_marker.
+    check_tls_marker(settings)
 
     lock_path = settings.enclosure_lock_path
     backend = SysfsEnclosureBackend(
@@ -176,8 +179,9 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         # Loopback is always answered. The threat is DNS rebinding, and a
         # rebound request's Host names the ATTACKER'S domain - it can never
         # name loopback - so this exemption gives up nothing. Without it the
-        # image's own HEALTHCHECK (which probes http://127.0.0.1:8420/healthz
-        # and therefore sends a loopback Host) would fail 400 the moment an
+        # image's own HEALTHCHECK (docker-healthcheck.py, which probes
+        # http(s)://127.0.0.1:$KTN_PORT/healthz - https when KTN_TLS_ENABLED is
+        # on - and therefore sends a loopback Host) would fail 400 the moment an
         # operator sets KTN_ALLOWED_HOSTS exactly as SECURITY.md advises,
         # reporting a hardened container as permanently unhealthy.
         allowed_hosts |= {"127.0.0.1", "::1", "localhost"}

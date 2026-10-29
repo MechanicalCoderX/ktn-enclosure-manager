@@ -48,7 +48,9 @@ SHIMS = {
     "python": (
         "#!/bin/sh\n"
         'if [ "$1" = "-m" ] && [ "$2" = "uvicorn" ]; then\n'
-        '    printf "%s\\n" "$@" > "$SHIM_DIR/uvicorn-args"; exit 0\n'
+        '    printf "%s\\n" "$@" > "$SHIM_DIR/uvicorn-args"\n'
+        # The TLS marker as uvicorn would inherit it ("<unset>" if absent).
+        '    printf "%s\\n" "${KTN_TLS_ACTIVE-<unset>}" > "$SHIM_DIR/tls-active"; exit 0\n'
         "fi\n"
         'exec "$REAL_PYTHON" "$@"\n'
     ),
@@ -61,6 +63,9 @@ class Run:
     output: str
     uvicorn_args: list[str] | None
     sleeps: int
+    #: KTN_TLS_ACTIVE as the uvicorn process saw it ("<unset>" if absent);
+    #: None when uvicorn never started.
+    tls_active: str | None = None
 
 
 class Harness:
@@ -76,7 +81,8 @@ class Harness:
         self.cert, self.key = make_pair(tmp_path / "mounted")
 
     def run(self, **env: str) -> Run:
-        child = {k: v for k, v in os.environ.items() if not k.startswith("KTN_")}
+        # Case-insensitive: pydantic-settings would read a lowercase ktn_* too.
+        child = {k: v for k, v in os.environ.items() if not k.upper().startswith("KTN_")}
         child.update(
             PATH=f"{self.shims}:{os.environ['PATH']}",
             SHIM_DIR=str(self.shims),
@@ -86,7 +92,7 @@ class Harness:
             KTN_TLS_RUNTIME_DIR=str(self.runtime),
         )
         child.update(env)
-        for leftover in ("uvicorn-args", "sleeps", "ran"):
+        for leftover in ("uvicorn-args", "sleeps", "ran", "tls-active"):
             (self.shims / leftover).unlink(missing_ok=True)
         result = subprocess.run(
             ["sh", str(ENTRYPOINT)], env=child, capture_output=True, text=True, timeout=60,
@@ -94,11 +100,13 @@ class Harness:
         )
         args_file = self.shims / "uvicorn-args"
         sleeps_file = self.shims / "sleeps"
+        active_file = self.shims / "tls-active"
         return Run(
             returncode=result.returncode,
             output=result.stdout + result.stderr,
             uvicorn_args=args_file.read_text().splitlines() if args_file.exists() else None,
             sleeps=len(sleeps_file.read_text().splitlines()) if sleeps_file.exists() else 0,
+            tls_active=active_file.read_text().strip() if active_file.exists() else None,
         )
 
     def enabled(self, **env: str) -> dict[str, str]:
@@ -218,13 +226,66 @@ def test_an_unknown_spelling_refuses(harness: Harness, value: str) -> None:
     assert run.uvicorn_args is None
 
 
+def non_tmpfs_dir() -> Path:
+    """Some existing directory on a real disk filesystem, never written here.
+
+    The checkout is the obvious one, but a contributor running the suite from
+    /tmp (a tmpfs on many distros) would see this test fail for no product
+    reason, so look further before giving up.
+    """
+    for candidate in (ROOT, Path("/var/tmp"), Path.home(), Path("/")):
+        try:
+            if candidate.is_dir() and fs_type(candidate) != "tmpfs":
+                return candidate
+        except (OSError, subprocess.CalledProcessError):
+            continue
+    pytest.fail("no non-tmpfs directory found (tried the checkout, /var/tmp, $HOME, /)")
+
+
 def test_a_runtime_dir_off_tmpfs_refuses_before_copying(harness: Harness) -> None:
-    on_disk = ROOT  # the checkout: a real disk filesystem, never written here
-    assert fs_type(on_disk) != "tmpfs", "pick a non-tmpfs directory for this test"
-    target = on_disk / "tls"
+    on_disk = non_tmpfs_dir()
+    assert fs_type(on_disk) != "tmpfs"
+    target = on_disk / f"ktn-test-tls-{uuid.uuid4().hex}"
     assert not target.exists()
     run = harness.run(**harness.enabled(KTN_TLS_RUNTIME_DIR=str(target)))
     assert run.returncode == 1
     assert "is not a tmpfs" in run.output
     assert run.uvicorn_args is None
     assert not target.exists()
+
+
+# ------------------------------------------------- the TLS marker (review M1)
+# The app refuses to start when its own KTN_TLS_ENABLED disagrees with whether
+# the entrypoint really started TLS (see test_tls_name_case.py). The
+# entrypoint's half of that contract is KTN_TLS_ACTIVE=1, exported only once
+# the --ssl-* arguments are built - and never inherited from the caller.
+
+
+def test_tls_on_exports_the_marker_to_uvicorn(harness: Harness) -> None:
+    run = harness.run(**harness.enabled())
+    assert run.returncode == 0, run.output
+    assert run.uvicorn_args is not None and "--ssl-certfile" in run.uvicorn_args
+    assert run.tls_active == "1"
+
+
+def test_tls_off_never_passes_a_marker_through(harness: Harness) -> None:
+    """A stray KTN_TLS_ACTIVE in the compose must not claim TLS for a plain start."""
+    run = harness.run(KTN_TLS_ACTIVE="1")
+    assert run.returncode == 0, run.output
+    assert run.uvicorn_args is not None
+    assert not any(arg.startswith("--ssl") for arg in run.uvicorn_args)
+    assert run.tls_active == "<unset>"
+
+
+def test_a_lowercase_name_gives_plain_args_and_no_marker(harness: Harness) -> None:
+    """What the entrypoint does with ktn_tls_enabled: plain HTTP, no marker -
+    which is exactly what the app then refuses (test_tls_name_case.py)."""
+    run = harness.run(
+        ktn_tls_enabled="true",
+        ktn_tls_certfile=str(harness.cert),
+        ktn_tls_keyfile=str(harness.key),
+    )
+    assert run.returncode == 0, run.output
+    assert run.uvicorn_args is not None
+    assert not any(arg.startswith("--ssl") for arg in run.uvicorn_args)
+    assert run.tls_active == "<unset>"

@@ -91,7 +91,12 @@ def run_server(tmp_path: Path, *, cert: Path | None = None, key: Path | None = N
     sysfs = work / "sys"
     shutil.copytree(FIXTURE_ROOT, sysfs)
     port = free_port()
-    child_env = {k: v for k, v in os.environ.items() if not k.startswith("KTN_")}
+    # Case-insensitive, as pydantic-settings reads them.
+    child_env = {k: v for k, v in os.environ.items() if not k.upper().startswith("KTN_")}
+    if cert is not None and key is not None:
+        # What docker-entrypoint.sh exports once it has built the --ssl-*
+        # arguments; the app refuses to start on TLS without it.
+        child_env["KTN_TLS_ACTIVE"] = "1"
     child_env.update(
         PYTHONPATH=str(ROOT / "backend"),
         KTN_SYSFS_ROOT=str(sysfs),

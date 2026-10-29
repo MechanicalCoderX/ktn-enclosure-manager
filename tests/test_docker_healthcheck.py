@@ -34,7 +34,11 @@ def probe(port: int | None, tls: str | None) -> int:
 def tls_port(tmp_path_factory: pytest.TempPathFactory) -> Iterator[int]:
     tmp = tmp_path_factory.mktemp("hc-tls")
     cert, key = make_pair(tmp / "pair")
-    with run_server(tmp, cert=cert, key=key) as port:
+    # As the container runs it: TLS on in the app's settings as well as on the
+    # listener (the app refuses to start when the two disagree).
+    env = {"KTN_TLS_ENABLED": "true", "KTN_TLS_CERTFILE": str(cert),
+           "KTN_TLS_KEYFILE": str(key)}
+    with run_server(tmp, cert=cert, key=key, env=env) as port:
         yield port
 
 

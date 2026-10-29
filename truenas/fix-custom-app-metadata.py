@@ -43,18 +43,27 @@ What it changes:
 It prints portal URLs only. It never prints the rendered compose, which
 carries the app's environment (the TrueNAS API key, the alert webhook).
 
-A full tar backup of the app's config dir is taken first and its path
-printed. Re-run after a delete-and-reinstall of the app, after updating the
+A full tar backup of the app's config dir is taken first (mode 0600: it
+holds the rendered compose, API key included) and its path printed; delete it
+once the result is accepted. Its rollback is "remove app_configs/<app>,
+extract the backup, then app.metadata.generate" - extracting over the dir
+would leave the renamed versions/<tag> beside the restored versions/<old>,
+which is why the script refuses to rename onto an existing versions/<tag>.
+For rolling back an app *update*, use app.update with the saved compose and
+re-run this script instead. Re-run after a delete-and-reinstall of the app, after updating the
 app to a new image tag (a plain re-run realigns the version), or after
 changing ``x-portals``; a normal app update does not revert the title or icon.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any
 
@@ -114,6 +123,33 @@ def computed_portals(app: str, version: str) -> dict[str, Any] | None:
     return result
 
 
+def write_yaml_atomic(path: str, data: Any) -> None:
+    """Replace ``path`` with ``data`` as YAML, all at once, mode 0600.
+
+    Written to a temp file in the same directory and renamed over the target,
+    so an exception or interruption mid-dump never leaves a truncated file
+    (a plain open(path, "w") truncates first). The owner is copied from the
+    file being replaced; 0600 matches what the middleware's own
+    write_if_changed produces.
+    """
+    directory, name = os.path.split(path)
+    fd, tmp = tempfile.mkstemp(prefix=f".{name}.", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            yaml.safe_dump(data, fh, default_flow_style=False)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        with contextlib.suppress(OSError):
+            st = os.stat(path)
+            os.chown(tmp, st.st_uid, st.st_gid)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def wait_for_job(job_id: int) -> str:
     state = "RUNNING"
     for _ in range(30):
@@ -137,14 +173,38 @@ def main(argv: list[str]) -> int:
     tag = image.rsplit(":", 1)[1] if ":" in image else "latest"
     print(f"running image tag: {tag}")
 
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    backup = f"{BACKUP_DIR}/{app}-app_configs-{stamp}.tar.gz"
-    subprocess.run(["tar", "czf", backup, "-C", APPS_ROOT, app], check=True)
-    print(f"full backup: {backup}   (rollback: extract it back and re-run app.metadata.generate)")
-
     with open(f"{base}/metadata.yaml") as fh:
         meta = yaml.safe_load(fh)
     old = meta["version"]
+
+    # Refuse before changing anything (or taking a backup) if the rename
+    # target already exists: shutil.move would move versions/<old> INTO it,
+    # giving versions/<tag>/<old>/ while the middleware read the stale
+    # versions/<tag>. That leftover is what extracting a backup over the dir
+    # leaves behind, because tar never deletes the newer directory.
+    if old != tag and os.path.exists(f"{base}/versions/{tag}"):
+        print(f"REFUSING: versions/{tag} already exists next to versions/{old} in {base}.")
+        print("  Nothing was changed. A leftover like this usually comes from extracting")
+        print("  a backup over the app's config dir. Restore it cleanly instead: remove")
+        print(f"  app_configs/{app}, extract the backup, then app.metadata.generate.")
+        return 2
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = f"{BACKUP_DIR}/{app}-app_configs-{stamp}.tar.gz"
+    # Private: the tarball holds the rendered compose, with the TrueNAS API key
+    # and the alert webhook in it.
+    previous_umask = os.umask(0o077)
+    try:
+        subprocess.run(["tar", "czf", backup, "-C", APPS_ROOT, app], check=True)
+    finally:
+        os.umask(previous_umask)
+    print(f"full backup: {backup}")
+    print("  mode 0600; it contains the app's API key - delete after acceptance")
+    print(f"  rollback: remove app_configs/{app}, extract the backup, then app.metadata.generate:")
+    print(f"    rm -rf {base} && tar xzf {backup} -C {APPS_ROOT} "
+          "&& midclt call app.metadata.generate")
+    print("  (never extract over the existing dir: the renamed versions/ dir would remain)")
+
     print_portals("portals before", meta.get("portals"))
 
     # Structural rename first: if it fails nothing else has changed yet.
@@ -159,10 +219,16 @@ def main(argv: list[str]) -> int:
     meta["metadata"]["app_version"] = tag
     # After the rename: the helper reads versions/<tag>/ for the rendered compose.
     refreshed = computed_portals(app, tag)
-    if refreshed is not None:
+    if refreshed is not None and not refreshed["portals"] and meta.get("portals"):
+        # The middleware helper returns {"portals": {}, "notes": None} on ANY
+        # x-portals validation error (a quoted port, say) rather than raising.
+        # Writing that would wipe a working button and the notes.
+        print("WARNING: x-portals failed validation (the recomputed portals are empty);")
+        print("  keeping the stored portals and notes. Fix x-portals (an integer port,")
+        print("  never quoted) with app.update, then re-run this script.")
+    elif refreshed is not None:
         meta.update(refreshed)
-    with open(f"{base}/metadata.yaml", "w") as fh:
-        yaml.safe_dump(meta, fh, default_flow_style=False)
+    write_yaml_atomic(f"{base}/metadata.yaml", meta)
 
     app_yaml_path = f"{base}/versions/{tag}/app.yaml"
     with open(app_yaml_path) as fh:
@@ -170,8 +236,7 @@ def main(argv: list[str]) -> int:
     av.update(DISPLAY)
     av["version"] = tag
     av["app_version"] = tag
-    with open(app_yaml_path, "w") as fh:
-        yaml.safe_dump(av, fh, default_flow_style=False)
+    write_yaml_atomic(app_yaml_path, av)
     print("metadata.yaml + app.yaml aligned")
 
     job_id = subprocess.check_output(

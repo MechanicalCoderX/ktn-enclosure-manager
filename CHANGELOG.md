@@ -58,6 +58,16 @@ Opt-in HTTPS. Nothing changes for an install that does not turn it on.
   never the rendered compose, which carries the API key. Its docstring and
   INSTALL-TRUENAS.md no longer claim `app.update` merges portals into the
   metadata file.
+- **Pre-release review fixes.** The app refuses to start when its
+  `KTN_TLS_ENABLED` disagrees with what the entrypoint set up (a lowercase
+  `ktn_tls_enabled` used to turn TLS "on" in the app while uvicorn served
+  plain HTTP); the entrypoint now exports `KTN_TLS_ACTIVE=1` only after
+  building the TLS arguments. A failing audit write can no longer stop the
+  renewal restart. The fix script refuses to rename onto an existing
+  `versions/<tag>` (it used to nest the directory), keeps the stored portals
+  and notes when `x-portals` fails validation, writes its YAML atomically at
+  `0600`, takes its backup under umask `077`, and prints the correct rollback
+  (remove the dir, then extract).
 
 ### Security
 - SECURITY.md names the trade plainly: the key served is the TrueNAS UI's

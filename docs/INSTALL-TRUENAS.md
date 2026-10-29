@@ -97,8 +97,15 @@ you create the administrator in the browser.
 > full `app.update` cycle afterwards. Run
 > [`truenas/fix-custom-app-metadata.py`](../truenas/fix-custom-app-metadata.py)
 > on the appliance to apply all of it; it takes a full tar backup first and
-> prints the rollback. Re-run after a reinstall, after updating to a new
-> image tag, or after changing `x-portals` (normal app updates do not revert
+> prints the rollback. That rollback is **remove `app_configs/<app>`, extract
+> the backup, then `app.metadata.generate`** - never extract over the existing
+> directory, which leaves the renamed `versions/<tag>` behind (the script now
+> refuses to run onto such a leftover). The backup holds the rendered compose,
+> API key included: it is created `0600`; delete it once you have checked the
+> result. To roll back an app *update*, use `app.update` with the previous
+> YAML and re-run the script; do not use the tar backup for that. Re-run
+> after a reinstall, after updating to a new image tag, or after changing
+> `x-portals` (normal app updates do not revert
 > the title or icon).
 
 ### Privileges this asks for
@@ -149,6 +156,11 @@ exist (`ls -l`) before editing the YAML.
       KTN_TLS_CERTFILE: /tls/fullchain.pem
       KTN_TLS_KEYFILE: /tls/privkey.pem
 ```
+
+Spell the variable names exactly as shown, in upper case. The app's own
+settings would accept `ktn_tls_enabled`, but the container entrypoint only
+reads `KTN_TLS_ENABLED`; since 1.6.0 the app refuses to start (naming the
+problem) rather than run with the two disagreeing.
 
 > **Use this long syntax only.** The short form
 > (`- /etc/certificates/<name>.key:/tls/privkey.pem:ro`) creates a missing
@@ -211,6 +223,16 @@ file. It never falls back to plain HTTP. To get back in immediately, set
 `KTN_TLS_ENABLED: "false"` (the two read-only mounts are harmless when off),
 set the portal back to `http`, rerun the fix script, and use
 `http://<NAS-IP>:8420` - by name, HSTS keeps upgrading it to https.
+
+**If a renewal leaves the container restarting** every few seconds, the
+renewed pair does not load (for example only the certificate was replaced,
+or the key write failed on the host). The app can check only the new
+certificate before restarting, not the key, and after the restart it refuses
+the pair, so the restart policy loops. Set `KTN_TLS_ENABLED: "false"` with
+**Apps → Edit** (that is an `app.update`) to get back in over plain HTTP, then
+fix the certificate in TrueNAS and turn TLS back on. Roll back with
+`app.update` only - never by extracting the fix script's tar backup over the
+app's config directory.
 
 ---
 

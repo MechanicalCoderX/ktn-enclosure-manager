@@ -8,6 +8,7 @@ serialised to the browser (spec §21).
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,55 @@ TLS_RUNTIME_DIR = Path("/run/ktn/tls")
 #: while the app believed it was on (or the reverse).
 TLS_BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
 TLS_BOOL_FALSE = frozenset({"0", "false", "no", "off", ""})
+
+#: Exported as "1" by docker-entrypoint.sh only once it has built uvicorn's
+#: --ssl-* arguments, and unset by it otherwise. See check_tls_marker.
+TLS_ACTIVE_MARKER = "KTN_TLS_ACTIVE"
+
+
+class TlsMismatchError(RuntimeError):
+    """The app's KTN_TLS_ENABLED disagrees with what the entrypoint started."""
+
+
+def check_tls_marker(settings: Settings, environ: Mapping[str, str] | None = None) -> None:
+    """Refuse to start unless the app and the entrypoint agree on TLS.
+
+    Why: pydantic-settings matches environment variable NAMES
+    case-insensitively, so ``ktn_tls_enabled=true`` turns TLS on here. The
+    shell entrypoint and the HEALTHCHECK read the exact name
+    ``KTN_TLS_ENABLED``, so for them TLS stays off - and uvicorn would serve
+    plain HTTP while ``/healthz`` claimed ``tls.enabled: true``. The VALUE
+    spelling is shared (scripts/tls-bool.sh); the name cannot be, so this
+    checks the outcome instead: the entrypoint sets the marker only after it
+    really set TLS up, and the marker and the setting must match.
+
+    The marker is read by its exact name, like everything the entrypoint
+    reads. With TLS unset - plain installs, the test suite, ``python -m
+    uvicorn`` in development - both sides are off and nothing changes. Anyone
+    running uvicorn by hand with ``--ssl-*`` and KTN_TLS_ENABLED=true sets
+    KTN_TLS_ACTIVE=1 too, as tests/tls_certs.run_server does.
+    """
+    env = os.environ if environ is None else environ
+    active = env.get(TLS_ACTIVE_MARKER, "") != ""
+    if settings.tls_enabled and not active:
+        raise TlsMismatchError(
+            "TLS is on in the app's settings (KTN_TLS_ENABLED), but the container "
+            f"entrypoint did not start TLS ({TLS_ACTIVE_MARKER} is not set), so uvicorn "
+            "would be serving plain HTTP. The entrypoint reads variable names in exact "
+            "upper case, while the app's settings accept any case: spell them "
+            "KTN_TLS_ENABLED, KTN_TLS_CERTFILE and KTN_TLS_KEYFILE. Refusing to start "
+            "rather than serve cleartext. (Running uvicorn by hand with --ssl-*? Set "
+            f"{TLS_ACTIVE_MARKER}=1 as well.)"
+        )
+    if active and not settings.tls_enabled:
+        raise TlsMismatchError(
+            f"The container entrypoint started TLS ({TLS_ACTIVE_MARKER} is set), but TLS "
+            "is off in the app's settings. Most likely a second spelling of the name in "
+            "a different case (for example ktn_tls_enabled=false) is overriding "
+            "KTN_TLS_ENABLED, because the app's settings ignore case. Refusing to start: "
+            "with TLS off here no renewal watcher would run, and a renewed certificate "
+            "would never be installed. Remove the other spelling."
+        )
 
 
 def parse_tls_bool(value: str) -> bool:

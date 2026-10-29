@@ -232,21 +232,30 @@ class TlsWatcher:
 
         if self._restarted:
             return self.interval
-        self._restarted = True
-        old, new = leaf_fingerprint(served), leaf_fingerprint(source)
-        if self.audit is not None:
-            self.audit.record(
-                user="system:tls",
-                enclosure="-",
-                operation="tls.reload",
-                result="restart",
-                verification="n/a",
-                detail=f"served sha256 {old} -> renewed sha256 {new}",
+        # The audit entry and the log line are best-effort: nothing in them
+        # may stop the restart. The one-shot flag is set only right before
+        # restart() for the same reason - set earlier, an exception in between
+        # left it True with no restart, and every later check returned above,
+        # so the renewal was never installed for the life of the process.
+        try:
+            old, new = leaf_fingerprint(served), leaf_fingerprint(source)
+            if self.audit is not None:
+                self.audit.record(
+                    user="system:tls",
+                    enclosure="-",
+                    operation="tls.reload",
+                    result="restart",
+                    verification="n/a",
+                    detail=f"served sha256 {old} -> renewed sha256 {new}",
+                )
+            log.warning(
+                "renewed TLS certificate detected (sha256 %s); restarting so the "
+                "entrypoint can install it - the container restart policy brings the "
+                "app back", new,
             )
-        log.warning(
-            "renewed TLS certificate detected (sha256 %s); restarting so the entrypoint "
-            "can install it - the container restart policy brings the app back", new,
-        )
+        except Exception:  # noqa: BLE001 - see above: never block the restart
+            log.exception("TLS reload: audit/log failed; restarting anyway")
+        self._restarted = True
         self.restart()
         return self.interval
 

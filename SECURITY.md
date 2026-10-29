@@ -298,6 +298,19 @@ gracefully. The container's restart policy (`unless-stopped`) brings it back,
 and the root entrypoint copies and checks the new pair. That is a few seconds
 of outage per renewal. A deployment without a restart policy simply stops -
 restart it by hand, or set the check to `0` and restart after each renewal.
+The watcher can verify only the renewed *certificate* (the web process cannot
+read the key), so a renewal onto a pair that does not load - only the
+certificate replaced, or a failed key write on the host - makes the
+entrypoint refuse after the restart, and the restart policy loops. That is
+the fail-closed choice; the recovery is `KTN_TLS_ENABLED=false` through
+`app.update` (see docs/INSTALL-TRUENAS.md), never a tar-extract of a backup.
+
+The app and the entrypoint must agree that TLS is on. The app's settings
+match variable names case-insensitively, the entrypoint only in exact upper
+case, so `ktn_tls_enabled=true` would have meant "on" to the app while uvicorn
+served plain HTTP. The entrypoint exports `KTN_TLS_ACTIVE=1` only after it has
+built the TLS arguments, and the app refuses to start when that marker and
+`KTN_TLS_ENABLED` disagree, in either direction.
 
 No HTTP listener remains when TLS is on, and there is **no http-to-https
 redirect**: uvicorn cannot speak both on one port, and a same-port redirect

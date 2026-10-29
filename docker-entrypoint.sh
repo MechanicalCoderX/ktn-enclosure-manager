@@ -53,6 +53,13 @@ fi
 # Done before the helper starts, so a refusal leaves nothing half-running.
 # Anything left in "$@" becomes extra uvicorn arguments, so clear it first.
 set --
+# KTN_TLS_ACTIVE tells the app that TLS really was set up here. It is
+# exported below only after the --ssl-* arguments are built, and never
+# inherited from the caller. The app refuses to start when it disagrees with
+# its own KTN_TLS_ENABLED: the app's settings match variable NAMES in any
+# case, this script only in exact upper case, so ktn_tls_enabled=true would
+# otherwise mean "TLS on" to the app while uvicorn served plain HTTP.
+unset KTN_TLS_ACTIVE
 APP_DIR="$(dirname "$0")"
 . "$APP_DIR/scripts/tls-bool.sh"
 
@@ -132,6 +139,7 @@ if [ "$TLS_ENABLED" = "true" ]; then
 
     echo "serving HTTPS with $TLS_CERT (copied to $TLS_DIR)"
     set -- --ssl-certfile "$TLS_DIR/cert.pem" --ssl-keyfile "$TLS_DIR/key.pem"
+    export KTN_TLS_ACTIVE=1
 fi
 
 if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
