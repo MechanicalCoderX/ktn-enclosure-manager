@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Dark theme: the bay numbers on the Drive map were near-black on the dark
+  tiles** (1.21:1). A tile is a `<button>`, buttons do not inherit colour, and
+  the number was the one part of the tile with no colour of its own, so it
+  took the browser's black. Tiles now use the theme's text colour (14.64:1 in
+  dark). Light is unchanged to the eye: pure black became the theme's
+  near-black `#16202c`, which all other text already uses.
+- **Dark theme: the search placeholder used the browser's light-theme grey**
+  (3.45:1 on the dark field). It now has a dark value (6.49:1); light keeps
+  the grey it had.
+- **Dark theme now declares `color-scheme: dark`**, so the browser's own
+  parts (scrollbars, the select arrow, the search field's clear button) are
+  drawn dark too, instead of in their light-theme colours.
+- A Playwright test measures the WCAG contrast of the bay numbers and of every
+  visible text element on all three tabs and the change-password dialog,
+  under Light, Dark and System with the OS preference emulated both ways.
+
 ## [1.6.0] — 2026-10-29
 
 Opt-in HTTPS. Nothing changes for an install that does not turn it on.
