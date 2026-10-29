@@ -336,3 +336,73 @@ async def test_many_simultaneous_changes_are_sent_concurrently(
 
     assert peak > 1, "notifications were delivered one at a time"
     assert elapsed < 15 * 0.05, f"delivery was serialised ({elapsed:.2f}s)"
+
+
+SECRET_URL = "https://ntfy.example/topic-s3cret?auth=TOKEN-s3cret"
+
+
+@pytest.mark.parametrize("status", [200, 301, 308, 401, 404, 500, 503])
+async def test_webhook_url_never_reaches_the_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    status: int,
+) -> None:
+    """The URL is a secret (ntfy topic / ?auth= token). It is driven through a
+    REAL httpx client, because the leak was httpx's own INFO line."""
+    from ktnmgr.main import configure_logging
+
+    configure_logging()
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(status))
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient",
+        lambda **kw: real_client(transport=transport, **kw),
+    )
+    notifier = HealthNotifier(SECRET_URL, state_path=tmp_path / "n.json")
+
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    assert caplog.records, "control: the notifier logged nothing, so this proves nothing"
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "s3cret" not in text, text
+    assert "topic" not in text, text
+
+
+async def test_webhook_url_is_scrubbed_from_exception_text(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    class QuotingClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, *a: Any, **k: Any) -> FakeResponse:
+            raise httpx.ConnectError(f"cannot connect to {SECRET_URL}")
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", QuotingClient)
+    notifier = HealthNotifier(SECRET_URL, state_path=tmp_path / "n.json")
+
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "could not deliver" in text and "ntfy.example" in text, text
+    assert "s3cret" not in text and "topic" not in text, text
+
+
+@pytest.mark.parametrize("status", [301, 308])
+async def test_a_redirect_is_not_delivery_and_is_retried(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, status: int
+) -> None:
+    class RedirectingClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, *a: Any, **k: Any) -> FakeResponse:
+            return FakeResponse(status)
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", RedirectingClient)
+    notifier = HealthNotifier("http://ntfy/topic", state_path=tmp_path / "n.json")
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+    assert not (tmp_path / "n.json").exists() or "failed" not in (tmp_path / "n.json").read_text()

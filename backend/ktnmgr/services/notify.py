@@ -21,6 +21,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -183,22 +184,39 @@ class HealthNotifier:
                         },
                     )
         except (httpx.HTTPError, OSError) as exc:
-            # A failing notification endpoint must never disturb polling.
-            log.warning("could not deliver health notification: %s", exc)
+            # A failing notification endpoint must never disturb polling. The URL
+            # is a secret for ntfy (the topic or an ?auth= token), and some httpx
+            # errors quote it, so it is scrubbed from the message.
+            log.warning(
+                "could not deliver health notification to %s: %s: %s",
+                self._where, type(exc).__name__, self._scrub(str(exc)),
+            )
             return False
 
         # A 404 from a mistyped ntfy topic, or a 401 from a webhook that wants
         # auth, is not delivery. Without this the log said "notified" forever
         # while nothing ever arrived - the worst possible failure mode for an
         # alerting path, because it looks healthy.
-        if response.status_code >= 400:
+        # A 3xx is not delivery either: the client does not follow redirects, so
+        # a moved topic or an http->https proxy would otherwise be committed as
+        # sent and never retried.
+        if not 200 <= response.status_code < 300:
             log.warning(
                 "health notification rejected: HTTP %s from %s",
-                response.status_code, self.url,
+                response.status_code, self._where,
             )
             return False
         log.info("notified: %s", title)
         return True
+
+    @property
+    def _where(self) -> str:
+        """Scheme and host only: the path and query of the URL are secrets."""
+        parts = urlsplit(self.url)
+        return f"{parts.scheme}://{parts.hostname or '?'}"
+
+    def _scrub(self, text: str) -> str:
+        return text.replace(self.url, "<webhook url>") if self.url else text
 
     # ------------------------------------------------------------- evaluate
 

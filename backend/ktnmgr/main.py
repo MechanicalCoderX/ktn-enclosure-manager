@@ -52,11 +52,20 @@ def _canonical_host(value: str) -> str:
     return value
 
 
-def build_app(settings: Settings | None = None) -> FastAPI:
-    settings = settings or get_settings()
+def configure_logging() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
+    # httpx logs "HTTP Request: POST <full url>" at INFO. The alert webhook URL
+    # is a secret (an ntfy topic or its ?auth= token), so the client libraries
+    # stay at WARNING whatever the root level is.
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def build_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or get_settings()
+    configure_logging()
 
     lock_path = settings.enclosure_lock_path
     backend = SysfsEnclosureBackend(
