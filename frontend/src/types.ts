@@ -152,6 +152,13 @@ export interface BaySources {
 export interface BaysResponse {
   bays: Bay[];
   sources: BaySources;
+  /**
+   * The server's clock when this response was composed. Every
+   * `ident_expires_at` is on that clock, not the browser's; the gap between
+   * the two is what turns an expiry into a moment the browser can schedule.
+   * Optional so a response without it degrades to the browser's own clock.
+   */
+  generated_at?: string;
 }
 
 export interface AuditEntry {

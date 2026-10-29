@@ -69,6 +69,18 @@ Opt-in HTTPS. Nothing changes for an install that does not turn it on.
   opt-in, `KTN_TLS_HTTP_REDIRECT`, not implemented). Update `http://`
   bookmarks and monitors to `https://`.
 
+### Fixed (also in 1.6.0)
+- **A timed Identify's marker now goes out on time.** The map learned of the
+  server's clear only on the next 5 s bay poll, so the marker kept blinking
+  for up to five seconds after the LED went dark (reported on Bay 15 after a
+  30 s Identify). The map now puts the marker out at `ident_expires_at` and
+  re-reads `/bays` once at that moment; a later expiry from the server cancels
+  the pending stop, and "Until cleared" is unchanged. The detail panel still
+  shows the server's state, so Clear stays available if the server's clear is
+  being retried. `/bays` now carries `generated_at` (the server's clock), so
+  the expiry is scheduled correctly when the browser's clock is skewed; the
+  countdown uses the same correction.
+
 ## [1.5.7] — 2026-10-29
 
 ### Security
