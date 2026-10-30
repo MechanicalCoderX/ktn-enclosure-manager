@@ -183,10 +183,14 @@ class HealthNotifier:
                             "zfs_state": bay.zfs.state,
                         },
                     )
-        except httpx.InvalidURL as exc:
+        except (httpx.InvalidURL, UnicodeError) as exc:
             # A malformed URL (a typo'd port, a stray control character) fails
             # while the request is built, and InvalidURL is not an HTTPError, so
-            # it needs its own clause or it escapes evaluate(). Nothing from the
+            # it needs its own clause or it escapes evaluate(). UnicodeError is
+            # the same failure, unwrapped: httpx 0.28 lets idna's error through
+            # for an ASCII "xn--" host that does not decode, and a
+            # UnicodeEncodeError through for a lone surrogate (os.environ makes
+            # one from any non-UTF-8 byte in the variable). Nothing from the
             # URL is logged here, not even scheme and host: httpx's message
             # quotes the bad component, and in a mistyped URL that can be the
             # secret itself ("https://user:token/topic" is reported as an

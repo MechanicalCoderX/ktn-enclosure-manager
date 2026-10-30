@@ -507,13 +507,25 @@ async def test_notifier_sees_every_bay_whose_identity_resolved() -> None:
     assert [bay.ses_slot for bay in seen] == [SES_SLOT, 4]
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://ntfy.example:notaport/topic-s3cret",
+        "https://xn--ls8h.la/topic-s3cret",
+        "https://ntfy.example/topic-s3cret\udcff",
+    ],
+    ids=["invalid-url", "idna-undecodable", "lone-surrogate"],
+)
 async def test_a_malformed_webhook_url_does_not_skip_later_enclosures(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    url: str,
 ) -> None:
-    """httpx.InvalidURL used to escape HealthNotifier.evaluate() for the first
-    enclosure, so _notify_health_changes logged a traceback and never reached
-    the second one. Driven through the real notifier and the real httpx client,
-    so it is httpx's own URL parsing that raises."""
+    """httpx.InvalidURL, and the bare UnicodeError httpx lets through for an
+    undecodable "xn--" host or a lone surrogate, used to escape
+    HealthNotifier.evaluate() for the first enclosure, so
+    _notify_health_changes logged a traceback and never reached the second one.
+    Driven through the real notifier and the real httpx client, so it is httpx's
+    own URL parsing that raises."""
     import httpx
     from ktnmgr.services.notify import HealthNotifier
 
@@ -525,9 +537,7 @@ async def test_a_malformed_webhook_url_does_not_skip_later_enclosures(
             return await super().post(*args, **kwargs)
 
     monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", CountingClient)
-    notifier = HealthNotifier(
-        "https://ntfy.example:notaport/topic-s3cret", state_path=tmp_path / "n.json"
-    )
+    notifier = HealthNotifier(url, state_path=tmp_path / "n.json")
     service = _service(notifier=notifier)
     second_id = "0x50060480aabbcc99"
     service.enclosures.succeed([_ref(), _ref().model_copy(update={"logical_id": second_id})])

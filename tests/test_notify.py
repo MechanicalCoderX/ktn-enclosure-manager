@@ -680,10 +680,11 @@ async def test_the_logging_cap_is_what_keeps_httpx_from_logging_the_url(
 async def test_a_malformed_url_counts_as_a_failed_delivery(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A typo in the webhook URL is a failed delivery like any other: warned
-    about without the secret, and retried on the cooldown. httpx.InvalidURL is
-    not an httpx.HTTPError, so it used to escape evaluate() instead: the caller
-    logged a traceback on every changed poll and the cooldown was never set."""
+    """A typo in the webhook URL is a failed delivery like any other: it must
+    not raise, and it is warned about without the secret. httpx.InvalidURL is
+    not an httpx.HTTPError, so it used to escape evaluate() instead and the
+    caller logged a traceback. (The cooldown it also skipped is asserted in
+    test_a_malformed_url_sets_the_cooldown_and_still_commits_silent_changes.)"""
     notifier = HealthNotifier("https://ntfy.example:notaport/topic-s3cret",
                               state_path=tmp_path / "n.json", retry_seconds=60.0)
 
@@ -700,15 +701,22 @@ async def test_a_malformed_url_counts_as_a_failed_delivery(
 
 # ------------------------------------------- malformed webhook URL 2026-10-30
 
-#: Each is rejected by httpx with InvalidURL while the request is being built,
-#: before anything is sent (checked against httpx 0.28.1). The second is the
-#: case that rules out logging httpx's message: with the "@host" missing, the
-#: password is parsed as a port and httpx reports "Invalid port: '<password>'".
+#: Each is rejected by httpx while the request is being built, before anything
+#: is sent (checked against httpx 0.28.1). The first three raise InvalidURL. The
+#: second is the case that rules out logging httpx's message: with the "@host"
+#: missing, the password is parsed as a port and httpx reports
+#: "Invalid port: '<password>'". The last two raise a bare UnicodeError that
+#: httpx does not wrap: idna's InvalidCodepoint for an ASCII "xn--" label that
+#: does not decode (an emoji domain in A-label form), and UnicodeEncodeError for
+#: a lone surrogate, which os.environ produces from a non-UTF-8 byte.
 MALFORMED_URLS = [
     "https://alice:pw-s3cret@ntfy.example:notaport/topic-s3cret?auth=TOKEN-s3cret",
     "https://alice:pw-s3cret/topic-s3cret?auth=TOKEN-s3cret",
     "https://ntfy.example/topic-s3cret\x7f?auth=TOKEN-s3cret",
+    "https://alice:pw-s3cret@xn--ls8h.la/topic-s3cret?auth=TOKEN-s3cret",
+    "https://ntfy.example/topic-s3cret\udcff?auth=TOKEN-s3cret",
 ]
+MALFORMED_IDS = ["bad-port", "missing-host", "control-char", "idna-undecodable", "lone-surrogate"]
 
 
 def counting_real_client() -> tuple[type, list[int]]:
@@ -723,7 +731,7 @@ def counting_real_client() -> tuple[type, list[int]]:
     return CountingClient, attempts
 
 
-@pytest.mark.parametrize("url", MALFORMED_URLS, ids=["bad-port", "missing-host", "control-char"])
+@pytest.mark.parametrize("url", MALFORMED_URLS, ids=MALFORMED_IDS)
 async def test_a_malformed_url_leaks_nothing_of_the_url_into_the_logs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
     url: str,
@@ -776,16 +784,29 @@ async def test_a_malformed_url_sets_the_cooldown_and_still_commits_silent_change
     assert len(attempts) == 2, "after the cooldown the alert is attempted again"
 
 
+#: URLs httpx accepts far enough to attempt a connection (checked against
+#: httpx 0.28.1: each gives a ConnectError for an unresolvable host) but that
+#: urlsplit refuses with ValueError. For the NFKC one - a userinfo character
+#: that changes under Unicode NFKC normalisation - the ValueError message quotes
+#: the whole netloc, password included, so before the _where guard the password
+#: reached the "health notification failed" traceback.
+URLSPLIT_REFUSES = [
+    "https://[ntfy.example/topic-s3cret?auth=TOKEN-s3cret",
+    "https://alice:pw[-s3cret@ntfy.example/topic-s3cret?auth=TOKEN-s3cret",
+    "https://alice:pw\u2100x-s3cret@ntfy.example/topic-s3cret?auth=TOKEN-s3cret",
+]
+
+
+@pytest.mark.parametrize("url", URLSPLIT_REFUSES, ids=["host-bracket", "password-bracket", "nfkc-userinfo"])
 @pytest.mark.parametrize("status", [None, 404], ids=["connect-error", "HTTP-404"])
 async def test_a_host_urlsplit_refuses_still_counts_as_a_failed_delivery(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
-    status: int | None,
+    status: int | None, url: str,
 ) -> None:
-    """An unbalanced "[" is not an InvalidURL to httpx (it fails later, as a
-    ConnectError), but urlsplit raises ValueError on it. The warning names the
+    """These are not an InvalidURL to httpx (they fail later, as a
+    ConnectError), but urlsplit raises ValueError on them. The warning names the
     endpoint through _where, inside the error handling, so _where must not
     raise there or the failure escapes evaluate() all the same."""
-    url = "https://[ntfy.example/topic-s3cret?auth=TOKEN-s3cret"
     if status is None:
         client = raising_client(lambda u: httpx.ConnectError("Name or service not known"))
     else:
@@ -797,5 +818,5 @@ async def test_a_host_urlsplit_refuses_still_counts_as_a_failed_delivery(
         await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # must not raise
 
     text = log_text(caplog)
-    assert "s3cret" not in text and "TOKEN" not in text, text
+    assert "s3cret" not in text and "TOKEN" not in text and "alice" not in text, text
     assert "<malformed webhook url>" in text, text

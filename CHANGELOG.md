@@ -21,18 +21,25 @@ versioning follows [Semantic Versioning](https://semver.org/).
   into the search and password fields, which it previously skipped.
 - **Health alerts: a malformed `KTN_ALERT_WEBHOOK_URL`, such as one whose
   port is not a number, now counts as a failed delivery.** httpx reports
-  these as `InvalidURL`, which is not an `HTTPError`, so the error escaped
-  the notifier. While an alert was waiting to be sent, every poll logged a
-  `health notification failed` traceback because the retry spacing was
-  never applied, any enclosures after the failing one were skipped for that
-  poll, and that poll's silent state changes were not saved. It is now a single warning that the
-  URL is malformed, quoting no part of it: httpx's message names the bad
-  part, and in a mistyped URL that part can be the password or token. The
-  alert is still not delivered until the URL is corrected.
-- Health alerts: a webhook URL with an unbalanced `[` in its host failed the
-  same way by a different route. httpx reports it as a connection error,
-  but the warning for that error took the URL apart with Python's
-  `urlsplit`, which raises on such a host. The warning now names the
+  most of these as `InvalidURL`, and an `xn--` host that does not decode or
+  a stray non-UTF-8 byte as a bare `UnicodeError`. Neither is an
+  `HTTPError`, so the error escaped the notifier. While an alert was waiting
+  to be sent, every poll logged a `health notification failed` traceback
+  because the retry spacing was never applied, any enclosures after the
+  failing one were skipped for that poll, and that poll's silent state
+  changes were not saved. It is now a one-line warning (no traceback),
+  repeated on the retry spacing, that says the URL is malformed and quotes
+  no part of it: httpx's message names the bad part, and in a mistyped URL
+  that part can be the password or token. The alert is still not delivered
+  until the URL is corrected.
+- Health alerts: some other malformed webhook URLs failed the same way by a
+  different route: an unbalanced `[` in the host, a `[` or `]` in the
+  password, and userinfo characters that change under Unicode NFKC
+  normalisation. httpx gets as far as a connection error on these, but the
+  warning for that error took the URL apart with Python's `urlsplit`, which
+  raises on them. For the NFKC case the error it raised quoted the whole
+  `user:password@host` part of the URL, and that message was logged with
+  the traceback: a credential leak, now closed. The warning now names the
   endpoint as `<malformed webhook url>` instead.
 
 ## [1.6.1] — 2026-10-29
