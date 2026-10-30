@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /**
  * End-to-end tests (spec §44). These drive the real backend against the
@@ -626,6 +627,65 @@ async function lowContrast(page: Page, selector: string) {
   }, selector);
 }
 
+/**
+ * WCAG 1.4.11 contrast of `target`'s keyboard focus ring: the outline colour
+ * (with the opacity of the element and its ancestors, which dims an outline
+ * too) against the surface it is drawn on, which is whatever is painted behind
+ * the element's parent - the ring sits outside the element's own box. The
+ * element is reached by keyboard, so :focus-visible applies.
+ * Returns the ratio, or 0 when no outline is drawn.
+ */
+async function focusRing(page: Page, target: Locator) {
+  // Focus it, then leave and come back by keyboard: a ring is only promised
+  // for keyboard focus, and a mouse click earlier in the test would otherwise
+  // leave :focus-visible unset.
+  await target.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(target).toBeFocused();
+  return target.evaluate((el) => {
+    type C = { r: number; g: number; b: number; a: number };
+    const parse = (s: string): C => {
+      const p = (s.match(/rgba?\(([^)]+)\)/)?.[1] ?? "0 0 0 0")
+        .split(/[ ,/]+/).filter(Boolean).map(Number);
+      return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+    };
+    const over = (t: C, u: C): C => ({
+      r: t.r * t.a + u.r * (1 - t.a),
+      g: t.g * t.a + u.g * (1 - t.a),
+      b: t.b * t.a + u.b * (1 - t.a),
+      a: 1,
+    });
+    const lum = (c: C) => {
+      const f = (v: number) =>
+        (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+    };
+    if (!el.matches(":focus-visible")) return 0;
+    const cs = getComputedStyle(el);
+    if (cs.outlineStyle === "none" || parseFloat(cs.outlineWidth) < 2) return 0;
+    let surface: C = { r: 255, g: 255, b: 255, a: 1 };
+    const chain: Element[] = [];
+    for (let n = el.parentElement; n; n = n.parentElement) chain.unshift(n);
+    for (const n of chain) surface = over(parse(getComputedStyle(n).backgroundColor), surface);
+    let alpha = 1;
+    for (let n: Element | null = el; n; n = n.parentElement) alpha *= Number(getComputedStyle(n).opacity);
+    const ring = parse(cs.outlineColor);
+    const [hi, lo] = [lum(over({ ...ring, a: ring.a * alpha }, surface)), lum(surface)].sort((a, b) => b - a);
+    return (hi + 0.05) / (lo + 0.05);
+  });
+}
+
+/** axe-core's serious and critical findings on the page as it stands. */
+async function seriousAxe(page: Page) {
+  const { violations } = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"])
+    .analyze();
+  return violations
+    .filter((v) => v.impact === "serious" || v.impact === "critical")
+    .map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
+}
+
 test.describe("theme contrast", () => {
   // The three theme settings, with the OS preference emulated both ways for
   // System. The explicit choices run against the *opposite* OS preference, so
@@ -809,6 +869,71 @@ test.describe("theme contrast", () => {
       expect(failures(infos.low), ".notice.info").toEqual([]);
     });
 
+    test(`${mode.name}: axe finds nothing serious or critical on any screen`, async ({ page }) => {
+      await signInAs(page, mode);
+      await page.getByRole("button", { name: /^Bay 1\b/ }).click();
+      await expect(page.getByTestId("bay-detail")).toBeVisible();
+      expect(await seriousAxe(page), "drive map with a bay selected").toEqual([]);
+
+      await page.getByRole("tab", { name: "Chassis" }).click();
+      await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
+      expect(await seriousAxe(page), "chassis tab").toEqual([]);
+
+      await page.getByRole("tab", { name: "Diagnostics" }).click();
+      await expect(page.locator("pre.raw").first()).toContainText("app_version");
+      await page.getByRole("button", { name: "Run" }).click();
+      await expect(page.locator("pre.raw")).toHaveCount(2);
+      expect(await seriousAxe(page), "diagnostics tab").toEqual([]);
+
+      await page.getByRole("button", { name: "Change password" }).click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      expect(await seriousAxe(page), "change-password dialog").toEqual([]);
+      await page.keyboard.press("Escape");
+
+      await page.getByRole("button", { name: /Sign out/ }).click();
+      await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+      expect(await seriousAxe(page), "login screen").toEqual([]);
+    });
+
+    test(`${mode.name}: every keyboard focus ring reaches 3:1 against its surface`, async ({
+      page,
+    }) => {
+      await signInAs(page, mode);
+      const rings: Record<string, number> = {};
+      const ring = async (name: string, target: Locator) => {
+        rings[name] = Number((await focusRing(page, target)).toFixed(2));
+      };
+      // Drive map: tab, search, theme select, freshness summary, and a bay
+      // tile plain, selected and dimmed by a search that does not match it.
+      await ring("tab", page.getByRole("tab", { name: "Drive map" }));
+      await ring("search", page.getByLabel("Search bays"));
+      await ring("theme select", page.getByLabel("Theme"));
+      await ring("freshness summary", page.getByTestId("freshness").locator("summary"));
+      await ring("bay tile", page.getByRole("button", { name: /^Bay 2\b/ }));
+      await page.getByRole("button", { name: /^Bay 1\b/ }).click();
+      await ring("selected bay tile", page.getByRole("button", { name: /^Bay 1\b/ }));
+      await ring("identify select", page.getByLabel("Identify for"));
+      await ring("identify button", page.getByRole("button", { name: "Identify", exact: true }));
+      await page.getByLabel("Search bays").fill("K1A00001");
+      await ring("dimmed bay tile", page.getByRole("button", { name: /^Bay 2\b/ }));
+      await page.getByLabel("Search bays").fill("");
+
+      await page.getByRole("tab", { name: "Diagnostics" }).click();
+      await expect(page.locator("pre.raw").first()).toContainText("app_version");
+      await ring("diagnostics output", page.locator("pre.raw").first());
+      await ring("raw-page select", page.getByLabel("Page", { exact: true }));
+
+      await page.getByRole("button", { name: "Change password" }).click();
+      const dialog = page.getByRole("dialog");
+      await ring("dialog field", dialog.getByLabel("Current password"));
+      await ring("dialog primary button", dialog.getByRole("button", { name: "Change password" }));
+      await ring("dialog secondary button", dialog.getByRole("button", { name: "Cancel" }));
+
+      const low = Object.entries(rings).filter(([, r]) => r < 3);
+      expect(Object.keys(rings)).toHaveLength(14);
+      expect(low, "focus rings below 3:1 (0 = no ring drawn)").toEqual([]);
+    });
+
     test(`${mode.name}: the login screen, its notices and the unauthenticated badge stay readable`, async ({
       page,
     }) => {
@@ -905,6 +1030,46 @@ test.describe("theme contrast", () => {
     const filled = await lowContrast(page, field);
     expect(filled.low.map((l) => l.label)).toEqual(["input[type=search] value (text-fill)"]);
     await search.fill("");
+  });
+});
+
+test.describe("keyboard", () => {
+  test("the password dialog keeps focus, closes on Escape and hands focus back", async ({
+    page,
+  }) => {
+    await bootstrapAndLogin(page);
+    const opener = page.getByRole("button", { name: "Change password" });
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByLabel("Current password")).toBeFocused();
+    // The page behind is inert: nothing in it can take focus or be clicked.
+    await expect(page.locator("header.topbar")).toHaveAttribute("inert", "");
+    await expect(page.locator("main")).toHaveAttribute("inert", "");
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("Tab");
+      const inDialog = await page.evaluate(
+        () => !document.activeElement || document.activeElement === document.body
+          || !!document.activeElement.closest('[role="dialog"]'),
+      );
+      expect(inDialog, `Tab ${i + 1} left the dialog`).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(page.locator("main")).not.toHaveAttribute("inert");
+  });
+
+  test("a bay tile is selected from the keyboard and announces it", async ({ page }) => {
+    await bootstrapAndLogin(page);
+    const tile = page.getByRole("button", { name: /^Bay 3\b/ });
+    await tile.focus();
+    await page.keyboard.press("Enter");
+    await expect(tile).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("bay-detail")).toContainText("Bay 3");
+    await page.getByRole("button", { name: /^Bay 4\b/ }).focus();
+    await page.keyboard.press("Space");
+    await expect(tile).toHaveAttribute("aria-pressed", "false");
   });
 });
 
