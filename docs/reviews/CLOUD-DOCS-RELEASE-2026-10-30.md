@@ -16,7 +16,7 @@ no merge, no PR, no deploy.
   (`/1.1.0/` returned 404, `/en/1.1.0/` returns 200).
 - **Checks:** markdown links pass (0 broken). `tests/test_version_consistency.py`
   passes (10/10). The repo has no docs build or linter. `git diff --check` is clean.
-- **Dependabot #51 (vite 8.3.4 → 8.3.5):** pending: the scratch-copy build and test run is still in progress. A follow-up commit fills this in.
+- **Dependabot #51 (vite 8.3.4 → 8.3.5):** **safe to merge** (not merged). Its CI passed 9 of 9 checks, and on this branch's base the build, typecheck, audit and e2e all pass. Details below.
 
 ## What changed
 | File | Change |
@@ -82,4 +82,38 @@ the docs now introduce them; no review file defines them.
   `.github/workflows`).
 
 ## Dependabot #51
-Pending (see Status).
+PR head `ba65029` changes only `frontend/package.json` and `package-lock.json`.
+The installed versions moved as follows: vite 8.3.4 → 8.3.5, rolldown 1.2.13 → 1.2.15
+and @oxc-project/types 0.153.0 → 0.155.0. postcss resolves to 8.5.30 in both.
+The test was a scratch copy of this branch's `frontend/` (b8663c2) with the PR's
+two files dropped in, against an unchanged copy. The repo checkout was not
+touched, and the temporary fetch ref was deleted afterwards.
+
+| Check | base (8.3.4) | PR #51 (8.3.5) |
+|---|---|---|
+| `npm ci` | exit 0 | exit 0 |
+| `npm run typecheck` | exit 0 | exit 0 |
+| `npm run build` | exit 0, no warnings | exit 0, no warnings |
+| dist | — | CSS, html, icons byte-identical; JS 251,739 → 251,737 B (4 equivalent minifier rewrites), gzip ≈ 77.95 kB both |
+| `npm audit` / `--omit=dev` | 0 vulnerabilities | 0 vulnerabilities |
+| Playwright e2e (CI's job: `scripts/e2e-server.sh`, desktop + mobile) | 74 passed, 5 skipped, 1 flake* | 75 passed, 5 skipped, exit 0 |
+| `--grep "identify expiry" --repeat-each 5` | 40/40 | 40/40 |
+
+\*On mobile, "identify expiry › a later expiry from the server cancels the
+pending local stop" failed once on **base** (it saw 2 polls in one interval).
+It passed 40/40 on both copies on rerun, so it is a timing flake and was not
+introduced by the PR. It may be worth a look as a separate item.
+
+PR CI on `ba65029`: 9/9 check runs green (frontend, backend, e2e, image
+amd64/arm64, TLS smoke, CodeQL, analyze python/js-ts). GitHub reports
+`mergeable_state: clean`.
+
+Caveats. The PR is 13 commits behind main, but none of those commits touch
+`frontend/package*.json`. The merged result was tested as described above,
+and a rebase or "Update branch" is optional. Local runs used Node 22.22 and
+Python 3.13, while CI uses Node 26 and Python 3.14; CI on the PR covers those.
+The e2e run used the preinstalled Chromium 1243 (the project pins 1248).
+
+Logs:
+`/tmp/claude-0/-home-user-ktn-enclosure-manager/4b0009fa-e75b-5c21-8a19-abb8251d0b3e/scratchpad/pr51/`
+(not committed).
