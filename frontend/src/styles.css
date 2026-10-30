@@ -96,7 +96,8 @@ body {
 }
 
 button { font: inherit; cursor: pointer; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+pre.raw:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

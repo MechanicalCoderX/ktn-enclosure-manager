@@ -931,7 +931,7 @@ export function DiagnosticsView({ enclosureId }: { enclosureId: string }) {
         >
           Copy diagnostics
         </button>
-        <pre className="raw">{copyable}</pre>
+        <pre className="raw" tabIndex={0}>{copyable}</pre>
       </div>
 
       <div className="panel">
@@ -940,7 +940,8 @@ export function DiagnosticsView({ enclosureId }: { enclosureId: string }) {
           Predefined read-only operations only; arbitrary sg_ses parameters are not accepted.
         </div>
         <div className="ident-controls">
-          <select value={page} onChange={(e) => setPage(e.target.value)}>
+          <label htmlFor="raw-page" className="muted">Page</label>
+          <select id="raw-page" value={page} onChange={(e) => setPage(e.target.value)}>
             {pages.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
@@ -957,7 +958,7 @@ export function DiagnosticsView({ enclosureId }: { enclosureId: string }) {
             Run
           </button>
         </div>
-        {raw && <pre className="raw">{raw}</pre>}
+        {raw && <pre className="raw" tabIndex={0}>{raw}</pre>}
       </div>
 
       <div className="panel">
