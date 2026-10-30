@@ -231,10 +231,10 @@ class HealthNotifier:
             parts = urlsplit(self.url)
             host = parts.hostname
         except ValueError:
-            # urlsplit refuses some malformed hosts outright (an unbalanced
-            # "[", a bracketed host that is not an IPv6 address) while httpx
-            # gets as far as a connect error. This runs inside _send()'s error
-            # handlers, so raising here would escape them.
+            # urlsplit refuses some malformed hosts outright, such as an
+            # unbalanced "[", that httpx takes as far as a connect error. This
+            # runs inside _send()'s error handlers, so raising here would
+            # escape them.
             return "<malformed webhook url>"
         return f"{parts.scheme}://{host or '?'}"
 
