@@ -8,6 +8,8 @@ the files and the certificate parsing are real.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -258,3 +260,250 @@ def test_a_failing_audit_still_restarts_onto_the_renewal(world: World) -> None:
         world.clock.advance(3600)
         world.watcher.check()
     assert world.restarts == 1
+
+
+# ------------------------------------- hardening pass 2026-10-30
+# The hash and settle bookkeeping from every side: a source that goes back, goes
+# bad or goes away mid-settle, an unreadable served copy, log de-duplication,
+# and the loop around check().
+
+
+def test_a_revert_during_settle_cancels_it_and_the_next_change_settles_afresh(
+    world: World,
+) -> None:
+    """Renewed, then put back to the served bytes before the settle ended: no
+    restart, and when the renewal reappears the clock starts again - the 30 s
+    already spent on the first sighting must not count."""
+    served_bytes = world.served.read_bytes()
+    renewed = world.renewed_cert()
+    world.rewrite_in_place(renewed)
+    assert world.watcher.check() == 60
+    assert world.watcher.reload_pending is True
+
+    world.clock.advance(30)
+    world.rewrite_in_place(served_bytes)
+    assert world.watcher.check() == 3600
+    assert world.watcher.reload_pending is False
+    assert world.restarts == 0
+
+    world.clock.advance(30)
+    world.rewrite_in_place(renewed)
+    assert world.watcher.check() == 60       # a fresh settle, not the 30 s left
+    assert world.watcher.reload_pending is True
+
+    world.clock.advance(30)
+    world.watcher.check()
+    assert world.restarts == 0
+    world.clock.advance(30)
+    world.watcher.check()
+    assert world.restarts == 1
+
+
+def test_unparseable_content_mid_settle_resets_the_settle(world: World) -> None:
+    """A half-written file in the middle of a settle throws the first sighting
+    away: the complete file that follows must itself be stable for a full settle."""
+    renewed = world.renewed_cert()
+    half = renewed[: len(renewed) // 2]
+    assert b"-----END" not in half
+    world.rewrite_in_place(renewed)
+    world.watcher.check()
+    world.clock.advance(50)
+    world.rewrite_in_place(half)
+    assert world.watcher.check() == 60       # the settle value, not the interval
+    assert world.watcher.reload_pending is False
+
+    world.clock.advance(10)
+    world.rewrite_in_place(renewed)
+    assert world.watcher.check() == 60       # fresh, though 60 s since the first
+    assert world.restarts == 0
+    world.clock.advance(59)
+    world.watcher.check()
+    assert world.restarts == 0
+    world.clock.advance(1)
+    world.watcher.check()
+    assert world.restarts == 1
+
+
+def test_an_unreadable_source_mid_settle_resets_the_settle(world: World) -> None:
+    """The file vanishing during a settle also forgets the first sighting."""
+    renewed = world.renewed_cert()
+    world.rewrite_in_place(renewed)
+    world.watcher.check()
+    world.clock.advance(50)
+    world.source.unlink()
+    assert world.watcher.check() == 3600
+    assert world.watcher.reload_pending is False
+
+    world.source.write_bytes(renewed)        # the file is gone, so a plain write is fine
+    assert world.watcher.check() == 60       # fresh settle
+    assert world.watcher.reload_pending is True
+    world.clock.advance(59)                  # 109 s since the FIRST sighting
+    world.watcher.check()
+    assert world.restarts == 0
+    world.clock.advance(1)
+    world.watcher.check()
+    assert world.restarts == 1
+
+
+def test_an_unreadable_served_copy_pauses_the_watcher_until_it_is_back(world: World) -> None:
+    """Without the served copy there is nothing to compare with, so even a real
+    renewal must not restart; when it returns the change settles normally."""
+    served_bytes = world.served.read_bytes()
+    world.served.unlink()
+    world.rewrite_in_place(world.renewed_cert())
+
+    assert world.watcher.check() == 3600
+    reason = world.watcher.disabled_reason
+    assert reason is not None and reason.startswith("served copy")
+    assert "served copy" in world.watcher.status()["watch_error"]
+    assert world.watcher.reload_pending is False
+    for _ in range(3):
+        world.clock.advance(3600)
+        world.watcher.check()
+    assert world.restarts == 0
+
+    world.served.write_bytes(served_bytes)
+    assert world.watcher.check() == 60
+    assert world.watcher.disabled_reason is None
+    assert world.watcher.reload_pending is True
+    assert world.restarts == 0
+    world.clock.advance(59)
+    world.watcher.check()
+    assert world.restarts == 0
+    world.clock.advance(1)
+    world.watcher.check()
+    assert world.restarts == 1
+
+
+def test_the_does_not_parse_warning_is_logged_once_per_distinct_content(
+    world: World, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A half-written file is rechecked every settle period; the log must not
+    repeat itself for the same bytes, but a different bad file is news."""
+    caplog.set_level(logging.WARNING, logger="ktnmgr.services.tls_watch")
+
+    def parse_warnings() -> list[str]:
+        return [r.getMessage() for r in caplog.records if "does not parse" in r.getMessage()]
+
+    world.rewrite_in_place(b"bad content X\n")
+    for _ in range(3):
+        world.watcher.check()
+        world.clock.advance(60)
+    assert len(parse_warnings()) == 1
+
+    world.rewrite_in_place(b"bad content Y\n")
+    for _ in range(3):
+        world.watcher.check()
+        world.clock.advance(60)
+    assert len(parse_warnings()) == 2
+
+
+def test_the_paused_warning_is_logged_once_and_resumption_is_noted(
+    world: World, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unreadable source is rechecked every interval; warn once per reason,
+    then say so when the watcher is back."""
+    caplog.set_level(logging.INFO, logger="ktnmgr.services.tls_watch")
+
+    def messages(level: int) -> list[str]:
+        return [r.getMessage() for r in caplog.records if r.levelno == level]
+
+    world.source.unlink()
+    for _ in range(3):
+        world.watcher.check()
+        world.clock.advance(3600)
+    assert len([m for m in messages(logging.WARNING) if "paused" in m]) == 1
+    assert not [m for m in messages(logging.INFO) if "resumed" in m]
+
+    world.source.write_bytes(world.served.read_bytes())
+    world.watcher.check()
+    assert len([m for m in messages(logging.INFO) if "resumed" in m]) == 1
+    assert len([m for m in messages(logging.WARNING) if "paused" in m]) == 1
+
+
+def test_a_changed_chain_with_the_same_leaf_is_a_change_and_restarts(world: World) -> None:
+    """Comparison is of the whole file's content, so an intermediate rotation is
+    installed too - the entrypoint serves the full chain, not just the leaf."""
+    served_bytes = world.served.read_bytes()
+    extended = served_bytes + world.renewed_cert()
+    assert leaf_fingerprint(extended) == leaf_fingerprint(served_bytes)
+    world.rewrite_in_place(extended)
+    assert world.watcher.check() == 60
+    assert world.watcher.reload_pending is True
+    world.clock.advance(59)
+    world.watcher.check()
+    assert world.restarts == 0
+    world.clock.advance(1)
+    world.watcher.check()
+    assert world.restarts == 1
+
+
+async def test_the_loop_survives_an_exception_from_check(
+    world: World, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One surprise in check() must not end renewal watching for the process."""
+    calls: list[int] = []
+
+    def flaky_check() -> float:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        return 42
+
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+        if len(delays) == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(world.watcher, "check", flaky_check)
+    monkeypatch.setattr("ktnmgr.services.tls_watch.asyncio.sleep", fake_sleep)
+    caplog.set_level(logging.ERROR, logger="ktnmgr.services.tls_watch")
+    with pytest.raises(asyncio.CancelledError):
+        await world.watcher._loop()
+    assert len(calls) == 2
+    assert delays == [world.watcher.interval, 42]   # the failure waits a full interval
+    assert world.watcher.interval == 3600
+    assert "unexpected error" in caplog.text
+
+
+async def test_start_is_idempotent_and_stop_cancels_the_task(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One task however often start() is called; stop() ends it and is safe to repeat."""
+    monkeypatch.setattr(world.watcher, "check", lambda: 3600.0)
+    world.watcher.start()
+    task = world.watcher._task
+    assert task is not None
+    world.watcher.start()
+    assert world.watcher._task is task
+    await asyncio.sleep(0)                   # let the loop reach its sleep
+    assert not task.done()
+
+    await world.watcher.stop()
+    assert task.cancelled()
+    assert world.watcher._task is None
+    await world.watcher.stop()               # a second stop is a no-op
+    assert world.watcher._task is None
+
+
+async def test_start_replaces_a_finished_task(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the loop task has ended, start() must make a new one rather than
+    leaving the watcher silently dead."""
+    monkeypatch.setattr(world.watcher, "check", lambda: 3600.0)
+    world.watcher.start()
+    first = world.watcher._task
+    assert first is not None
+    first.cancel()
+    await asyncio.gather(first, return_exceptions=True)
+    assert first.done()
+    world.watcher.start()
+    second = world.watcher._task
+    try:
+        assert second is not None and second is not first
+        assert not second.done()
+    finally:
+        await world.watcher.stop()

@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from ktnmgr.config import Settings, check_tls_marker
+from test_tls_config import SPELLINGS
 from tls_certs import ROOT, make_pair
 
 ENTRYPOINT = ROOT / "docker-entrypoint.sh"
@@ -289,3 +291,124 @@ def test_a_lowercase_name_gives_plain_args_and_no_marker(harness: Harness) -> No
     assert run.uvicorn_args is not None
     assert not any(arg.startswith("--ssl") for arg in run.uvicorn_args)
     assert run.tls_active == "<unset>"
+
+
+# ------------------------------------- hardening pass 2026-10-30
+# Entrypoint-level behaviour pinned from the outside: every spelling in the
+# shared table, the join with the app's own check, the tmpfs ordering and the
+# marker's independence from the caller's environment.
+
+
+@pytest.mark.parametrize(("value", "expected"), SPELLINGS, ids=[repr(v) for v, _ in SPELLINGS])
+def test_entrypoint_normalises_every_spelling_like_the_shared_table(
+    harness: Harness, value: str, expected: bool | None
+) -> None:
+    """The whole entrypoint, not just ktn_bool, honours the one spelling table:
+    accepted-true serves TLS, accepted-false never looks at the paths, and
+    anything else refuses by name rather than guessing."""
+    if expected is True:
+        run = harness.run(**harness.enabled(KTN_TLS_ENABLED=value))
+        assert run.returncode == 0, run.output
+        assert run.uvicorn_args is not None and "--ssl-certfile" in run.uvicorn_args
+        assert run.tls_active == "1"
+    elif expected is False:
+        run = harness.run(KTN_TLS_ENABLED=value, KTN_TLS_CERTFILE="/nonexistent")
+        assert run.returncode == 0, run.output
+        assert run.uvicorn_args is not None
+        assert not any(arg.startswith("--ssl") for arg in run.uvicorn_args)
+        assert run.tls_active == "<unset>"
+    else:
+        run = harness.run(**harness.enabled(KTN_TLS_ENABLED=value))
+        assert run.returncode == 1
+        assert f"KTN_TLS_ENABLED='{value}' is not one of" in run.output
+        assert run.uvicorn_args is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [value for value, expected in SPELLINGS if expected is not None],
+    ids=lambda value: repr(value),
+)
+def test_entrypoint_and_app_agree_for_every_accepted_spelling(
+    harness: Harness, value: str
+) -> None:
+    """The entrypoint and the app must agree for every spelling either accepts:
+    whatever marker the entrypoint leaves for uvicorn, the app's own check on
+    the same value must let the start through."""
+    run = harness.run(**harness.enabled(KTN_TLS_ENABLED=value))
+    assert run.returncode == 0, run.output
+    assert run.tls_active is not None
+    settings = Settings(
+        _env_file=None, tls_enabled=value,
+        tls_certfile=str(harness.cert), tls_keyfile=str(harness.key),
+    )
+    environ = {} if run.tls_active == "<unset>" else {"KTN_TLS_ACTIVE": run.tls_active}
+    check_tls_marker(settings, environ)
+
+
+def test_a_missing_runtime_parent_fails_closed_as_not_a_tmpfs(harness: Harness) -> None:
+    """stat on a parent that does not exist must refuse, not skip the check:
+    the `|| echo missing` fallback is what keeps the key off a disk."""
+    runtime = harness.tmp / "no-such-parent" / "tls"
+    run = harness.run(**harness.enabled(KTN_TLS_RUNTIME_DIR=str(runtime)))
+    assert run.returncode == 1
+    assert "is not a tmpfs (missing)" in run.output
+    assert run.uvicorn_args is None
+    assert not runtime.exists() and not runtime.parent.exists()
+
+
+def test_the_tmpfs_check_comes_before_any_file_is_read_or_retried(harness: Harness) -> None:
+    """An off-tmpfs runtime dir is refused first: a missing key must not be
+    reported (or retried for ten seconds) when nothing may be copied anyway."""
+    target = non_tmpfs_dir() / f"ktn-test-tls-{uuid.uuid4().hex}"
+    assert not target.exists()
+    run = harness.run(
+        **harness.enabled(
+            KTN_TLS_RUNTIME_DIR=str(target), KTN_TLS_KEYFILE=str(harness.tmp / "absent.key")
+        )
+    )
+    assert run.returncode == 1
+    assert "is not a tmpfs" in run.output
+    assert "unreadable" not in run.output
+    assert run.sleeps == 0
+    assert not target.exists()
+
+
+def test_tls_off_ignores_an_off_tmpfs_runtime_dir(harness: Harness) -> None:
+    """The tmpfs rule protects the key copy; with TLS off there is no copy, so a
+    runtime dir on disk must not stop a plain install."""
+    target = non_tmpfs_dir() / f"ktn-test-tls-{uuid.uuid4().hex}"
+    assert not target.exists()
+    run = harness.run(KTN_TLS_ENABLED="false", KTN_TLS_RUNTIME_DIR=str(target))
+    assert run.returncode == 0, run.output
+    assert run.uvicorn_args is not None
+    assert not any(arg.startswith("--ssl") for arg in run.uvicorn_args)
+    assert not target.exists()
+
+
+def test_tls_off_discards_a_caller_supplied_marker(harness: Harness) -> None:
+    """KTN_TLS_ENABLED=false with a stray KTN_TLS_ACTIVE=1 still starts plain,
+    and uvicorn does not inherit the marker (the app would refuse the mix)."""
+    run = harness.run(KTN_TLS_ENABLED="false", KTN_TLS_ACTIVE="1")
+    assert run.returncode == 0, run.output
+    assert run.uvicorn_args is not None
+    assert not any(arg.startswith("--ssl") for arg in run.uvicorn_args)
+    assert run.tls_active == "<unset>"
+
+
+def test_tls_on_overrides_an_empty_caller_supplied_marker(harness: Harness) -> None:
+    """The marker is set by the entrypoint, not merely passed through: an empty
+    inherited value (which the app reads as absent) becomes 1."""
+    run = harness.run(**harness.enabled(KTN_TLS_ACTIVE=""))
+    assert run.returncode == 0, run.output
+    assert run.tls_active == "1"
+
+
+def test_an_inherited_marker_cannot_carry_a_refused_start(harness: Harness) -> None:
+    """A mismatched pair with KTN_TLS_ACTIVE=1 already in the caller's
+    environment still exits 1 and never reaches uvicorn."""
+    _, other_key = make_pair(harness.tmp / "other", "other")
+    run = harness.run(**harness.enabled(KTN_TLS_KEYFILE=str(other_key), KTN_TLS_ACTIVE="1"))
+    assert run.returncode == 1
+    assert run.uvicorn_args is None
+    assert run.tls_active is None
