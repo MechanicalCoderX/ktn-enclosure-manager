@@ -14,10 +14,10 @@ versioning follows [Semantic Versioning](https://semver.org/).
   dark). Light is unchanged to the eye: pure black became the theme's
   near-black `#16202c`, which all other text already uses.
 - **Dark theme: the search placeholder used the browser's light-theme grey**
-  (3.45:1 on the dark field). It now has a dark value (6.49:1); light keeps
-  the grey it had.
+  (3.45:1 on the dark field). It now has a dark value (6.49:1); light uses
+  the same grey Chromium shows (`#757575`; Firefox and Safari may differ slightly).
 - **Dark theme now declares `color-scheme: dark`**, so the browser's own
-  parts (scrollbars, the select arrow, the search field's clear button) are
+  parts (the search field's clear button and, where the browser supports it, scrollbars) are
   drawn dark too, instead of in their light-theme colours.
 - A Playwright test measures the WCAG contrast of the bay numbers and of every
   visible text element on all three tabs and the change-password dialog,
