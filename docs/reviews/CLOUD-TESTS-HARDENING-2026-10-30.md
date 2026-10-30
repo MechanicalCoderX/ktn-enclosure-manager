@@ -229,6 +229,7 @@ logs `health notification failed` with a full traceback. But:
 - the traceback repeats on every poll that changes anything;
 - the retry cooldown is never set, because the failure never reaches the
   `_retry_at` line;
+- any enclosures after the failing one are skipped for that pass;
 - the `_save()` at the end of `evaluate()` is skipped, so silent transitions
   from that pass are not persisted.
 
@@ -259,4 +260,45 @@ catch it.
 
 ## Independent review
 
-_Pending: filled in below once the fresh reviewer reports._
+A fresh subagent reviewed the branch diff (`8be318d..1d0ee51`) against the
+brief. It was given only the code, not my conclusions or the mutation table.
+It ran the affected pytest files (194 passed, 1 skipped), `ruff` and `tsc`.
+It did not run Playwright, because my mutation harness was using the e2e
+port.
+
+**Verdict: APPROVE WITH NITS.**
+
+- It found no product change.
+- It confirmed Finding 1 against httpx 0.28.1 and rated it low. It also
+  corrected the probe's docstring: the poll loop does not crash; the
+  traceback, the skipped cooldown and the skipped enclosures are the impact.
+- It judged the cascade-layer emulation sound: it "correctly makes
+  `styles.css:216` `opacity: 1` load-bearing on Chromium".
+- It found no rate-limit or shared-state hazard in the new e2e tests.
+
+What I did with its points:
+
+| # | point | disposition |
+|---|---|---|
+| 1 | this report was a half-finished checkpoint | completed (this file) |
+| 2 | probe docstring overstated the bug ("crash the poll loop") | **fixed**: docstring now states the real impact |
+| 3 | `test_an_inherited_marker_cannot_carry_a_refused_start` does not fail when only `unset` is deleted | agreed: it is weak. It is killed only by E8, a refusal that trusts an inherited marker. The `unset` is guarded by `test_tls_off_discards_a_caller_supplied_marker` (E6). Kept, and noted here. |
+| 4 | the empty-marker test also survives `unset` deletion alone | agreed. It is killed only by the combined trust mutation (E7, note 2). |
+| 5 | `raising_client` echoes the configured URL, so it cannot catch httpx normalising it | agreed. Real httpx transport errors here do not quote the URL at all (checked). The test pins the exact-match scrub, and the rejected-path test pins `hostname` over `netloc` (D6). |
+| 6 | state-file test is near-tautological | kept: it is cheap, and D8 shows it fails if the URL is ever persisted |
+| 7 | comment "not the 30 s left" is inaccurate | **fixed** |
+| 8 | the loop test monkeypatches `asyncio.sleep` process-wide | kept: it is scoped by `monkeypatch` and restored after the test. Injecting a sleep would mean changing product code. |
+| 9 | the text-fill comment named only Chromium and Safari | **fixed**: now says "browsers" |
+| 11 | `.notice.info` relies on the chassis cache being warm (30 s poll, 15 s wait) | same exposure as the existing chassis test, and it was green in CI on both projects. Noted. |
+| 12 | `SPELLINGS` is imported from another test module (breaks under `--import-mode=importlib`) | kept: CI uses the default prepend mode, and this keeps one table rather than two copies |
+| 13 | "Review 10-29 L1/L2/L3" is not in the repo | it is the review this brief cites. Kept as a pointer. |
+| 14 | gaps: first-run login screen not measured; `_unusable_hash` never reset (bad A, then good, then bad A again gives no second warning); json-style 3xx | not covered. The bootstrap screen only exists once per server. The `_unusable_hash` behaviour is a log-only quirk, recorded here as an observation, not a bug. json-style 3xx takes the same branch. |
+| 10, 15 | L1/L2 approach OK; style OK, banner dashes uneven | no action |
+
+## Not done
+
+Nothing from the brief is outstanding. Things deliberately not done:
+
+- No product fixes. Finding 1 is left as a skipped test.
+- No PR and no deploy.
+- The reviewer's gap items in row 14 are not covered.

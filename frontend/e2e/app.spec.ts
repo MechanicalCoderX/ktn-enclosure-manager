@@ -528,8 +528,8 @@ test.describe("responsive", () => {
  * <select> on its own colour (the chosen option's label is drawn in it), an
  * input on its typed text when it has a value, else on its ::placeholder.
  * Text is judged on its `color` and, where it differs, on the
- * -webkit-text-fill-color the glyphs are actually painted with: Chromium and
- * Safari paint with the fill, so an override there is invisible to `color`
+ * -webkit-text-fill-color the glyphs are actually painted with: browsers
+ * paint with the fill, so an override there is invisible to `color`
  * alone. A ::placeholder's own opacity is composited onto its text colour,
  * because it dims the placeholder without dimming the field behind it.
  * Returns how many elements were measured, how many of those were form

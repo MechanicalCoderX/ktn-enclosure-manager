@@ -681,8 +681,10 @@ async def test_the_logging_cap_is_what_keeps_httpx_from_logging_the_url(
 async def test_a_malformed_url_counts_as_a_failed_delivery(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A typo in the webhook URL must not crash the poll loop: it is a failed
-    delivery like any other, warned about without the secret."""
+    """A typo in the webhook URL is a failed delivery like any other: warned
+    about without the secret, and retried on the cooldown. Today it escapes
+    evaluate() instead, so the caller logs a traceback on every changed poll
+    and the cooldown is never set."""
     notifier = HealthNotifier("https://ntfy.example:notaport/topic-s3cret",
                               state_path=tmp_path / "n.json", retry_seconds=60.0)
 

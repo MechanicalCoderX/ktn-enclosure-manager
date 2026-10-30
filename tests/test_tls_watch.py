@@ -288,7 +288,7 @@ def test_a_revert_during_settle_cancels_it_and_the_next_change_settles_afresh(
 
     world.clock.advance(30)
     world.rewrite_in_place(renewed)
-    assert world.watcher.check() == 60       # a fresh settle, not the 30 s left
+    assert world.watcher.check() == 60       # fresh: the first sighting is forgotten
     assert world.watcher.reload_pending is True
 
     world.clock.advance(30)
