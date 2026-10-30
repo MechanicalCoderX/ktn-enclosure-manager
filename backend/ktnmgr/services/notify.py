@@ -227,8 +227,16 @@ class HealthNotifier:
     @property
     def _where(self) -> str:
         """Scheme and host only: the path and query of the URL are secrets."""
-        parts = urlsplit(self.url)
-        return f"{parts.scheme}://{parts.hostname or '?'}"
+        try:
+            parts = urlsplit(self.url)
+            host = parts.hostname
+        except ValueError:
+            # urlsplit refuses some malformed hosts outright (an unbalanced
+            # "[", a bracketed host that is not an IPv6 address) while httpx
+            # gets as far as a connect error. This runs inside _send()'s error
+            # handlers, so raising here would escape them.
+            return "<malformed webhook url>"
+        return f"{parts.scheme}://{host or '?'}"
 
     def _scrub(self, text: str) -> str:
         return text.replace(self.url, "<webhook url>") if self.url else text

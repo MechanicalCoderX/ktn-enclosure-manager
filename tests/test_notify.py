@@ -774,3 +774,28 @@ async def test_a_malformed_url_sets_the_cooldown_and_still_commits_silent_change
     monkeypatch.setattr("ktnmgr.services.notify.time", SimpleNamespace(monotonic=lambda: later))
     await notifier.evaluate(bays)
     assert len(attempts) == 2, "after the cooldown the alert is attempted again"
+
+
+@pytest.mark.parametrize("status", [None, 404], ids=["connect-error", "HTTP-404"])
+async def test_a_host_urlsplit_refuses_still_counts_as_a_failed_delivery(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    status: int | None,
+) -> None:
+    """An unbalanced "[" is not an InvalidURL to httpx (it fails later, as a
+    ConnectError), but urlsplit raises ValueError on it. The warning names the
+    endpoint through _where, inside the error handling, so _where must not
+    raise there or the failure escapes evaluate() all the same."""
+    url = "https://[ntfy.example/topic-s3cret?auth=TOKEN-s3cret"
+    if status is None:
+        client = raising_client(lambda u: httpx.ConnectError("Name or service not known"))
+    else:
+        client = scripted_client([status], [])
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", client)
+    notifier = HealthNotifier(url, state_path=tmp_path / "n.json")
+
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # must not raise
+
+    text = log_text(caplog)
+    assert "s3cret" not in text and "TOKEN" not in text, text
+    assert "<malformed webhook url>" in text, text
