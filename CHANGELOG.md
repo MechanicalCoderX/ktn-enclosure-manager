@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Light theme: three text colours were just under WCAG AA (4.5:1).** Each is
+  now a shade darker; nothing else changes, and dark is untouched. Measured
+  in Chromium:
+  - OK badge: `#1a7f4b` → `#197b4a` on `#e6f4ec`, 4.43 → 4.66:1.
+  - Empty and Unknown badges: `#6b7684` → `#626d7a` on `#eef1f4`,
+    4.07 → 4.65:1.
+  - Search placeholder: `#757575` → `#717171` on `#f8fafc`, 4.40 → 4.66:1.
+- The theme contrast test no longer tolerates those three in light: every text
+  element it measures must reach 4.5:1 (3:1 for large text) in every theme.
+  It now also checks that the page's `color-scheme` is `dark` in dark and
+  `normal` in light, and it measures the text shown in the selects and typed
+  into the search and password fields, which it previously skipped.
+
 ## [1.6.1] — 2026-10-29
 
 ### Fixed
