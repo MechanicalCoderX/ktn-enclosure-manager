@@ -517,6 +517,153 @@ test.describe("responsive", () => {
   });
 });
 
+/**
+ * WCAG 2.x contrast of every visible text element under `selector`, measured
+ * against what is actually painted behind it: the ancestor chain's backgrounds
+ * are composited top-down (alpha and group opacity included), so a transparent
+ * element is judged against the first painted surface beneath it rather than
+ * against nothing. Disabled controls and search-dimmed tiles are skipped (WCAG
+ * exempts inactive components; dimming is the deliberate "not a match" cue).
+ * Returns how many elements were measured and those below 4.5:1 (3:1 large).
+ */
+async function lowContrast(page: Page, selector: string) {
+  return page.evaluate((sel) => {
+    type C = { r: number; g: number; b: number; a: number };
+    const parse = (s: string): C => {
+      const p = (s.match(/rgba?\(([^)]+)\)/)?.[1] ?? "0 0 0 0")
+        .split(/[ ,/]+/).filter(Boolean).map(Number);
+      return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+    };
+    const over = (t: C, u: C): C => ({
+      r: t.r * t.a + u.r * (1 - t.a),
+      g: t.g * t.a + u.g * (1 - t.a),
+      b: t.b * t.a + u.b * (1 - t.a),
+      a: 1,
+    });
+    const lum = (c: C) => {
+      const f = (v: number) =>
+        (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+    };
+    // The pixel under `el`, with its text colour on top when `fg` is given.
+    const paint = (el: Element, fg: C | null): C => {
+      const chain: Element[] = [];
+      for (let n: Element | null = el; n; n = n.parentElement) chain.unshift(n);
+      const walk = (i: number, px: C): C => {
+        if (i === chain.length) return fg ? over(fg, px) : px;
+        const cs = getComputedStyle(chain[i]);
+        const behind = px;
+        px = walk(i + 1, over(parse(cs.backgroundColor), px));
+        const op = Number(cs.opacity);
+        return op < 1 ? over({ ...px, a: op }, behind) : px;
+      };
+      return walk(0, { r: 255, g: 255, b: 255, a: 1 });
+    };
+    const hex = (c: C) =>
+      "#" + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
+    const low: { label: string; ratio: number; detail: string }[] = [];
+    let checked = 0;
+    const judge = (el: Element, label: string, color: string) => {
+      const cs = getComputedStyle(el);
+      const text = paint(el, parse(color));
+      const bg = paint(el, null);
+      const [hi, lo] = [lum(text), lum(bg)].sort((a, b) => b - a);
+      const ratio = (hi + 0.05) / (lo + 0.05);
+      const size = parseFloat(cs.fontSize);
+      const large = size >= 24 || (size >= 18.66 && Number(cs.fontWeight) >= 700);
+      checked++;
+      if (ratio < (large ? 3 : 4.5))
+        low.push({
+          label,
+          ratio,
+          detail: `${label}: ${hex(text)} on ${hex(bg)} = ${ratio.toFixed(2)}:1 at ${size}px`,
+        });
+    };
+    for (const el of document.querySelectorAll(sel)) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0 || el.closest(":disabled, .dim, option")) continue;
+      if (el instanceof HTMLInputElement) {
+        if (el.placeholder && !el.value)
+          judge(el, "::placeholder", getComputedStyle(el, "::placeholder").color);
+        continue;
+      }
+      if ([...el.childNodes].some((n) => n.nodeType === 3 && n.textContent?.trim()))
+        judge(el, `${el.className || el.tagName.toLowerCase()} "${el.textContent?.trim().slice(0, 24)}"`,
+              getComputedStyle(el).color);
+    }
+    return { checked, low };
+  }, selector);
+}
+
+test.describe("theme contrast", () => {
+  // The three theme settings, with the OS preference emulated both ways for
+  // System. The explicit choices run against the *opposite* OS preference, so
+  // a token block leaking through the wrong guard would show up here.
+  const MODES = [
+    { name: "Light", value: "light", os: "dark", dark: false },
+    { name: "Dark", value: "dark", os: "light", dark: true },
+    { name: "System, OS light", value: "system", os: "light", dark: false },
+    { name: "System, OS dark", value: "system", os: "dark", dark: true },
+  ] as const;
+
+  // Shortfalls that predate the dark-theme fix and belong to the light
+  // palette, which that fix deliberately left untouched: the 10px
+  // OK/Empty/Unknown badges (4.43 and 4.07:1) and Chromium's own placeholder
+  // grey (4.40:1). Tolerated only in light and only down to 4.0, so a further
+  // drop still fails; dark has no such allowance.
+  const KNOWN_LIGHT = /^badge (ok|empty|unknown) "|^span "[✓○?]"$|^::placeholder$/;
+  const failures = (dark: boolean, low: { label: string; ratio: number; detail: string }[]) =>
+    low
+      .filter((l) => dark || !(KNOWN_LIGHT.test(l.label) && l.ratio >= 4.0))
+      .map((l) => l.detail);
+
+  for (const mode of MODES) {
+    test(`${mode.name}: bay numbers and every tab's text stay readable`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: mode.os });
+      await bootstrapAndLogin(page);
+      await page.getByLabel("Theme").selectOption(mode.value);
+
+      // Every route to a palette must land on the same tokens; the page
+      // background is the cheapest witness of which block won.
+      await expect(page.locator("body")).toHaveCSS(
+        "background-color",
+        mode.dark ? "rgb(13, 17, 23)" : "rgb(244, 246, 248)",
+      );
+
+      // The 1.6.0 regression: a tile is a <button>, buttons do not inherit
+      // colour, and .bay-no had none of its own, so the bay numbers rendered
+      // the UA's black on the dark panel. Plain, selected and hovered tiles.
+      await expect(page.locator(".bay-no")).toHaveCount(16);
+      await page.getByRole("listitem", { name: /^Bay 1, / }).click();
+      await page.getByRole("listitem", { name: /^Bay 2, / }).hover();
+      const numbers = await lowContrast(page, ".bay-no");
+      expect(numbers.checked).toBe(16);
+      expect(numbers.low.map((l) => l.detail), "bay numbers").toEqual([]);
+
+      const map = await lowContrast(page, ".topbar *, main *");
+      expect(map.checked).toBeGreaterThan(100);
+      expect(failures(mode.dark, map.low), "drive map tab").toEqual([]);
+
+      await page.getByRole("tab", { name: "Chassis" }).click();
+      await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
+      const chassis = await lowContrast(page, "main *");
+      expect(chassis.checked).toBeGreaterThan(50);
+      expect(failures(mode.dark, chassis.low), "chassis tab").toEqual([]);
+
+      await page.getByRole("tab", { name: "Diagnostics" }).click();
+      await expect(page.locator("pre.raw").first()).toContainText("app_version");
+      const diag = await lowContrast(page, "main *");
+      expect(diag.checked).toBeGreaterThan(5);
+      expect(failures(mode.dark, diag.low), "diagnostics tab").toEqual([]);
+
+      await page.getByRole("button", { name: "Change password" }).click();
+      const modal = await lowContrast(page, ".modal *");
+      expect(modal.checked).toBeGreaterThan(5);
+      expect(failures(mode.dark, modal.low), "change-password dialog").toEqual([]);
+    });
+  }
+});
+
 test.describe("change password", () => {
   // Deliberately the last block in the file: it rotates the one credential
   // every other test's bootstrapAndLogin() depends on, and the backend is
