@@ -527,8 +527,14 @@ test.describe("responsive", () => {
  * Form controls own no text node, so they are judged on what they display: a
  * <select> on its own colour (the chosen option's label is drawn in it), an
  * input on its typed text when it has a value, else on its ::placeholder.
+ * Text is judged on its `color` and, where it differs, on the
+ * -webkit-text-fill-color the glyphs are actually painted with: browsers
+ * paint with the fill, so an override there is invisible to `color`
+ * alone. A ::placeholder's own opacity is composited onto its text colour,
+ * because it dims the placeholder without dimming the field behind it.
  * Returns how many elements were measured, how many of those were form
- * controls showing a value, and those below 4.5:1 (3:1 large).
+ * controls showing a value, every judged placeholder's computed opacity, and
+ * those below 4.5:1 (3:1 large).
  */
 async function lowContrast(page: Page, selector: string) {
   return page.evaluate((sel) => {
@@ -568,21 +574,30 @@ async function lowContrast(page: Page, selector: string) {
     const low: { label: string; ratio: number; detail: string }[] = [];
     let checked = 0;
     let controls = 0;
-    const judge = (el: Element, label: string, color: string) => {
+    const placeholderOpacity: string[] = [];
+    // `ink` is the computed style the text takes its colours from: the element
+    // itself, or its ::placeholder. `alpha` is that pseudo-element's opacity.
+    const judge = (el: Element, label: string, ink: CSSStyleDeclaration, alpha = 1) => {
       const cs = getComputedStyle(el);
-      const text = paint(el, parse(color));
       const bg = paint(el, null);
-      const [hi, lo] = [lum(text), lum(bg)].sort((a, b) => b - a);
-      const ratio = (hi + 0.05) / (lo + 0.05);
       const size = parseFloat(cs.fontSize);
       const large = size >= 24 || (size >= 18.66 && Number(cs.fontWeight) >= 700);
+      const fill = ink.getPropertyValue("-webkit-text-fill-color") || ink.color;
       checked++;
-      if (ratio < (large ? 3 : 4.5))
-        low.push({
-          label,
-          ratio,
-          detail: `${label}: ${hex(text)} on ${hex(bg)} = ${ratio.toFixed(2)}:1 at ${size}px`,
-        });
+      for (const [color, which] of fill === ink.color
+        ? [[ink.color, ""]]
+        : [[ink.color, " (color)"], [fill, " (text-fill)"]]) {
+        const c = parse(color);
+        const text = paint(el, { ...c, a: c.a * alpha });
+        const [hi, lo] = [lum(text), lum(bg)].sort((a, b) => b - a);
+        const ratio = (hi + 0.05) / (lo + 0.05);
+        if (ratio < (large ? 3 : 4.5))
+          low.push({
+            label: label + which,
+            ratio,
+            detail: `${label}${which}: ${hex(text)} on ${hex(bg)} = ${ratio.toFixed(2)}:1 at ${size}px`,
+          });
+      }
     };
     for (const el of document.querySelectorAll(sel)) {
       const r = el.getBoundingClientRect();
@@ -590,23 +605,25 @@ async function lowContrast(page: Page, selector: string) {
       if (el instanceof HTMLInputElement) {
         if (el.value) {
           controls++;
-          judge(el, `input[type=${el.type}] value`, getComputedStyle(el).color);
+          judge(el, `input[type=${el.type}] value`, getComputedStyle(el));
         } else if (el.placeholder) {
-          judge(el, "::placeholder", getComputedStyle(el, "::placeholder").color);
+          const ph = getComputedStyle(el, "::placeholder");
+          placeholderOpacity.push(ph.opacity);
+          judge(el, "::placeholder", ph, Number(ph.opacity));
         }
         continue;
       }
       if (el instanceof HTMLSelectElement) {
         controls++;
         judge(el, `select "${el.selectedOptions[0]?.text.slice(0, 24) ?? ""}"`,
-              getComputedStyle(el).color);
+              getComputedStyle(el));
         continue;
       }
       if ([...el.childNodes].some((n) => n.nodeType === 3 && n.textContent?.trim()))
         judge(el, `${el.className || el.tagName.toLowerCase()} "${el.textContent?.trim().slice(0, 24)}"`,
-              getComputedStyle(el).color);
+              getComputedStyle(el));
     }
-    return { checked, controls, low };
+    return { checked, controls, placeholderOpacity, low };
   }, selector);
 }
 
@@ -624,6 +641,34 @@ test.describe("theme contrast", () => {
   // No allowance in either palette: 1.6.1 tolerated the light OK/Empty/
   // Unknown badges and placeholder down to 4.0:1; their tokens now clear 4.5.
   const failures = (low: { detail: string }[]) => low.map((l) => l.detail);
+
+  const PAGE_BG = { dark: "rgb(13, 17, 23)", light: "rgb(244, 246, 248)" };
+
+  // Firefox's UA sheet dims ::placeholder to 54%; Chromium's leaves it at 1, so
+  // on Chromium alone the `opacity: 1` in styles.css guards nothing anyone can
+  // see, and deleting it would pass. Firefox's default is re-created here in a
+  // cascade layer: layered author rules lose to unlayered ones, so the app's
+  // own rule still wins - for exactly as long as it exists.
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      document.addEventListener("DOMContentLoaded", () => {
+        const style = document.createElement("style");
+        style.textContent = "@layer firefox-ua { ::placeholder { opacity: 0.54; } }";
+        document.head.append(style);
+      });
+    });
+  });
+
+  /** Sign in under `mode` and confirm which palette won before measuring. */
+  async function signInAs(page: Page, mode: (typeof MODES)[number]) {
+    await page.emulateMedia({ colorScheme: mode.os });
+    await bootstrapAndLogin(page);
+    await page.getByLabel("Theme").selectOption(mode.value);
+    await expect(page.locator("body")).toHaveCSS(
+      "background-color",
+      mode.dark ? PAGE_BG.dark : PAGE_BG.light,
+    );
+  }
 
   for (const mode of MODES) {
     test(`${mode.name}: bay numbers and every tab's text stay readable`, async ({ page }) => {
@@ -656,6 +701,9 @@ test.describe("theme contrast", () => {
       // The Theme select in the top bar and Bay 1's "Identify for" select.
       expect(map.controls).toBeGreaterThanOrEqual(2);
       expect(failures(map.low), "drive map tab").toEqual([]);
+      // The search field's placeholder, at full strength despite the emulated
+      // Firefox default (see the beforeEach).
+      expect(map.placeholderOpacity, "::placeholder opacity").toEqual(["1"]);
 
       // Typed text in the search field, not just its placeholder. A query that
       // matches nothing dims every tile, so it is cleared again straight after.
@@ -689,7 +737,176 @@ test.describe("theme contrast", () => {
       expect(modal.controls).toBeGreaterThanOrEqual(1);
       expect(failures(modal.low), "change-password dialog").toEqual([]);
     });
+
+    // Review 10-29 L3: the states a healthy test backend never shows. Each is
+    // forced in the browser - the backend's answers are rewritten, never its
+    // state - and each is first proved present, then measured on its own, so
+    // a notice that failed to render cannot pass as "nothing below 4.5:1".
+    test(`${mode.name}: warning, error and info notices and the state badges stay readable`, async ({
+      page,
+    }) => {
+      let failBays = false;
+      await page.route("**/api/enclosures/*/bays", async (route) => {
+        if (failBays) {
+          await route.fulfill({ status: 503, json: { detail: "e2e: bay poll refused" } });
+          return;
+        }
+        const body = await (await route.fetch()).json();
+        // Both source errors: two .notice.warn banners and the header's
+        // "degraded" badge.
+        body.sources.slots_error = "e2e: enclosure not readable";
+        body.sources.truenas_error = "e2e: connection refused";
+        // TrueNAS's over-temperature alert on Bay 1: the "too hot" badge.
+        body.bays.find((b: { ses_slot: number }) => b.ses_slot === 0).smart.over_temperature = true;
+        await route.fulfill({ json: body });
+      });
+      await page.route("**/api/enclosures/*/chassis", async (route) => {
+        const body = await (await route.fetch()).json();
+        // Banks at different steps: the one state that renders .notice.info.
+        const fans = (body.elements ?? []).filter(
+          (e: { element_type: string; is_overall: boolean }) =>
+            e.element_type === "Cooling" && !e.is_overall,
+        );
+        if (fans.length > 0) fans[0].speed_code = 4;
+        await route.fulfill({ json: body });
+      });
+      await signInAs(page, mode);
+
+      const warn = page.locator("main > .notice.warn");
+      await expect(warn).toHaveCount(2, { timeout: 10_000 });
+      const degraded = page.getByTestId("freshness").locator("summary .badge.warning");
+      await expect(degraded).toHaveText("▲ degraded");
+      await page.getByRole("listitem", { name: /^Bay 1, / }).click();
+      const tooHot = page.getByTestId("bay-detail").locator(".badge.warning");
+      await expect(tooHot).toHaveText("▲ too hot");
+
+      const notices = await lowContrast(page, "main > .notice.warn");
+      expect(notices.checked).toBe(2);
+      expect(failures(notices.low), ".notice.warn").toEqual([]);
+      const badges = await lowContrast(
+        page,
+        '[data-testid="freshness"] .badge.warning, [data-testid="bay-detail"] .badge.warning',
+      );
+      expect(badges.checked).toBe(2);
+      expect(failures(badges.low), "degraded / too hot badges").toEqual([]);
+      // And everything around them, as the first test measures the healthy page.
+      const map = await lowContrast(page, ".topbar *, main *");
+      expect(failures(map.low), "drive map with every warning up").toEqual([]);
+
+      // A poll that fails outright raises the page's error banner. The rows
+      // and the warnings above stay on the last good answer.
+      failBays = true;
+      const error = page.locator("main > .notice.error");
+      await expect(error).toContainText("e2e: bay poll refused", { timeout: 10_000 });
+      const errors = await lowContrast(page, "main > .notice.error");
+      expect(errors.checked).toBe(1);
+      expect(failures(errors.low), ".notice.error").toEqual([]);
+
+      await page.getByRole("tab", { name: "Chassis" }).click();
+      const info = page.locator("main .notice.info");
+      await expect(info).toContainText("different speed steps", { timeout: 15_000 });
+      const infos = await lowContrast(page, "main .notice.info");
+      expect(infos.checked).toBe(1);
+      expect(failures(infos.low), ".notice.info").toEqual([]);
+    });
+
+    test(`${mode.name}: the login screen, its notices and the unauthenticated badge stay readable`, async ({
+      page,
+    }) => {
+      // The theme is chosen while signed in; it is kept in localStorage, so the
+      // login screen and the reload below are drawn in it too.
+      await signInAs(page, mode);
+
+      // A sign-out whose POST never arrives lands on the login screen with the
+      // unmodified .notice explaining that the session may still be live.
+      await page.route("**/api/auth/logout", (route) => route.abort());
+      await page.getByRole("button", { name: /Sign out/ }).click();
+      await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+      await expect(page.locator(".login > .notice:not(.error)")).toContainText(
+        "Sign out did not complete",
+      );
+      await expect(page.locator("body")).toHaveCSS(
+        "background-color",
+        mode.dark ? PAGE_BG.dark : PAGE_BG.light,
+      );
+
+      // A refused sign-in for .notice.error, answered in the browser: a real
+      // wrong password would count against the server's login rate limit,
+      // which every later test's sign-in shares.
+      await page.route("**/api/auth/login", (route) =>
+        route.fulfill({ status: 401, json: { detail: "invalid username or password" } }),
+      );
+      await page.getByLabel("Username").fill(USER);
+      await page.getByLabel("Password", { exact: true }).fill("typed-text-probe");
+      await page.getByRole("button", { name: "Sign in" }).click();
+      await expect(page.locator(".login > .notice.error")).toContainText(
+        "invalid username or password",
+      );
+
+      const notices = await lowContrast(page, ".login > .notice");
+      expect(notices.checked).toBe(2);
+      expect(failures(notices.low), "login notices").toEqual([]);
+      const login = await lowContrast(page, ".login *");
+      expect(login.checked).toBeGreaterThan(6);
+      expect(login.controls).toBe(2); // typed username and (masked) password
+      expect(failures(login.low), "login screen").toEqual([]);
+
+      // KTN_AUTH_REQUIRED=false shows "unauthenticated" where the account
+      // buttons would be. Only the status answer is rewritten.
+      await page.route("**/api/auth/status", (route) =>
+        route.fulfill({
+          json: {
+            auth_required: false,
+            anonymous_ident_allowed: false,
+            needs_bootstrap: false,
+            user: null,
+          },
+        }),
+      );
+      await page.reload();
+      const badge = page.locator(".topbar .badge.warning");
+      await expect(badge).toHaveText("unauthenticated");
+      await expect(page.locator("body")).toHaveCSS(
+        "background-color",
+        mode.dark ? PAGE_BG.dark : PAGE_BG.light,
+      );
+      const badges = await lowContrast(page, ".topbar .badge.warning");
+      expect(badges.checked).toBe(1);
+      expect(failures(badges.low), "unauthenticated badge").toEqual([]);
+      const top = await lowContrast(page, ".topbar *");
+      expect(failures(top.low), "top bar without a session").toEqual([]);
+    });
   }
+
+  test("the contrast check sees a text-fill override and a dimmed placeholder", async ({
+    page,
+  }, testInfo) => {
+    // A check of the checker (review 10-29 L1/L2). Both overrides leave `color`
+    // exactly as shipped, which is the measurement the check used to rely on.
+    test.skip(testInfo.project.name !== "desktop", "one project is enough for a self-test");
+    await signInAs(page, MODES[0]);
+    const search = page.getByLabel("Search bays");
+    const field = 'input[type="search"]';
+
+    const clean = await lowContrast(page, field);
+    expect(failures(clean.low), "control: the placeholder as shipped").toEqual([]);
+    expect(clean.placeholderOpacity).toEqual(["1"]);
+
+    // L2: the placeholder's own opacity, which dims its text but not the field.
+    const dim = await page.addStyleTag({ content: `${field}::placeholder { opacity: 0.4; }` });
+    const dimmed = await lowContrast(page, field);
+    expect(dimmed.placeholderOpacity).toEqual(["0.4"]);
+    expect(dimmed.low.map((l) => l.label)).toEqual(["::placeholder"]);
+    await dim.evaluate((el) => (el as Element).remove());
+
+    // L1: glyphs painted in the field's own background colour.
+    await search.fill("typed");
+    expect(failures((await lowContrast(page, field)).low), "control: typed text").toEqual([]);
+    await page.addStyleTag({ content: `${field} { -webkit-text-fill-color: #f8fafc; }` });
+    const filled = await lowContrast(page, field);
+    expect(filled.low.map((l) => l.label)).toEqual(["input[type=search] value (text-fill)"]);
+    await search.fill("");
+  });
 });
 
 test.describe("change password", () => {

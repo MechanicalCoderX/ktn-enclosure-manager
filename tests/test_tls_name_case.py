@@ -22,6 +22,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from ktnmgr.config import Settings, TlsMismatchError, check_tls_marker
 from tls_certs import make_pair, run_server
 
 
@@ -91,3 +92,67 @@ def test_control_tls_with_marker_starts(tmp_path: Path) -> None:
         ) as r:
             body = json.loads(r.read())
     assert body["tls"]["enabled"] is True
+
+
+# ------------------------------------- hardening pass 2026-10-30
+# check_tls_marker called directly with an explicit environment: the four
+# quadrants, and exactly what counts as "the marker is present".
+
+ON = {"tls_enabled": True, "tls_certfile": "/tls/fullchain.pem", "tls_keyfile": "/tls/privkey.pem"}
+
+
+def _settings(*, on: bool) -> Settings:
+    return Settings(_env_file=None, **(ON if on else {}))
+
+
+def test_marker_and_setting_both_on_is_accepted() -> None:
+    """The container path with TLS: entrypoint started it, app expects it."""
+    check_tls_marker(_settings(on=True), {"KTN_TLS_ACTIVE": "1"})
+
+
+def test_marker_and_setting_both_off_is_accepted() -> None:
+    """A plain install: nothing set on either side, nothing changes."""
+    check_tls_marker(_settings(on=False), {})
+
+
+def test_setting_on_without_the_marker_refuses() -> None:
+    """The lowercase-name case: the app thinks TLS is on, uvicorn serves plain."""
+    with pytest.raises(TlsMismatchError, match="KTN_TLS_ACTIVE") as excinfo:
+        check_tls_marker(_settings(on=True), {})
+    assert "did not start TLS" in str(excinfo.value)
+
+
+def test_marker_without_the_setting_refuses() -> None:
+    """The reverse case: TLS served, but the app would build no renewal watcher."""
+    with pytest.raises(TlsMismatchError, match="KTN_TLS_ACTIVE") as excinfo:
+        check_tls_marker(_settings(on=False), {"KTN_TLS_ACTIVE": "1"})
+    assert "off in the app's settings" in str(excinfo.value)
+
+
+def test_an_empty_marker_counts_as_absent_when_tls_is_on() -> None:
+    """The entrypoint unsets the marker; an empty inherited one must not pass."""
+    with pytest.raises(TlsMismatchError, match="KTN_TLS_ACTIVE"):
+        check_tls_marker(_settings(on=True), {"KTN_TLS_ACTIVE": ""})
+
+
+def test_an_empty_marker_counts_as_absent_when_tls_is_off() -> None:
+    """...and equally must not trip a plain install that carries an empty value."""
+    check_tls_marker(_settings(on=False), {"KTN_TLS_ACTIVE": ""})
+
+
+def test_any_non_empty_marker_value_counts_as_present() -> None:
+    """The current contract: presence, not value. "0" is a marker too, so a plain
+    app with KTN_TLS_ACTIVE=0 refuses (the entrypoint only ever exports 1)."""
+    with pytest.raises(TlsMismatchError, match="KTN_TLS_ACTIVE"):
+        check_tls_marker(_settings(on=False), {"KTN_TLS_ACTIVE": "0"})
+
+
+def test_the_marker_is_read_by_exact_name_when_tls_is_on() -> None:
+    """A lowercase marker is not the entrypoint's marker: TLS on still refuses."""
+    with pytest.raises(TlsMismatchError, match="KTN_TLS_ACTIVE"):
+        check_tls_marker(_settings(on=True), {"ktn_tls_active": "1"})
+
+
+def test_the_marker_is_read_by_exact_name_when_tls_is_off() -> None:
+    """...and a lowercase marker does not make a plain install refuse."""
+    check_tls_marker(_settings(on=False), {"ktn_tls_active": "1"})

@@ -9,6 +9,8 @@ silently dropped.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Self
 
@@ -406,3 +408,292 @@ async def test_a_redirect_is_not_delivery_and_is_retried(
     notifier = HealthNotifier("http://ntfy/topic", state_path=tmp_path / "n.json")
     await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
     assert not (tmp_path / "n.json").exists() or "failed" not in (tmp_path / "n.json").read_text()
+
+
+# ------------------------------------------------ hardening pass 2026-10-30
+
+
+def scripted_client(statuses: list[int], posts: list[dict[str, Any]]) -> type:
+    """Fake client answering each POST with the next scripted status (the last
+    one repeats once the script runs out); every POST is recorded in `posts`."""
+
+    class ScriptedClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+            posts.append({"url": url, **kwargs})
+            return FakeResponse(statuses[min(len(posts) - 1, len(statuses) - 1)])
+
+    return ScriptedClient
+
+
+def raising_client(make_error: Callable[[str], Exception]) -> type:
+    """Fake client whose POST fails with an error built from the URL it was
+    actually asked to post to, the way httpx errors quote the request URL."""
+
+    class RaisingClient:
+        def __init__(self, **kwargs: Any) -> None: ...
+        async def __aenter__(self) -> Self: return self
+        async def __aexit__(self, *exc: object) -> None: ...
+        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+            raise make_error(url)
+
+    return RaisingClient
+
+
+def log_text(caplog: pytest.LogCaptureFixture) -> str:
+    return "\n".join(r.getMessage() for r in caplog.records)
+
+
+DELIVERED_STATUSES = [200, 201, 202, 204, 299]
+UNDELIVERED_STATUSES = [199, 300, 301, 302, 303, 304, 307, 308, 399]
+
+
+@pytest.mark.parametrize("status", DELIVERED_STATUSES, ids=lambda s: f"HTTP-{s}")
+async def test_every_2xx_counts_as_delivered(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    status: int,
+) -> None:
+    """ntfy answers 200, but a webhook receiver may legitimately answer 201,
+    202 or 204. Treating any of those as a failure would re-send the same alert
+    forever, so the whole 2xx range is delivery, up to and including 299."""
+    posts: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient", scripted_client([status], posts)
+    )
+    state = tmp_path / "n.json"
+    notifier = HealthNotifier("http://ntfy/topic", state_path=state, retry_seconds=0.0)
+
+    with caplog.at_level("INFO", logger="ktnmgr.services.notify"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    records = [(r.levelname, r.getMessage()) for r in caplog.records]
+    assert any(lvl == "INFO" and m.startswith("notified:") for lvl, m in records), records
+    assert state.exists() and "failed" in state.read_text(), "a delivered alert was not committed"
+
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+    assert len(posts) == 1, "a delivered alert was sent again"
+
+
+@pytest.mark.parametrize("status", UNDELIVERED_STATUSES, ids=lambda s: f"HTTP-{s}")
+async def test_anything_outside_2xx_is_not_delivered_and_is_retried(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    status: int,
+) -> None:
+    """Pins both edges of the accepted range (199 below, 300 and 399 above) and
+    that every status outside it is a delivery failure: warned about, left
+    uncommitted, and posted again on the next evaluation."""
+    posts: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient", scripted_client([status], posts)
+    )
+    state = tmp_path / "n.json"
+    notifier = HealthNotifier("http://ntfy/topic", state_path=state, retry_seconds=0.0)
+
+    with caplog.at_level("INFO", logger="ktnmgr.services.notify"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    records = [(r.levelname, r.getMessage()) for r in caplog.records]
+    assert not any(m.startswith("notified:") for _, m in records), records
+    assert any(
+        lvl == "WARNING" and "rejected" in m and str(status) in m for lvl, m in records
+    ), records
+    assert not state.exists() or "failed" not in state.read_text()
+
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+    assert len(posts) == 2, "an alert the endpoint never accepted was not retried"
+
+
+async def test_a_redirect_is_not_followed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Following the redirect would silently re-POST the alert somewhere the
+    operator never configured. The code relies on httpx's default of not
+    following redirects, and this pins it with a REAL client."""
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/topic":
+            return httpx.Response(302, headers={"Location": "https://ntfy.example/moved"})
+        return httpx.Response(200)
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient",
+        lambda **kw: real_client(transport=transport, **kw),
+    )
+    state = tmp_path / "n.json"
+    notifier = HealthNotifier("https://ntfy.example/topic", state_path=state, retry_seconds=0.0)
+
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+    assert requested == ["https://ntfy.example/topic"], requested
+    assert not state.exists() or "failed" not in state.read_text()
+
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+    assert requested == ["https://ntfy.example/topic"] * 2, requested
+
+
+async def test_alert_is_delivered_once_after_a_redirect_clears(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A moved topic that is fixed (or a proxy that recovers) must not lose the
+    alert: the retry after a 3xx carries the original transition and goes out
+    exactly once."""
+    posts: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient", scripted_client([302, 200], posts)
+    )
+    notifier = HealthNotifier("http://ntfy/topic", state_path=tmp_path / "n.json",
+                              retry_seconds=0.0)
+
+    await notifier.evaluate([make_bay(0, SlotHealth.OK)])
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # answered 302
+    assert len(posts) == 1
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # retried, answered 200
+    assert len(posts) == 2
+    assert "was: ok -> now: failed" in posts[1]["content"].decode(), (
+        "the retry lost the original previous-state context"
+    )
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # now committed
+    assert len(posts) == 2
+
+
+@pytest.mark.parametrize("status", [404, 302], ids=lambda s: f"HTTP-{s}")
+async def test_rejection_warning_names_only_scheme_and_host(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    status: int,
+) -> None:
+    """The topic and the ?auth= token live in the path and query, so the
+    warning an operator reads names where the alert went and nothing more."""
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient", scripted_client([status], [])
+    )
+    notifier = HealthNotifier(SECRET_URL, state_path=tmp_path / "n.json")
+
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings == [f"health notification rejected: HTTP {status} from https://ntfy.example"]
+
+
+CREDENTIAL_URL = "https://alice:pw-s3cret@ntfy.example/topic-s3cret?auth=TOKEN-s3cret"
+
+
+async def test_userinfo_credentials_never_reach_the_logs_when_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A webhook URL may carry basic-auth credentials in its userinfo. The
+    rejection warning must name the host without them."""
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient", scripted_client([401], [])
+    )
+    notifier = HealthNotifier(CREDENTIAL_URL, state_path=tmp_path / "n.json")
+
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    text = log_text(caplog)
+    assert "ntfy.example" in text and "401" in text, text
+    assert "s3cret" not in text and "alice" not in text, text
+
+
+async def test_userinfo_credentials_never_reach_the_logs_when_raising(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Same secret, other path: an httpx error that quotes the full URL
+    (userinfo included) must be scrubbed before it is logged."""
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient",
+        raising_client(lambda url: httpx.ConnectError(f"cannot connect to {url}")),
+    )
+    notifier = HealthNotifier(CREDENTIAL_URL, state_path=tmp_path / "n.json")
+
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    text = log_text(caplog)
+    assert "could not deliver" in text and "ntfy.example" in text, text
+    assert "s3cret" not in text and "alice" not in text, text
+
+
+async def test_persisted_state_never_contains_the_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The state file sits on disk next to the app's other files; it records
+    health per bay and has no business holding the webhook secret."""
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient", scripted_client([200], [])
+    )
+    state = tmp_path / "n.json"
+    notifier = HealthNotifier(SECRET_URL, state_path=state)
+
+    await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+    text = state.read_text()
+    assert "failed" in text, "control: the delivered alert was not persisted"
+    assert "s3cret" not in text and "ntfy.example" not in text, text
+
+
+async def test_the_logging_cap_is_what_keeps_httpx_from_logging_the_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The leak is real: uncapped, httpx's own INFO line carries the secret URL.
+    configure_logging() is what stops it, so the two halves here are the
+    control and the guard for test_webhook_url_never_reaches_the_logs."""
+    from ktnmgr.main import configure_logging
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200))
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient",
+        lambda **kw: real_client(transport=transport, **kw),
+    )
+    notifier = HealthNotifier(SECRET_URL, state_path=tmp_path / "n.json")
+
+    names = ("httpx", "httpcore")
+    saved = {name: logging.getLogger(name).level for name in names}
+    try:
+        for name in names:
+            logging.getLogger(name).setLevel(logging.NOTSET)
+        with caplog.at_level("DEBUG"):
+            await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+        assert "s3cret" in log_text(caplog), "control: httpx no longer logs the URL"
+
+        caplog.clear()
+        configure_logging()
+        with caplog.at_level("DEBUG"):
+            await notifier.evaluate([make_bay(0, SlotHealth.OK)])  # the recovery alert
+        assert caplog.records, "control: the notifier logged nothing, so this proves nothing"
+        assert "s3cret" not in log_text(caplog), log_text(caplog)
+    finally:
+        for name, level in saved.items():
+            logging.getLogger(name).setLevel(level)
+
+
+@pytest.mark.skip(
+    reason="BUG: httpx.InvalidURL is not an httpx.HTTPError, so a malformed webhook URL "
+    "escapes _send() instead of counting as a failed delivery"
+)
+async def test_a_malformed_url_counts_as_a_failed_delivery(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A typo in the webhook URL is a failed delivery like any other: warned
+    about without the secret, and retried on the cooldown. Today it escapes
+    evaluate() instead, so the caller logs a traceback on every changed poll
+    and the cooldown is never set."""
+    notifier = HealthNotifier("https://ntfy.example:notaport/topic-s3cret",
+                              state_path=tmp_path / "n.json", retry_seconds=60.0)
+
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # must not raise
+
+    text = log_text(caplog)
+    assert any(
+        r.levelname == "WARNING" and "could not deliver" in r.getMessage()
+        for r in caplog.records
+    ), text
+    assert "s3cret" not in text, text
