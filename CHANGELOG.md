@@ -19,6 +19,16 @@ versioning follows [Semantic Versioning](https://semver.org/).
   It now also checks that the page's `color-scheme` is `dark` in dark and
   `normal` in light, and it measures the text shown in the selects and typed
   into the search and password fields, which it previously skipped.
+- **Health alerts: a malformed `KTN_ALERT_WEBHOOK_URL`, such as one whose
+  port is not a number, now counts as a failed delivery.** httpx reports
+  these as `InvalidURL`, which is not an `HTTPError`, so the error escaped
+  the notifier. While an alert was waiting to be sent, every poll logged a
+  `health notification failed` traceback because the retry spacing was
+  never applied, any enclosures after the failing one were skipped for that
+  poll, and that poll's silent state changes were not saved. It is now a single warning that the
+  URL is malformed, quoting no part of it: httpx's message names the bad
+  part, and in a mistyped URL that part can be the password or token. The
+  alert is still not delivered until the URL is corrected.
 
 ## [1.6.1] — 2026-10-29
 

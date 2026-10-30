@@ -183,6 +183,21 @@ class HealthNotifier:
                             "zfs_state": bay.zfs.state,
                         },
                     )
+        except httpx.InvalidURL as exc:
+            # A malformed URL (a typo'd port, a stray control character) fails
+            # while the request is built, and InvalidURL is not an HTTPError, so
+            # it needs its own clause or it escapes evaluate(). Nothing from the
+            # URL is logged here, not even scheme and host: httpx's message
+            # quotes the bad component, and in a mistyped URL that can be the
+            # secret itself ("https://user:token/topic" is reported as an
+            # invalid port 'token'), while urlsplit's idea of the host of a
+            # malformed URL can be the userinfo.
+            log.warning(
+                "could not deliver health notification: %s: the webhook URL is "
+                "malformed (check KTN_ALERT_WEBHOOK_URL)",
+                type(exc).__name__,
+            )
+            return False
         except (httpx.HTTPError, OSError) as exc:
             # A failing notification endpoint must never disturb polling. The URL
             # is a secret for ntfy (the topic or an ?auth= token), and some httpx

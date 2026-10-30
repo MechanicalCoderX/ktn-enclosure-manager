@@ -9,9 +9,12 @@ silently dropped.
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Self
 
 import httpx
@@ -674,17 +677,13 @@ async def test_the_logging_cap_is_what_keeps_httpx_from_logging_the_url(
             logging.getLogger(name).setLevel(level)
 
 
-@pytest.mark.skip(
-    reason="BUG: httpx.InvalidURL is not an httpx.HTTPError, so a malformed webhook URL "
-    "escapes _send() instead of counting as a failed delivery"
-)
 async def test_a_malformed_url_counts_as_a_failed_delivery(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A typo in the webhook URL is a failed delivery like any other: warned
-    about without the secret, and retried on the cooldown. Today it escapes
-    evaluate() instead, so the caller logs a traceback on every changed poll
-    and the cooldown is never set."""
+    about without the secret, and retried on the cooldown. httpx.InvalidURL is
+    not an httpx.HTTPError, so it used to escape evaluate() instead: the caller
+    logged a traceback on every changed poll and the cooldown was never set."""
     notifier = HealthNotifier("https://ntfy.example:notaport/topic-s3cret",
                               state_path=tmp_path / "n.json", retry_seconds=60.0)
 
@@ -697,3 +696,81 @@ async def test_a_malformed_url_counts_as_a_failed_delivery(
         for r in caplog.records
     ), text
     assert "s3cret" not in text, text
+
+
+# ------------------------------------------- malformed webhook URL 2026-10-30
+
+#: Each is rejected by httpx with InvalidURL while the request is being built,
+#: before anything is sent (checked against httpx 0.28.1). The second is the
+#: case that rules out logging httpx's message: with the "@host" missing, the
+#: password is parsed as a port and httpx reports "Invalid port: '<password>'".
+MALFORMED_URLS = [
+    "https://alice:pw-s3cret@ntfy.example:notaport/topic-s3cret?auth=TOKEN-s3cret",
+    "https://alice:pw-s3cret/topic-s3cret?auth=TOKEN-s3cret",
+    "https://ntfy.example/topic-s3cret\x7f?auth=TOKEN-s3cret",
+]
+
+
+def counting_real_client() -> tuple[type, list[int]]:
+    """The real httpx client, so its own URL parsing runs, counting POSTs."""
+    attempts: list[int] = []
+
+    class CountingClient(httpx.AsyncClient):
+        async def post(self, *args: Any, **kwargs: Any) -> httpx.Response:
+            attempts.append(1)
+            return await super().post(*args, **kwargs)
+
+    return CountingClient, attempts
+
+
+@pytest.mark.parametrize("url", MALFORMED_URLS, ids=["bad-port", "missing-host", "control-char"])
+async def test_a_malformed_url_leaks_nothing_of_the_url_into_the_logs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    url: str,
+) -> None:
+    """httpx's InvalidURL message quotes the offending part of the URL, and in a
+    mistyped URL that part can be the credential. The warning says the URL is
+    malformed and quotes none of it - not the path, the query, the userinfo, or
+    whatever httpx thought the port was."""
+    client, attempts = counting_real_client()
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", client)
+    notifier = HealthNotifier(url, state_path=tmp_path / "n.json")
+
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # must not raise
+
+    assert attempts == [1], "control: no delivery was attempted, so this proves nothing"
+    text = log_text(caplog)
+    assert "s3cret" not in text and "alice" not in text and "TOKEN" not in text, text
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("could not deliver" in w and "malformed" in w for w in warnings), warnings
+    assert not [r for r in caplog.records if r.exc_info], "no traceback for a typo"
+
+
+async def test_a_malformed_url_sets_the_cooldown_and_still_commits_silent_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The two side effects the escaping exception used to skip: the retry
+    cooldown, so a typo is not re-attempted on every poll tick, and the save at
+    the end of evaluate(), so the silent transitions of that same pass persist."""
+    client, attempts = counting_real_client()
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", client)
+    state = tmp_path / "n.json"
+    notifier = HealthNotifier(MALFORMED_URLS[0], state_path=state, retry_seconds=60.0)
+    # Bay 1 is a silent first observation (OK): it commits without a message.
+    bays = [make_bay(0, SlotHealth.FAILED), make_bay(1, SlotHealth.OK)]
+
+    for _ in range(5):
+        await notifier.evaluate(bays)
+    assert len(attempts) == 1, "the malformed URL was re-attempted inside the cooldown"
+
+    saved = json.loads(state.read_text())
+    assert saved == {"0x50060480aabbcc00:1": "ok"}, (
+        "the silent change must persist; the undelivered alert must not"
+    )
+
+    # Only the notifier's clock moves; asyncio's own time.monotonic is untouched.
+    later = time.monotonic() + 61.0
+    monkeypatch.setattr("ktnmgr.services.notify.time", SimpleNamespace(monotonic=lambda: later))
+    await notifier.evaluate(bays)
+    assert len(attempts) == 2, "after the cooldown the alert is attempted again"

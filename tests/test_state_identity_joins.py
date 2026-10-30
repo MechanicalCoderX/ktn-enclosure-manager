@@ -507,6 +507,50 @@ async def test_notifier_sees_every_bay_whose_identity_resolved() -> None:
     assert [bay.ses_slot for bay in seen] == [SES_SLOT, 4]
 
 
+async def test_a_malformed_webhook_url_does_not_skip_later_enclosures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """httpx.InvalidURL used to escape HealthNotifier.evaluate() for the first
+    enclosure, so _notify_health_changes logged a traceback and never reached
+    the second one. Driven through the real notifier and the real httpx client,
+    so it is httpx's own URL parsing that raises."""
+    import httpx
+    from ktnmgr.services.notify import HealthNotifier
+
+    attempts: list[str] = []
+
+    class CountingClient(httpx.AsyncClient):
+        async def post(self, *args: Any, **kwargs: Any) -> httpx.Response:
+            attempts.append(kwargs["content"].decode())
+            return await super().post(*args, **kwargs)
+
+    monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", CountingClient)
+    notifier = HealthNotifier(
+        "https://ntfy.example:notaport/topic-s3cret", state_path=tmp_path / "n.json"
+    )
+    service = _service(notifier=notifier)
+    second_id = "0x50060480aabbcc99"
+    service.enclosures.succeed([_ref(), _ref().model_copy(update={"logical_id": second_id})])
+
+    def compose(logical_id: str) -> list[tuple[Bay, bool]]:
+        slot = 0 if logical_id == STL3_ID else 7
+        bay = Bay(
+            display_bay=slot + 1, ses_slot=slot, enclosure_id=logical_id,
+            health=SlotHealth.FAILED, status="Critical",
+        )
+        return [(bay, True)]
+
+    monkeypatch.setattr(service, "_compose_bays", compose)
+
+    with caplog.at_level("DEBUG"):
+        await service._notify_health_changes()
+
+    assert len(attempts) == 2, f"the second enclosure was skipped: {attempts}"
+    assert any("Bay 8" in body for body in attempts), attempts
+    assert not [r for r in caplog.records if r.getMessage() == "health notification failed"]
+    assert "s3cret" not in "\n".join(r.getMessage() for r in caplog.records)
+
+
 # -------------------------------------- #8: a failing discover advances nothing
 
 
