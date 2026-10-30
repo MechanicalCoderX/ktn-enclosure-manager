@@ -513,19 +513,30 @@ async def test_notifier_sees_every_bay_whose_identity_resolved() -> None:
         "https://ntfy.example:notaport/topic-s3cret",
         "https://xn--ls8h.la/topic-s3cret",
         "https://ntfy.example/topic-s3cret\udcff",
+        # Out-of-range ports on loopback: these get past DNS to anyio's
+        # connect, which raises an ExceptionGroup of OverflowError before any
+        # connect() call, so nothing is sent and no network is needed.
+        "https://alice:pw-s3cret@127.0.0.1:99999/topic-s3cret?auth=TOKEN-s3cret",
+        "https://alice:pw-s3cret@127.0.0.1:65536/topic-s3cret?auth=TOKEN-s3cret",
+        "https://alice:pw-s3cret@127.0.0.1:-1/topic-s3cret?auth=TOKEN-s3cret",
+        "https://alice:pw-s3cret@[::1]:99999/topic-s3cret?auth=TOKEN-s3cret",
+        "https://alice:pw-s3cret@localhost:99999/topic-s3cret?auth=TOKEN-s3cret",
     ],
-    ids=["invalid-url", "idna-undecodable", "lone-surrogate"],
+    ids=[
+        "invalid-url", "idna-undecodable", "lone-surrogate",
+        "port-99999", "port-65536", "port-negative", "port-ipv6", "port-localhost",
+    ],
 )
 async def test_a_malformed_webhook_url_does_not_skip_later_enclosures(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
     url: str,
 ) -> None:
-    """httpx.InvalidURL, and the bare UnicodeError httpx lets through for an
-    undecodable "xn--" host or a lone surrogate, used to escape
-    HealthNotifier.evaluate() for the first enclosure, so
-    _notify_health_changes logged a traceback and never reached the second one.
-    Driven through the real notifier and the real httpx client, so it is httpx's
-    own URL parsing that raises."""
+    """httpx.InvalidURL, the bare UnicodeError httpx lets through for an
+    undecodable "xn--" host or a lone surrogate, and the ExceptionGroup of an
+    out-of-range port used to escape HealthNotifier.evaluate() for the first
+    enclosure, so _notify_health_changes logged a traceback, set no cooldown and
+    never reached the second one. Driven through the real notifier and the real
+    httpx client, so it is httpx's own stack that raises."""
     import httpx
     from ktnmgr.services.notify import HealthNotifier
 
@@ -558,7 +569,12 @@ async def test_a_malformed_webhook_url_does_not_skip_later_enclosures(
     assert len(attempts) == 2, f"the second enclosure was skipped: {attempts}"
     assert any("Bay 8" in body for body in attempts), attempts
     assert not [r for r in caplog.records if r.getMessage() == "health notification failed"]
-    assert "s3cret" not in "\n".join(r.getMessage() for r in caplog.records)
+    assert not [r for r in caplog.records if r.exc_info], "no traceback for a typo"
+    assert set(notifier._retry_at) == {f"{STL3_ID}:0", f"{second_id}:7"}, (
+        "both enclosures' failed alerts must be on the retry cooldown"
+    )
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "s3cret" not in text and "alice" not in text and "TOKEN" not in text, text
 
 
 # -------------------------------------- #8: a failing discover advances nothing

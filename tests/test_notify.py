@@ -701,22 +701,68 @@ async def test_a_malformed_url_counts_as_a_failed_delivery(
 
 # ------------------------------------------- malformed webhook URL 2026-10-30
 
-#: Each is rejected by httpx while the request is being built, before anything
-#: is sent (checked against httpx 0.28.1). The first three raise InvalidURL. The
-#: second is the case that rules out logging httpx's message: with the "@host"
-#: missing, the password is parsed as a port and httpx reports
-#: "Invalid port: '<password>'". The last two raise a bare UnicodeError that
-#: httpx does not wrap: idna's InvalidCodepoint for an ASCII "xn--" label that
-#: does not decode (an emoji domain in A-label form), and UnicodeEncodeError for
-#: a lone surrogate, which os.environ produces from a non-UTF-8 byte.
+MALFORMED = "the webhook URL is malformed"
+UNENCODABLE = "the webhook URL or the alert text could not be encoded"
+UNEXPECTED = "unexpected error sending the alert"
+
+#: Each fails inside the real httpx client without any traffic leaving the host
+#: (checked against httpx 0.28.1), paired with the warning(s) it may produce.
+#:
+#: - The first three raise InvalidURL while the request is built. The second
+#:   is the case that rules out logging httpx's message: with the "@host"
+#:   missing, the password is parsed as a port and httpx reports
+#:   "Invalid port: '<password>'".
+#: - The next two raise a bare UnicodeError that httpx does not wrap: idna's
+#:   InvalidCodepoint for an ASCII "xn--" label that does not decode (an emoji
+#:   domain in A-label form), and UnicodeEncodeError for a lone surrogate,
+#:   which os.environ produces from a non-UTF-8 byte.
+#: - The rest are out-of-range ports. httpx does no range check, so these get
+#:   as far as anyio's connect, which raises an ExceptionGroup of
+#:   OverflowError. The hosts are loopback and resolve without DNS, which is
+#:   what makes them reach the connect: on an unresolvable host the DNS
+#:   failure (a ConnectError) comes first and hides it. Nothing is sent: the
+#:   port is rejected before the connect() call. [::1] may also give a
+#:   ConnectError on a host with no IPv6, which is handled as well.
 MALFORMED_URLS = [
-    "https://alice:pw-s3cret@ntfy.example:notaport/topic-s3cret?auth=TOKEN-s3cret",
-    "https://alice:pw-s3cret/topic-s3cret?auth=TOKEN-s3cret",
-    "https://ntfy.example/topic-s3cret\x7f?auth=TOKEN-s3cret",
-    "https://alice:pw-s3cret@xn--ls8h.la/topic-s3cret?auth=TOKEN-s3cret",
-    "https://ntfy.example/topic-s3cret\udcff?auth=TOKEN-s3cret",
+    pytest.param(
+        "https://alice:pw-s3cret@ntfy.example:notaport/topic-s3cret?auth=TOKEN-s3cret",
+        (MALFORMED,), id="bad-port",
+    ),
+    pytest.param(
+        "https://alice:pw-s3cret/topic-s3cret?auth=TOKEN-s3cret", (MALFORMED,), id="missing-host"
+    ),
+    pytest.param(
+        "https://ntfy.example/topic-s3cret\x7f?auth=TOKEN-s3cret", (MALFORMED,), id="control-char"
+    ),
+    pytest.param(
+        "https://alice:pw-s3cret@xn--ls8h.la/topic-s3cret?auth=TOKEN-s3cret",
+        (UNENCODABLE,), id="idna-undecodable",
+    ),
+    pytest.param(
+        "https://ntfy.example/topic-s3cret\udcff?auth=TOKEN-s3cret",
+        (UNENCODABLE,), id="lone-surrogate",
+    ),
+    pytest.param(
+        "https://alice:pw-s3cret@127.0.0.1:99999/topic-s3cret?auth=TOKEN-s3cret",
+        (UNEXPECTED,), id="port-99999",
+    ),
+    pytest.param(
+        "https://alice:pw-s3cret@127.0.0.1:65536/topic-s3cret?auth=TOKEN-s3cret",
+        (UNEXPECTED,), id="port-65536",
+    ),
+    pytest.param(
+        "https://alice:pw-s3cret@127.0.0.1:-1/topic-s3cret?auth=TOKEN-s3cret",
+        (UNEXPECTED,), id="port-negative",
+    ),
+    pytest.param(
+        "https://alice:pw-s3cret@[::1]:99999/topic-s3cret?auth=TOKEN-s3cret",
+        (UNEXPECTED, "could not deliver health notification to"), id="port-ipv6",
+    ),
+    pytest.param(
+        "https://alice:pw-s3cret@localhost:99999/topic-s3cret?auth=TOKEN-s3cret",
+        (UNEXPECTED,), id="port-localhost",
+    ),
 ]
-MALFORMED_IDS = ["bad-port", "missing-host", "control-char", "idna-undecodable", "lone-surrogate"]
 
 
 def counting_real_client() -> tuple[type, list[int]]:
@@ -731,15 +777,15 @@ def counting_real_client() -> tuple[type, list[int]]:
     return CountingClient, attempts
 
 
-@pytest.mark.parametrize("url", MALFORMED_URLS, ids=MALFORMED_IDS)
+@pytest.mark.parametrize(("url", "phrases"), MALFORMED_URLS)
 async def test_a_malformed_url_leaks_nothing_of_the_url_into_the_logs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
-    url: str,
+    url: str, phrases: tuple[str, ...],
 ) -> None:
     """httpx's InvalidURL message quotes the offending part of the URL, and in a
-    mistyped URL that part can be the credential. The warning says the URL is
-    malformed and quotes none of it - not the path, the query, the userinfo, or
-    whatever httpx thought the port was."""
+    mistyped URL that part can be the credential. The warning says what kind of
+    failure it was and quotes none of the URL - not the path, the query, the
+    userinfo, or whatever httpx thought the port was."""
     client, attempts = counting_real_client()
     monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", client)
     notifier = HealthNotifier(url, state_path=tmp_path / "n.json")
@@ -751,20 +797,26 @@ async def test_a_malformed_url_leaks_nothing_of_the_url_into_the_logs(
     text = log_text(caplog)
     assert "s3cret" not in text and "alice" not in text and "TOKEN" not in text, text
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-    assert any("could not deliver" in w and "malformed" in w for w in warnings), warnings
+    assert any(
+        w.startswith("could not deliver health notification") and any(p in w for p in phrases)
+        for w in warnings
+    ), warnings
     assert not [r for r in caplog.records if r.exc_info], "no traceback for a typo"
 
 
+@pytest.mark.parametrize(("url", "phrases"), MALFORMED_URLS)
 async def test_a_malformed_url_sets_the_cooldown_and_still_commits_silent_changes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str, phrases: tuple[str, ...]
 ) -> None:
     """The two side effects the escaping exception used to skip: the retry
     cooldown, so a typo is not re-attempted on every poll tick, and the save at
-    the end of evaluate(), so the silent transitions of that same pass persist."""
+    the end of evaluate(), so the silent transitions of that same pass persist.
+    Run for every case, so a clause that counted its failure as delivered (and
+    so lost the alert for good) fails here."""
     client, attempts = counting_real_client()
     monkeypatch.setattr("ktnmgr.services.notify.httpx.AsyncClient", client)
     state = tmp_path / "n.json"
-    notifier = HealthNotifier(MALFORMED_URLS[0], state_path=state, retry_seconds=60.0)
+    notifier = HealthNotifier(url, state_path=state, retry_seconds=60.0)
     # Bay 1 is a silent first observation (OK): it commits without a message.
     bays = [make_bay(0, SlotHealth.FAILED), make_bay(1, SlotHealth.OK)]
 
@@ -787,17 +839,21 @@ async def test_a_malformed_url_sets_the_cooldown_and_still_commits_silent_change
 #: URLs httpx accepts far enough to attempt a connection (checked against
 #: httpx 0.28.1: each gives a ConnectError for an unresolvable host) but that
 #: urlsplit refuses with ValueError. For the NFKC one - a userinfo character
-#: that changes under Unicode NFKC normalisation - the ValueError message quotes
-#: the whole netloc, password included, so before the _where guard the password
-#: reached the "health notification failed" traceback.
+#: that NFKC-normalises into a URL delimiter (U+2100 becomes "a/c") - the
+#: ValueError message quotes the whole netloc, password included, so before the
+#: _where guard the password reached the "health notification failed" traceback.
 URLSPLIT_REFUSES = [
     "https://[ntfy.example/topic-s3cret?auth=TOKEN-s3cret",
     "https://alice:pw[-s3cret@ntfy.example/topic-s3cret?auth=TOKEN-s3cret",
+    "https://alice:pw]-s3cret@ntfy.example/topic-s3cret?auth=TOKEN-s3cret",
     "https://alice:pw\u2100x-s3cret@ntfy.example/topic-s3cret?auth=TOKEN-s3cret",
 ]
 
 
-@pytest.mark.parametrize("url", URLSPLIT_REFUSES, ids=["host-bracket", "password-bracket", "nfkc-userinfo"])
+@pytest.mark.parametrize(
+    "url", URLSPLIT_REFUSES,
+    ids=["host-bracket", "password-bracket-open", "password-bracket-close", "nfkc-userinfo"],
+)
 @pytest.mark.parametrize("status", [None, 404], ids=["connect-error", "HTTP-404"])
 async def test_a_host_urlsplit_refuses_still_counts_as_a_failed_delivery(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
@@ -820,3 +876,62 @@ async def test_a_host_urlsplit_refuses_still_counts_as_a_failed_delivery(
     text = log_text(caplog)
     assert "s3cret" not in text and "TOKEN" not in text and "alice" not in text, text
     assert "<malformed webhook url>" in text, text
+
+
+class MadeUpLibraryError(Exception):
+    """Stands in for whatever the HTTP stack raises next that nobody listed."""
+
+
+@pytest.mark.parametrize(
+    ("make_error", "logged_type"),
+    [
+        pytest.param(lambda url: MadeUpLibraryError(f"while posting to {url}"),
+                     "MadeUpLibraryError", id="unknown-type"),
+        pytest.param(
+            lambda url: ExceptionGroup(
+                f"connect to {url}", [MadeUpLibraryError(url), OverflowError(url)]
+            ),
+            "ExceptionGroup[MadeUpLibraryError, OverflowError]", id="exception-group",
+        ),
+    ],
+)
+async def test_an_unexpected_error_is_a_failed_delivery_logged_by_type_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture,
+    make_error: Callable[[str], Exception], logged_type: str,
+) -> None:
+    """The last clause: an error type nobody anticipated is a failed delivery
+    with the cooldown set, not an exception out of evaluate(). Its message may
+    quote the URL, so only class names are logged - for a group, the class
+    names inside it too, since "ExceptionGroup" alone says nothing."""
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient", raising_client(make_error)
+    )
+    notifier = HealthNotifier(CREDENTIAL_URL, state_path=tmp_path / "n.json")
+
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])  # must not raise
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings == [
+        f"could not deliver health notification: {logged_type}: {UNEXPECTED}"
+    ], warnings
+    assert not [r for r in caplog.records if r.exc_info]
+    assert notifier._retry_at, "the cooldown was not set"
+
+
+async def test_cancellation_is_not_swallowed_by_the_last_clause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The last clause catches Exception, not BaseException: shutting the app
+    down cancels the poll loop, and a notifier that ate the CancelledError
+    would keep it running."""
+    import asyncio
+
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient",
+        raising_client(lambda url: asyncio.CancelledError()),
+    )
+    notifier = HealthNotifier("http://ntfy/topic", state_path=tmp_path / "n.json")
+
+    with pytest.raises(asyncio.CancelledError):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
