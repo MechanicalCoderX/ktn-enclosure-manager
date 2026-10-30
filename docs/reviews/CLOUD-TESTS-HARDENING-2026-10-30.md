@@ -12,7 +12,8 @@ Tests only; no product code changed. Full tables are in
 - **Tests:** pytest 606 → 699 passed, 1 skipped. Playwright 62 → 80
   (75 passed, 5 skipped project gates).
 - **CI:** [41099030501](https://github.com/MechanicalCoderX/ktn-enclosure-manager/actions/runs/41099030501)
-  on `1d0ee51`, all 6 jobs green. Final commit `acab8ac`: run 41100951653 queued.
+  on `1d0ee51`, all 6 jobs green. Final test commit `acab8ac`:
+  [41100951653](https://github.com/MechanicalCoderX/ktn-enclosure-manager/actions/runs/41100951653) green.
 - **Coverage (line+branch):** 90.57% → 91.28%. `tls_watch` 82→96%,
   `config` 97→99%, `notify` 92→92% (assertions added, no new lines run).
 - **Mutations:** 44, plus 2 bug-probe checks. Each new test is killed by one. One
