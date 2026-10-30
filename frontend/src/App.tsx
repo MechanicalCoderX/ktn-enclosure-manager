@@ -208,7 +208,7 @@ function ChangePasswordDialog({
                  minLength={12} value={confirm}
                  onChange={(e) => setConfirm(e.target.value)} required />
 
-          {error && <div className="notice error">{error}</div>}
+          {error && <div className="notice error" role="alert">{error}</div>}
 
           <div className="modal-actions">
             <button type="button" className="btn secondary" onClick={onClose}
@@ -294,7 +294,7 @@ function LoginScreen({
             : "Sign in to continue."}
         </div>
         {notice && <div className="notice">{notice}</div>}
-        {error && <div className="notice error">{error}</div>}
+        {error && <div className="notice error" role="alert">{error}</div>}
         <label htmlFor="u">Username</label>
         <input id="u" type="text" autoComplete="username" value={username}
                onChange={(e) => setUsername(e.target.value)} required />
@@ -592,8 +592,8 @@ export function App() {
         />
       )}
 
-      <main>
-        {error && <div className="notice error">{error}</div>}
+      <main inert={changingPassword}>
+        {error && <div className="notice error" role="alert">{error}</div>}
         {/* First, because it is the more fundamental failure: TrueNAS going away
             costs the pool columns, but the slot poll going away means the map
             itself - presence, health, IDENT, fault - is a photograph. The rows

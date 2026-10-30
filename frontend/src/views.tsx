@@ -943,7 +943,7 @@ export function DiagnosticsView({ enclosureId }: { enclosureId: string }) {
       <div className="panel">
         <h2>Diagnostics</h2>
         <div className="sub">Sanitised &mdash; contains no credentials. Safe to paste into a bug report.</div>
-        {error && <div className="notice error">{error}</div>}
+        {error && <div className="notice error" role="alert">{error}</div>}
         <button
           className="btn secondary"
           onClick={() => navigator.clipboard?.writeText(copyable)}
