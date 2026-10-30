@@ -19,6 +19,33 @@ versioning follows [Semantic Versioning](https://semver.org/).
   It now also checks that the page's `color-scheme` is `dark` in dark and
   `normal` in light, and it measures the text shown in the selects and typed
   into the search and password fields, which it previously skipped.
+- **Health alerts: a malformed `KTN_ALERT_WEBHOOK_URL`, such as one whose
+  port is not a number or is out of range, now counts as a failed
+  delivery.** httpx reports most of these as `InvalidURL`. A stray
+  non-UTF-8 byte gives `InvalidURL` in the host but a bare `UnicodeError`
+  elsewhere in the URL, as does an `xn--` host that does not decode. A port
+  above 65535 or below 0 on a host that resolves gets as far as the connect
+  and fails there as an `ExceptionGroup` of `OverflowError`. None of these
+  is an `HTTPError`, so the error escaped the notifier. While an alert was
+  waiting to be sent, every poll logged a `health notification failed`
+  traceback because the retry spacing was never applied, any enclosures
+  after the failing one were skipped for that poll, and that poll's silent
+  state changes were not saved. It is now a one-line warning (no
+  traceback) per failing bay, repeated on the retry spacing. It names the
+  kind of failure and quotes no part of the URL: httpx's message names the
+  bad part, and in a mistyped URL that part can be the password or token.
+  Any other unexpected error while sending an alert is now handled the same
+  way, logged by exception class name only. The alert is still not
+  delivered until the URL is corrected.
+- Health alerts: some other malformed webhook URLs failed the same way by a
+  different route: an unbalanced `[` in the host, a `[` or `]` in the
+  password, and userinfo characters that NFKC-normalise into a URL
+  delimiter such as `/` or `@`. httpx gets as far as a connection error on
+  these, but the warning for that error took the URL apart with Python's
+  `urlsplit`, which raises on them. For the NFKC case the error it raised
+  quoted the whole `user:password@host` part of the URL, and that message
+  was logged with the traceback: a credential leak, now closed. The warning
+  now names the endpoint as `<malformed webhook url>` instead.
 
 ## [1.6.1] — 2026-10-29
 

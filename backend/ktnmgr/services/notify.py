@@ -51,6 +51,20 @@ _NTFY_STYLE: dict[str, tuple[str, str]] = {
 }
 
 
+def _type_names(exc: BaseException) -> str:
+    """The exception's class name, plus the class names inside a group.
+
+    Class names only, never the messages: those can quote the webhook URL. A
+    group's own name alone ("ExceptionGroup") would hide the useful part, such
+    as the OverflowError of an out-of-range port.
+    """
+    name = type(exc).__name__
+    if isinstance(exc, BaseExceptionGroup):
+        inner = sorted({_type_names(e) for e in exc.exceptions})
+        name += "[" + ", ".join(inner) + "]"
+    return name
+
+
 class HealthNotifier:
     """Sends a message when a bay's health changes."""
 
@@ -183,6 +197,34 @@ class HealthNotifier:
                             "zfs_state": bay.zfs.state,
                         },
                     )
+        except httpx.InvalidURL as exc:
+            # A malformed URL (a typo'd port, a stray control character) fails
+            # while the request is built, and InvalidURL is not an HTTPError, so
+            # it needs its own clause or it escapes evaluate(). Nothing from the
+            # URL is logged here, not even scheme and host: httpx's message
+            # quotes the bad component, and in a mistyped URL that can be the
+            # secret itself ("https://user:token/topic" is reported as an
+            # invalid port 'token'), while urlsplit's idea of the host of a
+            # malformed URL can be the userinfo.
+            log.warning(
+                "could not deliver health notification: %s: the webhook URL is "
+                "malformed (check KTN_ALERT_WEBHOOK_URL)",
+                type(exc).__name__,
+            )
+            return False
+        except UnicodeError as exc:
+            # The same failure, unwrapped: httpx 0.28 lets idna's error through
+            # for an ASCII "xn--" host that does not decode, and a
+            # UnicodeEncodeError through for a lone surrogate (os.environ makes
+            # one from any non-UTF-8 byte in the variable). The body is encoded
+            # inside this try as well, so the message cannot blame the URL
+            # alone. Logged without the message, for the reason above.
+            log.warning(
+                "could not deliver health notification: %s: the webhook URL or "
+                "the alert text could not be encoded (check KTN_ALERT_WEBHOOK_URL)",
+                type(exc).__name__,
+            )
+            return False
         except (httpx.HTTPError, OSError) as exc:
             # A failing notification endpoint must never disturb polling. The URL
             # is a secret for ntfy (the topic or an ?auth= token), and some httpx
@@ -190,6 +232,21 @@ class HealthNotifier:
             log.warning(
                 "could not deliver health notification to %s: %s: %s",
                 self._where, type(exc).__name__, self._scrub(str(exc)),
+            )
+            return False
+        except Exception as exc:  # noqa: BLE001 - an unsent alert is a failed delivery
+            # Whatever else the HTTP stack raises. Listing exception types has
+            # been tried, and each review found one more: an out-of-range port
+            # (httpx does no range check) on a host that resolves surfaces as an
+            # ExceptionGroup of OverflowError from anyio's connect. An alert that
+            # cannot be sent is a failed delivery, retried on the cooldown, never
+            # an exception out of evaluate(). Class names only: str(exc) of an
+            # unknown error may quote the URL. CancelledError is a BaseException
+            # and is deliberately not caught.
+            log.warning(
+                "could not deliver health notification: %s: unexpected error "
+                "sending the alert",
+                _type_names(exc),
             )
             return False
 
@@ -212,8 +269,16 @@ class HealthNotifier:
     @property
     def _where(self) -> str:
         """Scheme and host only: the path and query of the URL are secrets."""
-        parts = urlsplit(self.url)
-        return f"{parts.scheme}://{parts.hostname or '?'}"
+        try:
+            parts = urlsplit(self.url)
+            host = parts.hostname
+        except ValueError:
+            # urlsplit refuses some malformed hosts outright, such as an
+            # unbalanced "[", that httpx takes as far as a connect error. This
+            # runs inside _send()'s error handlers, so raising here would
+            # escape them.
+            return "<malformed webhook url>"
+        return f"{parts.scheme}://{host or '?'}"
 
     def _scrub(self, text: str) -> str:
         return text.replace(self.url, "<webhook url>") if self.url else text
