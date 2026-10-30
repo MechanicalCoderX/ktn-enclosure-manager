@@ -74,7 +74,7 @@ await shot(page, "drive-map-light.png");
 await setTheme(page, "dark");
 
 // Bay detail: pick a populated bay so the panel has real content.
-await page.getByRole("listitem", { name: /^Bay 6, / }).click();
+await page.getByRole("button", { name: /^Bay 6\b/ }).click();
 await page.waitForTimeout(600);
 await shot(page, "bay-detail.png");
 

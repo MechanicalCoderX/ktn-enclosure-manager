@@ -153,6 +153,13 @@ main { padding: 18px; max-width: 1500px; width: 100%; margin: 0 auto; }
   min-width: min-content;
 }
 
+/* Text for screen readers only. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* The list item around each tile; flex so the tile still fills the row's height. */
+.bay-slot { display: flex; }
 .bay {
   width: 82px; min-height: 128px;
   border: 1px solid var(--border); border-radius: 6px;

@@ -45,12 +45,12 @@ await page.waitForTimeout(1800); // first poll lands, tiles settle
 
 // The demo: pick a bay, identify it for 60s, let the countdown breathe,
 // then clear it - the full round trip a viewer would perform.
-await page.getByRole("listitem", { name: /^Bay 4, / }).click();
+await page.getByRole("button", { name: /^Bay 4\b/ }).click();
 await page.waitForTimeout(1200);
 await page.getByLabel("Identify for").selectOption("60");
 await page.getByRole("button", { name: "Identify", exact: true }).click();
 await page
-  .getByRole("listitem", { name: /^Bay 4,.*identify active/i })
+  .getByRole("button", { name: /^Bay 4\b.*identify active/i })
   .waitFor({ timeout: 10_000 });
 await page.waitForTimeout(4500); // pulsing dot + ticking countdown on film
 await page.getByRole("button", { name: "Clear" }).click();

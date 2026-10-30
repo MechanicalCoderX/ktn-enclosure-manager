@@ -26,7 +26,7 @@ async function bootstrapAndLogin(page: Page) {
 /** Locate the IDENT indicator on one specific bay tile rather than counting
  *  every dot on the page, so a lit LED elsewhere cannot affect the assertion. */
 const identDot = (page: Page, bay: number) =>
-  page.getByRole("listitem", { name: new RegExp(`^Bay ${bay}, `) }).locator(".ident-dot");
+  page.getByRole("button", { name: new RegExp(`^Bay ${bay}\\b`) }).locator(".ident-dot");
 
 test.describe("authentication", () => {
   test("first run requires creating an administrator", async ({ page }, testInfo) => {
@@ -67,17 +67,17 @@ test.describe("drive map", () => {
       [15, 14],
     ]) {
       await expect(
-        page.getByRole("listitem", { name: new RegExp(`^Bay ${bay}, SES slot ${ses},`) }),
+        page.getByRole("button", { name: new RegExp(`^Bay ${bay}\\b.*SES slot ${ses}\\b`) }),
       ).toHaveCount(1);
     }
   });
 
   test("bay one shows the expected disk", async ({ page }) => {
-    await expect(page.getByRole("listitem", { name: /^Bay 1, / })).toContainText("K1A00001");
+    await expect(page.getByRole("button", { name: /^Bay 1\b/ })).toContainText("K1A00001");
   });
 
   test("selecting a bay opens the detail panel", async ({ page }) => {
-    await page.getByRole("listitem", { name: /^Bay 8, / }).click();
+    await page.getByRole("button", { name: /^Bay 8\b/ }).click();
     const detail = page.getByTestId("bay-detail");
     await expect(detail.getByRole("heading", { name: /Bay 8.*SES slot 7/ })).toBeVisible();
     // Scoped to the detail panel: the serial also appears on the tile itself.
@@ -95,11 +95,11 @@ test.describe("identify", () => {
   test.beforeEach(async ({ page }) => bootstrapAndLogin(page));
 
   test("timed identify turns on, shows a countdown, and clears", async ({ page }) => {
-    await page.getByRole("listitem", { name: /^Bay 1, / }).click();
+    await page.getByRole("button", { name: /^Bay 1\b/ }).click();
     await page.getByLabel("Identify for").selectOption("60");
     await page.getByRole("button", { name: "Identify", exact: true }).click();
 
-    await expect(page.getByRole("listitem", { name: /^Bay 1,.*identify active/i })).toBeVisible({
+    await expect(page.getByRole("button", { name: /^Bay 1\b.*identify active/i })).toBeVisible({
       timeout: 10_000,
     });
     await expect(identDot(page, 1)).toHaveCount(1);
@@ -110,7 +110,7 @@ test.describe("identify", () => {
   });
 
   test("identify is recorded in the audit log", async ({ page }) => {
-    await page.getByRole("listitem", { name: /^Bay 3, / }).click();
+    await page.getByRole("button", { name: /^Bay 3\b/ }).click();
     await page.getByRole("button", { name: "Identify", exact: true }).click();
     await expect(identDot(page, 3)).toHaveCount(1, { timeout: 10_000 });
 
@@ -128,14 +128,14 @@ test.describe("identify", () => {
     // lit after the audit test) cannot mask a false negative here.
     await page.route("**/api/enclosures/*/slots/*/identify", (route) => route.abort());
 
-    await page.getByRole("listitem", { name: /^Bay 5, / }).click();
+    await page.getByRole("button", { name: /^Bay 5\b/ }).click();
     await page.getByRole("button", { name: "Identify", exact: true }).click();
 
     // The rejection text is fetch's browser-specific wording ("Failed to
     // fetch" on Chromium), so assert the banner itself, not the prose.
     await expect(page.locator("main > .notice.error")).toBeVisible();
     await expect(identDot(page, 5)).toHaveCount(0);
-    await expect(page.getByRole("listitem", { name: /^Bay 5,.*identify active/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Bay 5\b.*identify active/i })).toHaveCount(0);
   });
 });
 
@@ -269,7 +269,7 @@ test.describe("identify expiry", () => {
       await advanceTo(page, fake, deadline + 300);
       await expect(identDot(page, BAY)).toHaveCount(0);
       await expect(
-        page.getByRole("listitem", { name: new RegExp(`^Bay ${BAY},.*identify active`, "i") }),
+        page.getByRole("button", { name: new RegExp(`^Bay ${BAY}\\b.*identify active`, "i") }),
       ).toHaveCount(0);
       // Exactly one refetch, fired at the expiry itself ...
       expect(requestsIn(fake, deadline - STEP_MS, deadline + 300)).toBe(1);
@@ -374,7 +374,7 @@ test.describe("freshness", () => {
     // the enclosure block claimed the same freshness. Here they cannot - the
     // enclosure is live and TrueNAS is switched off, and the panel says so
     // separately for each.
-    await page.getByRole("listitem", { name: /^Bay 8, / }).click();
+    await page.getByRole("button", { name: /^Bay 8\b/ }).click();
     const detail = page.getByTestId("bay-detail");
 
     await expect(detail.getByTestId("section-physical")).toContainText(
@@ -510,9 +510,8 @@ test.describe("responsive", () => {
     const overflows = await scroller.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
     expect(overflows).toBe(true);
     // The physical order must be preserved even when scrolled.
-    await expect(page.getByRole("listitem").first()).toHaveAttribute(
-      "aria-label",
-      /^Bay 1, SES slot 0/,
+    await expect(page.getByRole("listitem").first().getByRole("button")).toHaveAccessibleName(
+      /^Bay 1\b.*SES slot 0\b/,
     );
   });
 });
@@ -690,8 +689,8 @@ test.describe("theme contrast", () => {
       // colour, and .bay-no had none of its own, so the bay numbers rendered
       // the UA's black on the dark panel. Plain, selected and hovered tiles.
       await expect(page.locator(".bay-no")).toHaveCount(16);
-      await page.getByRole("listitem", { name: /^Bay 1, / }).click();
-      await page.getByRole("listitem", { name: /^Bay 2, / }).hover();
+      await page.getByRole("button", { name: /^Bay 1\b/ }).click();
+      await page.getByRole("button", { name: /^Bay 2\b/ }).hover();
       const numbers = await lowContrast(page, ".bay-no");
       expect(numbers.checked).toBe(16);
       expect(numbers.low.map((l) => l.detail), "bay numbers").toEqual([]);
@@ -776,7 +775,7 @@ test.describe("theme contrast", () => {
       await expect(warn).toHaveCount(2, { timeout: 10_000 });
       const degraded = page.getByTestId("freshness").locator("summary .badge.warning");
       await expect(degraded).toHaveText("▲ degraded");
-      await page.getByRole("listitem", { name: /^Bay 1, / }).click();
+      await page.getByRole("button", { name: /^Bay 1\b/ }).click();
       const tooHot = page.getByTestId("bay-detail").locator(".badge.warning");
       await expect(tooHot).toHaveText("▲ too hot");
 

@@ -348,30 +348,49 @@ export function EnclosureMap({
         <div className="shelf" role="list" aria-label="Drive bays, left to right">
           {bays.map((bay) => {
             const dim = !matches(bay);
+            // The list item wraps the button: a <button> cannot itself be a
+            // listitem and still carry aria-pressed (axe: aria-allowed-attr).
             return (
-              <button
-                key={bay.ses_slot}
-                role="listitem"
-                className={`bay ${dim ? "dim" : ""}`}
-                aria-pressed={selected === bay.ses_slot}
-                aria-label={
-                  `Bay ${bay.display_bay}, SES slot ${bay.ses_slot}, ` +
-                  `${HEALTH[bay.health]?.label ?? "unknown"}` +
-                  (bay.disk.serial ? `, serial ${bay.disk.serial}` : ", empty") +
-                  (bay.locate ? ", identify active" : "")
-                }
-                onClick={() => onSelect(bay.ses_slot)}
-              >
-                {bay.locate && <span className="ident-dot" aria-hidden="true" />}
-                <span className="bay-no">{bay.display_bay}</span>
-                <span className="bay-ses">SES {bay.ses_slot}</span>
-                <HealthBadge health={bay.health} />
-                <span className="bay-serial">{bay.disk.serial ?? "—"}</span>
-                <span className="bay-dev">{bay.device ?? ""}</span>
-                {bay.smart.temperature_c !== null && (
-                  <span className="bay-temp">{bay.smart.temperature_c}&deg;C</span>
-                )}
-              </button>
+              <div key={bay.ses_slot} role="listitem" className="bay-slot">
+                <button
+                  className={`bay ${dim ? "dim" : ""}`}
+                  aria-pressed={selected === bay.ses_slot}
+                  onClick={() => onSelect(bay.ses_slot)}
+                >
+                  {/* The name is the tile's own text plus the words a sighted
+                      user infers from the layout, added for screen readers
+                      only, so it contains what is printed (WCAG 2.5.3). */}
+                  {bay.locate && <span className="ident-dot" aria-hidden="true" />}
+                  <span className="bay-no">
+                    <span className="sr-only">Bay </span>{bay.display_bay}
+                    <span className="sr-only">, </span>
+                  </span>
+                  <span className="bay-ses">
+                    SES<span className="sr-only"> slot</span> {bay.ses_slot}
+                    <span className="sr-only">, </span>
+                  </span>
+                  <HealthBadge health={bay.health} />
+                  <span className="bay-serial">
+                    {bay.disk.serial ? (
+                      <><span className="sr-only">, serial </span>{bay.disk.serial}</>
+                    ) : (
+                      <>
+                        {bay.health !== "empty" && <span className="sr-only">, empty</span>}
+                        <span aria-hidden="true">—</span>
+                      </>
+                    )}
+                  </span>
+                  <span className="bay-dev">
+                    {bay.device && <><span className="sr-only">, </span>{bay.device}</>}
+                  </span>
+                  {bay.smart.temperature_c !== null && (
+                    <span className="bay-temp">
+                      <span className="sr-only">, </span>{bay.smart.temperature_c}&deg;C
+                    </span>
+                  )}
+                  {bay.locate && <span className="sr-only">, identify active</span>}
+                </button>
+              </div>
             );
           })}
         </div>
