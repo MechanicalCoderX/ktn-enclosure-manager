@@ -120,11 +120,13 @@ annotated list. The essentials:
 | `KTN_SG_DEVICE` | SES device node to expose to the container |
 | `KTN_ENCLOSURE_ALLOWLIST` | restrict management to specific enclosure ids |
 | `KTN_POLL_*_SECONDS` | polling intervals (5 / 20 / 30 / 120 by default) |
-| `KTN_ALERT_WEBHOOK_URL` | ntfy topic or webhook for health-change alerts; empty disables |
+| `KTN_ALERT_WEBHOOK_URL` | ntfy topic or webhook for health-change alerts; empty disables. Only a 2xx reply counts as delivered: a 3xx (redirects are not followed), 4xx, 5xx, connection error or malformed URL is a failure, and the alert is retried on a 60 s spacing until it is accepted. The URL is treated as a credential and never logged — see [SECURITY.md](SECURITY.md#health-alerts-the-webhook-url-is-a-credential) |
 | `KTN_ALERT_STYLE` | `ntfy` (plain text + headers) or `json` |
 | `KTN_AUTH_REQUIRED` | defaults to `true`. `false` runs it as an open read-only dashboard, like scrutiny |
 | `KTN_ALLOW_ANONYMOUS_IDENT` | defaults to `false`, and stays false when auth is off. Permits the LED write with no account |
-| `KTN_TLS_ENABLED` | defaults to `false`. Serve HTTPS directly, e.g. with the TrueNAS UI's own certificate bound read-only (long bind syntax only) — see [INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md#serving-https-with-the-truenas-certificate) and the key note in [SECURITY.md](SECURITY.md#serving-https-with-the-truenas-certificate-opt-in). Fails closed, no plain-http fallback or redirect: use `https://`, update `http://` bookmarks and monitors; a browser that never opened the TrueNAS UI by name gets an empty response without `https://`; if the cert expires, `https://<NAS-IP>:8420` is the click-through fallback |
+| `KTN_TLS_ENABLED` | defaults to `false`. Serve HTTPS directly, e.g. with the TrueNAS UI's own certificate bound read-only (long bind syntax only) — see [INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md#serving-https-with-the-truenas-certificate) and the key note in [SECURITY.md](SECURITY.md#serving-https-with-the-truenas-certificate-opt-in). Fails closed, no plain-http fallback or redirect: use `https://`, update `http://` bookmarks and monitors; a browser that never opened the TrueNAS UI by name gets an empty response without `https://`; if the cert expires, `https://<NAS-IP>:8420` is the click-through fallback. Lockouts: see [Troubleshooting](#https-lockouts) |
+| `KTN_TLS_CERTFILE` / `KTN_TLS_KEYFILE` | required when `KTN_TLS_ENABLED` is on: absolute, distinct paths of the mounted certificate (full chain) and key, e.g. `/tls/fullchain.pem` and `/tls/privkey.pem` |
+| `KTN_ALLOWED_HOSTS` | empty (every Host answered) by default. A comma-separated list of the names and addresses you browse to; anything else gets `400`. Loopback is always answered. With TLS on, list the NAS IP as well as the certificate's name, or the by-IP fallback is refused too |
 
 One backend poll serves every connected browser; expensive `sg_ses` and SMART
 reads are cached and never run per client.
@@ -285,6 +287,33 @@ sg_ses --no-time --join /dev/sgN 2>&1 >/dev/null   # silent
 
 **Everything logs out on restart.** `/data` is not writable by uid 1000. The
 container refuses to start in this state and prints the fix.
+
+**Alerts never arrive.** Check the log for `health notification rejected:
+HTTP <code>` or `could not deliver health notification`. Only a 2xx counts
+as delivered, so a 3xx (a moved ntfy topic, an http-to-https proxy) is
+reported as a failure: put the final `https://` URL in
+`KTN_ALERT_WEBHOOK_URL`. The log names scheme and host only, never the URL.
+
+### HTTPS lockouts
+
+These apply only with `KTN_TLS_ENABLED` on (since 1.6.0). The way back in is
+always the same: set `KTN_TLS_ENABLED: "false"` with **Apps → the app → Edit**
+(the two read-only mounts are harmless when off), and open
+`http://<NAS-IP>:8420` **by IP**. By name, the browser keeps upgrading to
+https because of the TrueNAS UI's own HSTS policy. Full setup and recovery
+steps are in
+[INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md#serving-https-with-the-truenas-certificate).
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Browser shows an empty response ("didn't send any data") | Plain HTTP to the TLS port. There is no http-to-https redirect, and a browser that has never opened the TrueNAS UI by name has no HSTS policy to upgrade it | Type `https://<name>:8420`, or use the **Web UI** button. Update `http://` bookmarks and monitors |
+| **Web UI** button still opens `http://` | `app.update` does not recompute a custom app's portal | Set `scheme: https` and the certificate's name in `x-portals`, then rerun `truenas/fix-custom-app-metadata.py` |
+| Container exits at once, log line `ERROR: TLS is enabled but ...` | Certificate or key path not set, unreadable, unparsable or mismatched, or `/run/ktn` is not a tmpfs. It never falls back to plain HTTP | Fix what the line names (it names paths, never their contents), or turn TLS off as above |
+| Container exits with `ERROR: KTN_TLS_ENABLED='...' is not one of ...` | Value other than `1/true/yes/on` or `0/false/no/off`/empty | Use one of those values |
+| App refuses to start: `TLS is on in the app's settings ... (KTN_TLS_ACTIVE is not set)`, or `The container entrypoint started TLS ..., but TLS is off in the app's settings` | A TLS variable spelled in lower or mixed case. The app reads names case-insensitively, the entrypoint only in upper case, so the two disagree | Spell them `KTN_TLS_ENABLED`, `KTN_TLS_CERTFILE`, `KTN_TLS_KEYFILE` exactly, and remove any other spelling |
+| Certificate expired: the browser refuses the name with no click-through | The TrueNAS UI's HSTS policy covers every port of that name (KTN sends no HSTS of its own) | Renew it in TrueNAS. Meanwhile use `https://<NAS-IP>:8420` and accept the name-mismatch warning: HSTS does not apply to IP addresses. `/healthz` reports `tls.days_left`, and the log warns from 14 days out |
+| The by-IP fallback answers `400 request Host header does not match KTN_ALLOWED_HOSTS` | `KTN_ALLOWED_HOSTS` lists the name but not the NAS IP | Add the IP to the list, or clear the list until the certificate is renewed |
+| Container restarts every few seconds after a certificate renewal | The renewed pair does not load (for example only the certificate was replaced). The app can check only the new certificate before restarting, and the entrypoint refuses the pair on every restart. This is a known limitation: KTN does not break the loop itself (see [SECURITY.md](SECURITY.md#serving-https-with-the-truenas-certificate-opt-in)) | Turn TLS off as above, fix the certificate in TrueNAS, turn TLS back on. Roll back with `app.update` only, never by extracting the fix script's tar backup |
 
 ## Upgrades, backup, uninstall
 

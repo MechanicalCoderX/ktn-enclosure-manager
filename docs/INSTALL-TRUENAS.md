@@ -208,8 +208,11 @@ python3 fix-custom-app-metadata.py
 - **If the certificate ever expires**, the browser refuses the name with no
   click-through (HSTS). Use `https://<NAS-IP>:8420` instead - the name
   mismatch there is an ordinary warning you can accept, because HSTS does not
-  apply to IP addresses. `/healthz` reports `tls.days_left`, and the log warns
-  from 14 days out.
+  apply to IP addresses. If you set `KTN_ALLOWED_HOSTS`, it must list the IP
+  as well as the name, or this fallback gets `400` too. `/healthz` reports
+  `tls.days_left`, and the log warns from 14 days out.
+- Every lockout case, with its log line and fix, is in the README's
+  [HTTPS lockouts](../README.md#https-lockouts) table.
 
 **Renewal is automatic.** TrueNAS rewrites the files in place; KTN checks the
 certificate's content hourly and, on a real change, restarts itself (a few
@@ -228,7 +231,8 @@ set the portal back to `http`, rerun the fix script, and use
 renewed pair does not load (for example only the certificate was replaced,
 or the key write failed on the host). The app can check only the new
 certificate before restarting, not the key, and after the restart it refuses
-the pair, so the restart policy loops. Set `KTN_TLS_ENABLED: "false"` with
+the pair, so the restart policy loops. KTN does not break this loop itself
+(a known limitation, deferred). Set `KTN_TLS_ENABLED: "false"` with
 **Apps → Edit** (that is an `app.update`) to get back in over plain HTTP, then
 fix the certificate in TrueNAS and turn TLS back on. Roll back with
 `app.update` only - never by extracting the fix script's tar backup over the

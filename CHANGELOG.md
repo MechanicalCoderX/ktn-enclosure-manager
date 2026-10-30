@@ -1,10 +1,26 @@
 # Changelog
 
 All notable changes to this project are documented here.
-Format follows [Keep a Changelog](https://keepachangelog.com/1.1.0/);
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+On main, not yet released (likely 1.6.2): #57 (light-theme contrast), #58
+(tests hardening) and #59 (webhook URL errors no longer escape the notifier).
+
+### Documentation
+- README: the configuration table now lists `KTN_TLS_CERTFILE`,
+  `KTN_TLS_KEYFILE` and `KTN_ALLOWED_HOSTS`, and states the webhook rules
+  (2xx only is delivery, 3xx is a failure, the URL is never logged). A new
+  **HTTPS lockouts** troubleshooting table covers each way TLS can lock you
+  out, with its log line and fix, including the by-IP fallback refused by a
+  `KTN_ALLOWED_HOSTS` that omits the IP.
+- SECURITY.md: the shared TrueNAS UI key is named as accepted risk R5; a new
+  section explains why the webhook URL is a credential and how alerts
+  count delivery; the post-renewal restart loop is called a known, deferred
+  limitation (L2).
+- ARCHITECTURE.md lists `tls_watch.py`.
 
 ### Fixed
 - **Light theme: three text colours were just under WCAG AA (4.5:1).** Each is
