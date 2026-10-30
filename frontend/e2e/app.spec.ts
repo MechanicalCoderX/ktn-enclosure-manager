@@ -918,6 +918,10 @@ test.describe("theme contrast", () => {
       await ring("dimmed bay tile", page.getByRole("button", { name: /^Bay 2\b/ }));
       await page.getByLabel("Search bays").fill("");
 
+      await page.getByRole("tab", { name: "Chassis" }).click();
+      await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
+      await ring("chassis table", page.locator(".table-scroll").first());
+
       await page.getByRole("tab", { name: "Diagnostics" }).click();
       await expect(page.locator("pre.raw").first()).toContainText("app_version");
       await ring("diagnostics output", page.locator("pre.raw").first());
@@ -930,7 +934,7 @@ test.describe("theme contrast", () => {
       await ring("dialog secondary button", dialog.getByRole("button", { name: "Cancel" }));
 
       const low = Object.entries(rings).filter(([, r]) => r < 3);
-      expect(Object.keys(rings)).toHaveLength(14);
+      expect(Object.keys(rings)).toHaveLength(15);
       expect(low, "focus rings below 3:1 (0 = no ring drawn)").toEqual([]);
     });
 

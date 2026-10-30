@@ -674,7 +674,7 @@ function ElementTable({
   subName: (id: number) => string;
 }) {
   return (
-    <div className="table-scroll">
+    <div className="table-scroll" tabIndex={0}>
       <table>
         <thead>
           <tr>
@@ -768,7 +768,7 @@ function CoolingTable({
           modulates them independently.
         </div>
       )}
-      <div className="table-scroll">
+      <div className="table-scroll" tabIndex={0}>
         <table>
           <thead>
             <tr>
@@ -869,7 +869,7 @@ export function ChassisView({ chassis }: { chassis: Chassis | null }) {
           {chassis.stale && " — stale, last poll failed"}
         </div>
         {chassis.overall_flags && Object.keys(chassis.overall_flags).length > 0 && (
-          <div className="table-scroll">
+          <div className="table-scroll" tabIndex={0}>
             <table>
               <tbody>
                 <tr>
@@ -983,7 +983,7 @@ export function DiagnosticsView({ enclosureId }: { enclosureId: string }) {
       <div className="panel">
         <h2>Audit log</h2>
         <div className="sub">Every write, including automatic IDENT clearing.</div>
-        <div className="table-scroll">
+        <div className="table-scroll" tabIndex={0}>
           <table>
             <thead>
               <tr>

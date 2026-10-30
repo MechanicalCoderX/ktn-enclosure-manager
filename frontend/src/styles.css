@@ -97,7 +97,7 @@ body {
 
 button { font: inherit; cursor: pointer; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
-summary:focus-visible, pre.raw:focus-visible {
+summary:focus-visible, pre.raw:focus-visible, .table-scroll:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -241,6 +241,7 @@ table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; }
 td.mono, .mono { font-family: var(--mono); }
+/* Focusable (tabIndex=0) so a table too wide for a phone can be scrolled by keyboard. */
 .table-scroll { overflow-x: auto; }
 
 pre.raw {
