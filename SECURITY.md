@@ -250,7 +250,8 @@ already manages for its own UI. The pair reaches the container as two
 `.key`, and nothing on the host is changed. Install steps are in
 [docs/INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md#serving-https-with-the-truenas-certificate).
 
-**The key's blast radius - accept this before turning it on.** The key you
+**Accepted risk R5: the key's blast radius - accept this before turning it
+on.** In short, a compromise of KTN exposes the TrueNAS UI's TLS key. The key you
 mount is the TrueNAS web UI's own private key. Anyone who gets code execution
 in the KTN web process (uid 1000) can read the copy it serves, and with it
 impersonate the TrueNAS UI by name to anyone on your LAN they can intercept -
@@ -304,6 +305,12 @@ certificate replaced, or a failed key write on the host - makes the
 entrypoint refuse after the restart, and the restart policy loops. That is
 the fail-closed choice; the recovery is `KTN_TLS_ENABLED=false` through
 `app.update` (see docs/INSTALL-TRUENAS.md), never a tar-extract of a backup.
+This restart loop is a **known limitation, deferred (L2)**: KTN neither
+detects nor breaks the loop itself. While it lasts nothing is served, not
+even `/healthz`, and the only signal is the repeating `ERROR: TLS ...` line
+in the container log and the restart count. The
+[HTTPS lockouts](README.md#https-lockouts) table lists this and the other
+ways to get locked out.
 
 The app and the entrypoint must agree that TLS is on. The app's settings
 match variable names case-insensitively, the entrypoint only in exact upper
@@ -339,6 +346,26 @@ it is also sent to the TrueNAS UI on the same name, and theirs to KTN;
 `SameSite` gives no CSRF protection between them. The defence against that
 remains the mandatory `X-KTN-Request` header on every mutating request, and
 KTN sending no CORS headers.
+
+## Health alerts: the webhook URL is a credential
+
+For ntfy the topic, or an `?auth=` token, *is* the credential, and a generic
+webhook URL often carries a token too. So the URL in `KTN_ALERT_WEBHOOK_URL`
+is kept out of the logs at every level (since 1.5.7):
+
+- the `httpx` and `httpcore` loggers are held at `WARNING`, so their
+  `HTTP Request: POST <url>` line never appears, whatever `KTN_LOG_LEVEL` says;
+- the app's own warnings name the endpoint by scheme and host only, and the
+  URL is scrubbed from any delivery-error text it quotes;
+- a malformed URL is logged by error class only, with no part of the URL,
+  because the part httpx complains about can be the password or token
+  (on main, not yet released; see the CHANGELOG).
+
+**Only a 2xx reply is delivery.** The client does not follow redirects, so a
+3xx is a failure, like a 4xx, a 5xx, a connection error or a malformed URL.
+A health change whose alert was not accepted is not recorded as notified; it
+is retried on a 60-second spacing until the endpoint accepts it. A failing
+endpoint never disturbs polling.
 
 ## TLS: connect by the name on the certificate
 

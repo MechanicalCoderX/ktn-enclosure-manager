@@ -50,7 +50,10 @@ backend/ktnmgr/
     auth.py              Argon2id accounts, signed sessions, rate limiting
     audit.py             append-only JSON-lines audit log
     notify.py            health-change alerts to ntfy/webhook; transitions
-                         only, delivery-confirmed before a state is recorded
+                         only, delivery-confirmed (2xx only) before a state
+                         is recorded; the URL never reaches the logs
+    tls_watch.py         opt-in HTTPS: served-certificate expiry warnings,
+                         renewal detection, graceful restart onto the new pair
   api/routes.py          semantic HTTP surface
   main.py                wiring
 helper/ktn_ident_helper.py   the only privileged process
