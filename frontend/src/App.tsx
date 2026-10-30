@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api";
 import type { Bay, BaySources, Chassis, Enclosure, IdentDuration } from "./types";
 import {
@@ -182,7 +182,10 @@ function ChangePasswordDialog({
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true"
-         aria-labelledby="cp-title">
+         aria-labelledby="cp-title"
+         onKeyDown={(e) => {
+           if (e.key === "Escape" && !busy) onClose();
+         }}>
       <div className="modal">
         <h2 id="cp-title">Change password</h2>
         <p className="sub">
@@ -343,6 +346,14 @@ export function App() {
   const [authRequired, setAuthRequired] = useState(true);
   const [anonIdentAllowed, setAnonIdentAllowed] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  // Closing the dialog hands focus back to the button that opened it. It has
+  // to wait for the commit: the button is inert while the dialog is up.
+  const passwordButton = useRef<HTMLButtonElement>(null);
+  const wasChangingPassword = useRef(false);
+  useEffect(() => {
+    if (wasChangingPassword.current && !changingPassword) passwordButton.current?.focus();
+    wasChangingPassword.current = changingPassword;
+  }, [changingPassword]);
   const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
   const [theme, setTheme] = useTheme();
 
@@ -474,7 +485,8 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
+      {/* inert while the dialog is up, so Tab cannot leave it for the page behind. */}
+      <header className="topbar" inert={changingPassword}>
         <div className="brand">
           KTN Enclosure Manager
           <small>Designed for TrueNAS SCALE</small>
@@ -542,7 +554,8 @@ export function App() {
         <FreshnessSummary sources={sources} />
         {user ? (
           <>
-            <button className="btn secondary" onClick={() => setChangingPassword(true)}>
+            <button ref={passwordButton} className="btn secondary"
+                    onClick={() => setChangingPassword(true)}>
               Change password
             </button>
             <button className="btn secondary" onClick={() => void signOut()}>
