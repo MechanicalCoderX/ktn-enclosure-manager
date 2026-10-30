@@ -524,7 +524,11 @@ test.describe("responsive", () => {
  * element is judged against the first painted surface beneath it rather than
  * against nothing. Disabled controls and search-dimmed tiles are skipped (WCAG
  * exempts inactive components; dimming is the deliberate "not a match" cue).
- * Returns how many elements were measured and those below 4.5:1 (3:1 large).
+ * Form controls own no text node, so they are judged on what they display: a
+ * <select> on its own colour (the chosen option's label is drawn in it), an
+ * input on its typed text when it has a value, else on its ::placeholder.
+ * Returns how many elements were measured, how many of those were form
+ * controls showing a value, and those below 4.5:1 (3:1 large).
  */
 async function lowContrast(page: Page, selector: string) {
   return page.evaluate((sel) => {
@@ -563,6 +567,7 @@ async function lowContrast(page: Page, selector: string) {
       "#" + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
     const low: { label: string; ratio: number; detail: string }[] = [];
     let checked = 0;
+    let controls = 0;
     const judge = (el: Element, label: string, color: string) => {
       const cs = getComputedStyle(el);
       const text = paint(el, parse(color));
@@ -583,15 +588,25 @@ async function lowContrast(page: Page, selector: string) {
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0 || el.closest(":disabled, .dim, option")) continue;
       if (el instanceof HTMLInputElement) {
-        if (el.placeholder && !el.value)
+        if (el.value) {
+          controls++;
+          judge(el, `input[type=${el.type}] value`, getComputedStyle(el).color);
+        } else if (el.placeholder) {
           judge(el, "::placeholder", getComputedStyle(el, "::placeholder").color);
+        }
+        continue;
+      }
+      if (el instanceof HTMLSelectElement) {
+        controls++;
+        judge(el, `select "${el.selectedOptions[0]?.text.slice(0, 24) ?? ""}"`,
+              getComputedStyle(el).color);
         continue;
       }
       if ([...el.childNodes].some((n) => n.nodeType === 3 && n.textContent?.trim()))
         judge(el, `${el.className || el.tagName.toLowerCase()} "${el.textContent?.trim().slice(0, 24)}"`,
               getComputedStyle(el).color);
     }
-    return { checked, low };
+    return { checked, controls, low };
   }, selector);
 }
 
@@ -606,16 +621,9 @@ test.describe("theme contrast", () => {
     { name: "System, OS dark", value: "system", os: "dark", dark: true },
   ] as const;
 
-  // Shortfalls that predate the dark-theme fix and belong to the light
-  // palette, which that fix deliberately left untouched: the 10px
-  // OK/Empty/Unknown badges (4.43 and 4.07:1) and Chromium's own placeholder
-  // grey (4.40:1). Tolerated only in light and only down to 4.0, so a further
-  // drop still fails; dark has no such allowance.
-  const KNOWN_LIGHT = /^badge (ok|empty|unknown) "|^span "[✓○?]"$|^::placeholder$/;
-  const failures = (dark: boolean, low: { label: string; ratio: number; detail: string }[]) =>
-    low
-      .filter((l) => dark || !(KNOWN_LIGHT.test(l.label) && l.ratio >= 4.0))
-      .map((l) => l.detail);
+  // No allowance in either palette: 1.6.1 tolerated the light OK/Empty/
+  // Unknown badges and placeholder down to 4.0:1; their tokens now clear 4.5.
+  const failures = (low: { detail: string }[]) => low.map((l) => l.detail);
 
   for (const mode of MODES) {
     test(`${mode.name}: bay numbers and every tab's text stay readable`, async ({ page }) => {
@@ -629,6 +637,9 @@ test.describe("theme contrast", () => {
         "background-color",
         mode.dark ? "rgb(13, 17, 23)" : "rgb(244, 246, 248)",
       );
+      // ...and the UA's own parts (form controls, scrollbars, the search
+      // field's clear button) must follow the same choice, not just the tokens.
+      await expect(page.locator("html")).toHaveCSS("color-scheme", mode.dark ? "dark" : "normal");
 
       // The 1.6.0 regression: a tile is a <button>, buttons do not inherit
       // colour, and .bay-no had none of its own, so the bay numbers rendered
@@ -642,24 +653,41 @@ test.describe("theme contrast", () => {
 
       const map = await lowContrast(page, ".topbar *, main *");
       expect(map.checked).toBeGreaterThan(100);
-      expect(failures(mode.dark, map.low), "drive map tab").toEqual([]);
+      // The Theme select in the top bar and Bay 1's "Identify for" select.
+      expect(map.controls).toBeGreaterThanOrEqual(2);
+      expect(failures(map.low), "drive map tab").toEqual([]);
+
+      // Typed text in the search field, not just its placeholder. A query that
+      // matches nothing dims every tile, so it is cleared again straight after.
+      const search = page.getByLabel("Search bays");
+      await search.fill("no-such-drive");
+      const typed = await lowContrast(page, 'input[type="search"]');
+      expect(typed.controls).toBe(1);
+      expect(failures(typed.low), "typed search text").toEqual([]);
+      await search.fill("");
 
       await page.getByRole("tab", { name: "Chassis" }).click();
       await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
       const chassis = await lowContrast(page, "main *");
       expect(chassis.checked).toBeGreaterThan(50);
-      expect(failures(mode.dark, chassis.low), "chassis tab").toEqual([]);
+      expect(failures(chassis.low), "chassis tab").toEqual([]);
 
       await page.getByRole("tab", { name: "Diagnostics" }).click();
       await expect(page.locator("pre.raw").first()).toContainText("app_version");
       const diag = await lowContrast(page, "main *");
       expect(diag.checked).toBeGreaterThan(5);
-      expect(failures(mode.dark, diag.low), "diagnostics tab").toEqual([]);
+      expect(diag.controls).toBeGreaterThanOrEqual(1); // the raw-page select
+      expect(failures(diag.low), "diagnostics tab").toEqual([]);
 
+      // Typed (masked) password text. Filled but never submitted, so the
+      // credential the later tests depend on is untouched.
       await page.getByRole("button", { name: "Change password" }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("Current password").fill("typed-text-probe");
       const modal = await lowContrast(page, ".modal *");
       expect(modal.checked).toBeGreaterThan(5);
-      expect(failures(mode.dark, modal.low), "change-password dialog").toEqual([]);
+      expect(modal.controls).toBeGreaterThanOrEqual(1);
+      expect(failures(modal.low), "change-password dialog").toEqual([]);
     });
   }
 });

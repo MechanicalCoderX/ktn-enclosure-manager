@@ -14,18 +14,22 @@
   --accent: #1f6feb;
   --accent-contrast: #ffffff;
 
-  --ok: #1a7f4b;
+  /* --ok, --empty and --placeholder are each a shade darker than in 1.6.1,
+     just enough to clear WCAG AA 4.5:1 on what they sit on (ok on --ok-bg
+     4.43 -> 4.66, empty on --empty-bg 4.07 -> 4.65, placeholder on --panel-2
+     4.40 -> 4.66). */
+  --ok: #197b4a;
   --ok-bg: #e6f4ec;
   --warn: #9a6300;
   --warn-bg: #fdf3e0;
   --fail: #b3261e;
   --fail-bg: #fdecea;
-  --empty: #6b7684;
+  --empty: #626d7a;
   --empty-bg: #eef1f4;
   --ident: #7b3fe4;
   --ident-bg: #f1e9fe;
-  /* Chromium's own placeholder grey, named so dark can replace it. */
-  --placeholder: #757575;
+  /* Named so dark can replace it. */
+  --placeholder: #717171;
 
   --radius: 8px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
