@@ -175,13 +175,13 @@ main { padding: 18px; max-width: 1500px; width: 100%; margin: 0 auto; }
 }
 .bay:hover { border-color: var(--accent); }
 .bay[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-.bay.dim { opacity: 0.35; }
+/* A tile the search does not match dims its contents, not itself: opacity on
+   the button would dim its focus ring too, and lifting it on focus would make
+   a focused non-match look exactly like a match. */
+.bay.dim > * { opacity: 0.35; }
 /* The selected tile already wears an accent ring, so the focus ring is drawn
-   in the text colour and further out: focused and selected stay distinct.
-   A tile dimmed by the search comes back to full strength while focused, or
-   its ring would be dimmed with it. */
+   in the text colour and further out: focused and selected stay distinct. */
 .bay:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
-.bay.dim:focus-visible { opacity: 1; }
 
 .bay-no { font-weight: 700; font-size: 15px; }
 .bay-ses { font-size: 10px; color: var(--muted); font-family: var(--mono); }

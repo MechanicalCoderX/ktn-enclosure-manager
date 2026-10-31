@@ -875,15 +875,52 @@ test.describe("theme contrast", () => {
       await expect(page.getByTestId("bay-detail")).toBeVisible();
       expect(await seriousAxe(page), "drive map with a bay selected").toEqual([]);
 
+      // Tiles dimmed by a search that does not match them, one of them keyboard-
+      // focused. Known and pre-existing: the dimmed text itself is below 4.5:1
+      // (axe color-contrast; 1.5-2.9:1 measured, the same before and after the
+      // tile dimmed its children instead of itself), so that one rule is set
+      // aside here - but only for text inside a dimmed tile. Anything else
+      // serious, or contrast anywhere else, still fails.
+      await page.getByLabel("Search bays").fill("K1A00001");
+      await expect(page.locator(".bay.dim")).toHaveCount(15);
+      const dimmedTile = page.getByRole("button", { name: /^Bay 2\b/ });
+      await dimmedTile.focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(dimmedTile).toBeFocused();
+      const outsideDim = (await seriousAxe(page)).flatMap((v) => {
+        if (!v.startsWith("color-contrast ")) return [v];
+        const nodes = v.slice(v.indexOf(": ") + 2).split(", ");
+        return nodes.filter((n) => !/\.dim\.bay > /.test(n)).map((n) => `color-contrast: ${n}`);
+      });
+      expect(outsideDim, "drive map with a search dimming tiles").toEqual([]);
+      await page.getByLabel("Search bays").fill("");
+
+      // Every scrollable wrapper is a tab stop, so each is a named region
+      // rather than an anonymous group (review of #61, F3).
+      const unnamedRegions = () =>
+        page.locator(".table-scroll, pre.raw").evaluateAll((els) =>
+          els
+            .filter((el) => el.getAttribute("role") !== "region" || !el.getAttribute("aria-label")?.trim())
+            .map((el) => el.outerHTML.slice(0, 60)),
+        );
+
       await page.getByRole("tab", { name: "Chassis" }).click();
       await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
       expect(await seriousAxe(page), "chassis tab").toEqual([]);
+      await expect(page.getByRole("region", { name: "Cooling table" })).toBeVisible();
+      expect(await page.locator(".table-scroll").count()).toBeGreaterThanOrEqual(4);
+      expect(await unnamedRegions(), "chassis scroll regions without a name").toEqual([]);
 
       await page.getByRole("tab", { name: "Diagnostics" }).click();
       await expect(page.locator("pre.raw").first()).toContainText("app_version");
       await page.getByRole("button", { name: "Run" }).click();
       await expect(page.locator("pre.raw")).toHaveCount(2);
       expect(await seriousAxe(page), "diagnostics tab").toEqual([]);
+      await expect(page.getByRole("region", { name: "Diagnostics output" })).toContainText("app_version");
+      await expect(page.getByRole("region", { name: "Raw page output" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Audit log table" })).toBeVisible();
+      expect(await unnamedRegions(), "diagnostics scroll regions without a name").toEqual([]);
 
       await page.getByRole("button", { name: "Change password" }).click();
       await expect(page.getByRole("dialog")).toBeVisible();
@@ -912,10 +949,33 @@ test.describe("theme contrast", () => {
       await ring("bay tile", page.getByRole("button", { name: /^Bay 2\b/ }));
       await page.getByRole("button", { name: /^Bay 1\b/ }).click();
       await ring("selected bay tile", page.getByRole("button", { name: /^Bay 1\b/ }));
+      // Focused and selected must stay distinct: the focus outline is drawn
+      // in another colour than the selection ring, not a second accent ring.
+      const selectedFocus = await page.getByRole("button", { name: /^Bay 1\b/ }).evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return {
+          outline: cs.outlineStyle === "none" ? "" : cs.outlineColor,
+          selection: cs.boxShadow.match(/rgba?\([^)]+\)/)?.[0] ?? "",
+        };
+      });
+      expect(selectedFocus.selection, "selection ring").not.toBe("");
+      expect(selectedFocus.outline, "focus outline").not.toBe("");
+      expect(selectedFocus.outline, "focus outline vs selection ring").not.toBe(selectedFocus.selection);
       await ring("identify select", page.getByLabel("Identify for"));
       await ring("identify button", page.getByRole("button", { name: "Identify", exact: true }));
       await page.getByLabel("Search bays").fill("K1A00001");
       await ring("dimmed bay tile", page.getByRole("button", { name: /^Bay 2\b/ }));
+      // ...and while it holds focus it must still look like a non-match: its
+      // content stays dimmed even though its ring is at full strength.
+      // Effective opacity of the bay number, through every ancestor.
+      const strength = (name: RegExp) =>
+        page.getByRole("button", { name }).locator(".bay-no").evaluate((el) => {
+          let a = 1;
+          for (let n: Element | null = el; n; n = n.parentElement) a *= Number(getComputedStyle(n).opacity);
+          return a;
+        });
+      expect(await strength(/^Bay 2\b/), "focused dimmed tile's content").toBeLessThan(0.5);
+      expect(await strength(/^Bay 1\b/), "control: the matching tile").toBe(1);
       await page.getByLabel("Search bays").fill("");
 
       await page.getByRole("tab", { name: "Chassis" }).click();
@@ -1071,9 +1131,53 @@ test.describe("keyboard", () => {
     await page.keyboard.press("Enter");
     await expect(tile).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("bay-detail")).toContainText("Bay 3");
-    await page.getByRole("button", { name: /^Bay 4\b/ }).focus();
+    const next = page.getByRole("button", { name: /^Bay 4\b/ });
+    await next.focus();
     await page.keyboard.press("Space");
+    await expect(next).toHaveAttribute("aria-pressed", "true");
     await expect(tile).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("bay-detail")).toContainText("Bay 4");
+  });
+
+  test("Escape still closes the password dialog after a request fails", async ({ page }) => {
+    // Review of #61, F1: Enter on the submit button disables it, Chromium drops
+    // focus to <body>, and a listener on the dialog never hears Escape again.
+    // The request is held in the browser and refused there, so the suite's
+    // credential is never touched.
+    await bootstrapAndLogin(page);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/auth/password", async (route) => {
+      await held;
+      await route.fulfill({ status: 400, json: { detail: "e2e: current password is wrong" } });
+    });
+    const opener = page.getByRole("button", { name: "Change password" });
+    await opener.click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Current password").fill("e2e-not-the-password");
+    await dialog.getByLabel("New password", { exact: true }).fill("e2e-another-password");
+    await dialog.getByLabel("Confirm new password").fill("e2e-another-password");
+    await dialog.getByRole("button", { name: "Change password" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog.getByRole("button", { name: "Changing…" })).toBeVisible();
+
+    // In flight: Escape is ignored, so a change cannot be abandoned half-sent.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(1);
+
+    release();
+    await expect(dialog.getByRole("alert")).toContainText("e2e: current password is wrong");
+    // Focus is back inside the dialog, wherever the disabled button left it.
+    await expect
+      .poll(() => page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')))
+      .toBe(true);
+
+    // And Escape works even from <body>, the state the review measured.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
   });
 });
 

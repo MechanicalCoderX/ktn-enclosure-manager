@@ -6,8 +6,9 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-On main, not yet released (likely 1.6.2): #57 (light-theme contrast), #58
-(tests hardening) and #59 (webhook URL errors no longer escape the notifier).
+On main, not yet released (likely 1.6.2): #51 (vite patch), #57
+(light-theme contrast), #58 (tests hardening), #59 (webhook URL errors no
+longer escape the notifier), #60 (documentation) and #61 (accessibility).
 
 ### Documentation
 - README: the configuration table now lists `KTN_TLS_CERTFILE`,
@@ -63,17 +64,35 @@ On main, not yet released (likely 1.6.2): #57 (light-theme contrast), #58
   was logged with the traceback: a credential leak, now closed. The warning
   now names the endpoint as `<malformed webhook url>` instead.
 - **Accessibility: axe-core now finds nothing serious or critical in Light,
-  Dark or System** (before, on desktop: 3 rules, 18
-  elements per theme). Bay tiles are
-  buttons inside list items, so the selected bay is announced, and each
-  tile's name now includes its printed text, `/dev` node and temperature.
-  The raw-page select has a label, and the diagnostics output and the
-  chassis tables (which overflow on a phone) can be scrolled from the
-  keyboard. The change-password dialog closes on Escape,
-  keeps Tab inside it and returns focus to its button. Error notices are
-  announced. The freshness summary has a focus ring. A dimmed or selected
-  bay tile's focus ring is now clearly visible (it was 1.6:1 when dimmed).
-  The theme tests now also run axe and check every focus ring reaches 3:1.
+  Dark or System** (before, on desktop: 3 rules, 19 elements per theme).
+  Bay tiles are buttons inside list items, so the selected bay is
+  announced, and each tile's name now includes its printed text, `/dev`
+  node and temperature. The raw-page select has a label, and the
+  diagnostics output and the chassis tables (which overflow on a phone) can
+  be scrolled from the keyboard. The change-password dialog closes on
+  Escape, keeps Tab inside it and returns focus to its button. Error
+  notices are announced. The freshness summary has a focus ring. A dimmed
+  or selected bay tile's focus ring is now clearly visible (it was 1.6:1
+  when dimmed). The theme tests now also run axe and check every focus ring
+  reaches 3:1.
+- Accessibility follow-up, from the review of #61:
+  - Escape closes the change-password dialog after a failed request too.
+    Pressing Enter on the submit button disabled it and dropped focus out
+    of the dialog, so Escape did nothing until you pressed Tab. Focus now
+    also returns into the dialog when the request ends.
+  - A bay tile dimmed by the search stays dimmed while it has keyboard
+    focus; before, a focused non-match looked exactly like a match. The
+    tile now dims its contents rather than itself, so its focus ring stays
+    at full strength.
+  - The scrollable tables and outputs that take keyboard focus are named
+    regions ("Cooling table", "Audit log table", "Diagnostics output" and
+    so on), not unnamed tab stops.
+  - New tests cover each, plus a focused and selected tile's focus ring
+    differing from its selection ring, and Space selecting a tile.
+  - Known, unchanged: the text in a search-dimmed tile is below 4.5:1
+    (1.5 to 2.9:1, the same before and after this change). axe now scans
+    that state and its test sets aside that one finding, for dimmed tiles
+    only.
 
 ## [1.6.1] — 2026-10-29
 
