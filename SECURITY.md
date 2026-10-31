@@ -359,7 +359,7 @@ is kept out of the logs at every level (since 1.5.7):
   URL is scrubbed from any delivery-error text it quotes;
 - a malformed URL is logged by error class only, with no part of the URL,
   because the part httpx complains about can be the password or token
-  (on main, not yet released; see the CHANGELOG).
+  (since 1.6.2).
 
 **Only a 2xx reply is delivery.** The client does not follow redirects, so a
 3xx is a failure, like a 4xx, a 5xx, a connection error or a malformed URL.

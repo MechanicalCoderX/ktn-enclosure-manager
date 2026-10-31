@@ -32,6 +32,14 @@ wait_healthy() {
     fail "$1 did not become healthy within 90 s"
 }
 
+# True if a container's log holds the fixed string. grep reads to the end on
+# purpose: with pipefail, `docker logs | grep -q` fails when grep exits at the
+# first match and docker then dies of SIGPIPE on its next write. A found line
+# reads as missing, and in an `if ...; then fail` leak check as absent.
+log_has() {
+    docker logs "$1" 2>&1 | grep -F -- "$2" >/dev/null
+}
+
 fingerprint() {
     openssl x509 -noout -fingerprint -sha256
 }

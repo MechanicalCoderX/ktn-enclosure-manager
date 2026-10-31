@@ -312,7 +312,7 @@ jobs:
           done
           [ "$(docker inspect -f '{{.RestartCount}}' ktn-tls)" = 1 ] || fail "no restart after renewal"
           wait_healthy ktn-tls
-          docker logs ktn-tls 2>&1 | grep -q 'renewed TLS certificate detected' \
+          log_has ktn-tls 'renewed TLS certificate detected' \
             || fail "the watcher did not log the renewal"
 
           expected=$(fingerprint < smoke/gen/second.crt)
@@ -336,8 +336,8 @@ jobs:
           done
           [ "$(docker inspect -f '{{.State.Status}}' ktn-bad)" = exited ] || fail "still running"
           [ "$(docker inspect -f '{{.State.ExitCode}}' ktn-bad)" != 0 ] || fail "exit code 0"
-          docker logs ktn-bad 2>&1 | grep -q 'ERROR: TLS' || fail "no TLS error logged"
-          if docker logs ktn-bad 2>&1 | grep -q -- '-----BEGIN'; then fail "PEM text in logs"; fi
+          log_has ktn-bad 'ERROR: TLS' || fail "no TLS error logged"
+          if log_has ktn-bad '-----BEGIN'; then fail "PEM text in logs"; fi
           if curl -sS --max-time 5 -o /dev/null http://127.0.0.1:18444/healthz; then
             fail "plain http answered"
           fi
