@@ -1075,6 +1075,47 @@ test.describe("keyboard", () => {
     await page.keyboard.press("Space");
     await expect(tile).toHaveAttribute("aria-pressed", "false");
   });
+
+  test("Escape still closes the password dialog after a request fails", async ({ page }) => {
+    // Review of #61, F1: Enter on the submit button disables it, Chromium drops
+    // focus to <body>, and a listener on the dialog never hears Escape again.
+    // The request is held in the browser and refused there, so the suite's
+    // credential is never touched.
+    await bootstrapAndLogin(page);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/auth/password", async (route) => {
+      await held;
+      await route.fulfill({ status: 400, json: { detail: "e2e: current password is wrong" } });
+    });
+    const opener = page.getByRole("button", { name: "Change password" });
+    await opener.click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Current password").fill("e2e-not-the-password");
+    await dialog.getByLabel("New password", { exact: true }).fill("e2e-another-password");
+    await dialog.getByLabel("Confirm new password").fill("e2e-another-password");
+    await dialog.getByRole("button", { name: "Change password" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog.getByRole("button", { name: "Changing…" })).toBeVisible();
+
+    // In flight: Escape is ignored, so a change cannot be abandoned half-sent.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(1);
+
+    release();
+    await expect(dialog.getByRole("alert")).toContainText("e2e: current password is wrong");
+    // Focus is back inside the dialog, wherever the disabled button left it.
+    await expect
+      .poll(() => page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')))
+      .toBe(true);
+
+    // And Escape works even from <body>, the state the review measured.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
 });
 
 test.describe("change password", () => {

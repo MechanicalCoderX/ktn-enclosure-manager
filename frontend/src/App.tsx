@@ -140,6 +140,32 @@ function ChangePasswordDialog({
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const firstField = useRef<HTMLInputElement>(null);
+
+  // Escape is heard on the document, not on the dialog: pressing Enter on a
+  // button that then disables itself drops Chromium's focus to <body>, outside
+  // the dialog, where a listener on the backdrop never sees the key. Ignored
+  // while a request is in flight, so a change cannot be abandoned half-sent.
+  useEffect(() => {
+    if (busy) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
+
+  // When a request ends with the dialog still open (it failed), put focus back
+  // inside it if the disabled button let it fall out, so Tab starts from the
+  // top of the form rather than wherever the browser parked it.
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    if (wasBusy.current && !busy && !dialogRef.current?.contains(document.activeElement)) {
+      firstField.current?.focus();
+    }
+    wasBusy.current = busy;
+  }, [busy]);
 
   const revokeAll = async () => {
     setError(null);
@@ -182,10 +208,7 @@ function ChangePasswordDialog({
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true"
-         aria-labelledby="cp-title"
-         onKeyDown={(e) => {
-           if (e.key === "Escape" && !busy) onClose();
-         }}>
+         aria-labelledby="cp-title" ref={dialogRef}>
       <div className="modal">
         <h2 id="cp-title">Change password</h2>
         <p className="sub">
@@ -195,7 +218,7 @@ function ChangePasswordDialog({
         <form onSubmit={submit}>
           <label htmlFor="cp-current">Current password</label>
           <input id="cp-current" type="password" autoComplete="current-password"
-                 value={current} onChange={(e) => setCurrent(e.target.value)}
+                 ref={firstField} value={current} onChange={(e) => setCurrent(e.target.value)}
                  required autoFocus />
 
           <label htmlFor="cp-new">New password</label>
