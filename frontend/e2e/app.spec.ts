@@ -949,6 +949,18 @@ test.describe("theme contrast", () => {
       await ring("bay tile", page.getByRole("button", { name: /^Bay 2\b/ }));
       await page.getByRole("button", { name: /^Bay 1\b/ }).click();
       await ring("selected bay tile", page.getByRole("button", { name: /^Bay 1\b/ }));
+      // Focused and selected must stay distinct: the focus outline is drawn
+      // in another colour than the selection ring, not a second accent ring.
+      const selectedFocus = await page.getByRole("button", { name: /^Bay 1\b/ }).evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return {
+          outline: cs.outlineStyle === "none" ? "" : cs.outlineColor,
+          selection: cs.boxShadow.match(/rgba?\([^)]+\)/)?.[0] ?? "",
+        };
+      });
+      expect(selectedFocus.selection, "selection ring").not.toBe("");
+      expect(selectedFocus.outline, "focus outline").not.toBe("");
+      expect(selectedFocus.outline, "focus outline vs selection ring").not.toBe(selectedFocus.selection);
       await ring("identify select", page.getByLabel("Identify for"));
       await ring("identify button", page.getByRole("button", { name: "Identify", exact: true }));
       await page.getByLabel("Search bays").fill("K1A00001");
@@ -1119,9 +1131,12 @@ test.describe("keyboard", () => {
     await page.keyboard.press("Enter");
     await expect(tile).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("bay-detail")).toContainText("Bay 3");
-    await page.getByRole("button", { name: /^Bay 4\b/ }).focus();
+    const next = page.getByRole("button", { name: /^Bay 4\b/ });
+    await next.focus();
     await page.keyboard.press("Space");
+    await expect(next).toHaveAttribute("aria-pressed", "true");
     await expect(tile).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("bay-detail")).toContainText("Bay 4");
   });
 
   test("Escape still closes the password dialog after a request fails", async ({ page }) => {
