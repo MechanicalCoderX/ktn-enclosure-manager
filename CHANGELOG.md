@@ -4,11 +4,12 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.6.2] — 2026-10-31
 
-On main, not yet released (likely 1.6.2): #51 (vite patch), #57
-(light-theme contrast), #58 (tests hardening), #59 (webhook URL errors no
-longer escape the notifier), #60 (documentation) and #61 (accessibility).
+No data migration and no configuration change. Upgrading and rolling back are
+image changes only. Includes #51 (vite patch), #57 (light-theme contrast), #58
+(tests hardening), #59 (webhook URL errors no longer escape the notifier), #60
+(documentation), #61 (accessibility) and #62 (accessibility follow-up).
 
 ### Documentation
 - README: the configuration table now lists `KTN_TLS_CERTFILE`,
@@ -64,7 +65,8 @@ longer escape the notifier), #60 (documentation) and #61 (accessibility).
   was logged with the traceback: a credential leak, now closed. The warning
   now names the endpoint as `<malformed webhook url>` instead.
 - **Accessibility: axe-core now finds nothing serious or critical in Light,
-  Dark or System** (before, on desktop: 3 rules, 19 elements per theme).
+  Dark or System, with no search active** (before, on desktop: 3 rules, 19
+  elements per theme).
   Bay tiles are buttons inside list items, so the selected bay is
   announced, and each tile's name now includes its printed text, `/dev`
   node and temperature. The raw-page select has a label, and the
