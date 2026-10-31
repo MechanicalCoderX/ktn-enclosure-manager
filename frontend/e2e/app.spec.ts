@@ -875,6 +875,27 @@ test.describe("theme contrast", () => {
       await expect(page.getByTestId("bay-detail")).toBeVisible();
       expect(await seriousAxe(page), "drive map with a bay selected").toEqual([]);
 
+      // Tiles dimmed by a search that does not match them, one of them keyboard-
+      // focused. Known and pre-existing: the dimmed text itself is below 4.5:1
+      // (axe color-contrast; 1.5-2.9:1 measured, the same before and after the
+      // tile dimmed its children instead of itself), so that one rule is set
+      // aside here - but only for text inside a dimmed tile. Anything else
+      // serious, or contrast anywhere else, still fails.
+      await page.getByLabel("Search bays").fill("K1A00001");
+      await expect(page.locator(".bay.dim")).toHaveCount(15);
+      const dimmedTile = page.getByRole("button", { name: /^Bay 2\b/ });
+      await dimmedTile.focus();
+      await page.keyboard.press("Shift+Tab");
+      await page.keyboard.press("Tab");
+      await expect(dimmedTile).toBeFocused();
+      const outsideDim = (await seriousAxe(page)).flatMap((v) => {
+        if (!v.startsWith("color-contrast ")) return [v];
+        const nodes = v.slice(v.indexOf(": ") + 2).split(", ");
+        return nodes.filter((n) => !/\.dim\.bay > /.test(n)).map((n) => `color-contrast: ${n}`);
+      });
+      expect(outsideDim, "drive map with a search dimming tiles").toEqual([]);
+      await page.getByLabel("Search bays").fill("");
+
       await page.getByRole("tab", { name: "Chassis" }).click();
       await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
       expect(await seriousAxe(page), "chassis tab").toEqual([]);
@@ -916,6 +937,17 @@ test.describe("theme contrast", () => {
       await ring("identify button", page.getByRole("button", { name: "Identify", exact: true }));
       await page.getByLabel("Search bays").fill("K1A00001");
       await ring("dimmed bay tile", page.getByRole("button", { name: /^Bay 2\b/ }));
+      // ...and while it holds focus it must still look like a non-match: its
+      // content stays dimmed even though its ring is at full strength.
+      // Effective opacity of the bay number, through every ancestor.
+      const strength = (name: RegExp) =>
+        page.getByRole("button", { name }).locator(".bay-no").evaluate((el) => {
+          let a = 1;
+          for (let n: Element | null = el; n; n = n.parentElement) a *= Number(getComputedStyle(n).opacity);
+          return a;
+        });
+      expect(await strength(/^Bay 2\b/), "focused dimmed tile's content").toBeLessThan(0.5);
+      expect(await strength(/^Bay 1\b/), "control: the matching tile").toBe(1);
       await page.getByLabel("Search bays").fill("");
 
       await page.getByRole("tab", { name: "Chassis" }).click();
