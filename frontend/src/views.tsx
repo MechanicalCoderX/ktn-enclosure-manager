@@ -669,12 +669,15 @@ function SpeedStep({ code, phrase }: { code: number | null; phrase: string | nul
 function ElementTable({
   rows,
   subName,
+  label,
 }: {
   rows: ChassisElement[];
   subName: (id: number) => string;
+  /** The scroll region's accessible name: it is a tab stop, so it needs one. */
+  label: string;
 }) {
   return (
-    <div className="table-scroll" tabIndex={0}>
+    <div className="table-scroll" tabIndex={0} role="region" aria-label={label}>
       <table>
         <thead>
           <tr>
@@ -768,7 +771,7 @@ function CoolingTable({
           modulates them independently.
         </div>
       )}
-      <div className="table-scroll" tabIndex={0}>
+      <div className="table-scroll" tabIndex={0} role="region" aria-label="Cooling table">
         <table>
           <thead>
             <tr>
@@ -869,7 +872,8 @@ export function ChassisView({ chassis }: { chassis: Chassis | null }) {
           {chassis.stale && " — stale, last poll failed"}
         </div>
         {chassis.overall_flags && Object.keys(chassis.overall_flags).length > 0 && (
-          <div className="table-scroll" tabIndex={0}>
+          <div className="table-scroll" tabIndex={0} role="region"
+               aria-label="Chassis status flags">
             <table>
               <tbody>
                 <tr>
@@ -911,7 +915,7 @@ export function ChassisView({ chassis }: { chassis: Chassis | null }) {
             {kind === "cooling" ? (
               <CoolingTable rows={rows} subName={subName} />
             ) : (
-              <ElementTable rows={rows} subName={subName} />
+              <ElementTable rows={rows} subName={subName} label={`${title} table`} />
             )}
           </div>
         );
@@ -950,7 +954,9 @@ export function DiagnosticsView({ enclosureId }: { enclosureId: string }) {
         >
           Copy diagnostics
         </button>
-        <pre className="raw" tabIndex={0}>{copyable}</pre>
+        <pre className="raw" tabIndex={0} role="region" aria-label="Diagnostics output">
+          {copyable}
+        </pre>
       </div>
 
       <div className="panel">
@@ -977,13 +983,17 @@ export function DiagnosticsView({ enclosureId }: { enclosureId: string }) {
             Run
           </button>
         </div>
-        {raw && <pre className="raw" tabIndex={0}>{raw}</pre>}
+        {raw && (
+          <pre className="raw" tabIndex={0} role="region" aria-label="Raw page output">
+            {raw}
+          </pre>
+        )}
       </div>
 
       <div className="panel">
         <h2>Audit log</h2>
         <div className="sub">Every write, including automatic IDENT clearing.</div>
-        <div className="table-scroll" tabIndex={0}>
+        <div className="table-scroll" tabIndex={0} role="region" aria-label="Audit log table">
           <table>
             <thead>
               <tr>

@@ -896,15 +896,31 @@ test.describe("theme contrast", () => {
       expect(outsideDim, "drive map with a search dimming tiles").toEqual([]);
       await page.getByLabel("Search bays").fill("");
 
+      // Every scrollable wrapper is a tab stop, so each is a named region
+      // rather than an anonymous group (review of #61, F3).
+      const unnamedRegions = () =>
+        page.locator(".table-scroll, pre.raw").evaluateAll((els) =>
+          els
+            .filter((el) => el.getAttribute("role") !== "region" || !el.getAttribute("aria-label")?.trim())
+            .map((el) => el.outerHTML.slice(0, 60)),
+        );
+
       await page.getByRole("tab", { name: "Chassis" }).click();
       await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
       expect(await seriousAxe(page), "chassis tab").toEqual([]);
+      await expect(page.getByRole("region", { name: "Cooling table" })).toBeVisible();
+      expect(await page.locator(".table-scroll").count()).toBeGreaterThanOrEqual(4);
+      expect(await unnamedRegions(), "chassis scroll regions without a name").toEqual([]);
 
       await page.getByRole("tab", { name: "Diagnostics" }).click();
       await expect(page.locator("pre.raw").first()).toContainText("app_version");
       await page.getByRole("button", { name: "Run" }).click();
       await expect(page.locator("pre.raw")).toHaveCount(2);
       expect(await seriousAxe(page), "diagnostics tab").toEqual([]);
+      await expect(page.getByRole("region", { name: "Diagnostics output" })).toContainText("app_version");
+      await expect(page.getByRole("region", { name: "Raw page output" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Audit log table" })).toBeVisible();
+      expect(await unnamedRegions(), "diagnostics scroll regions without a name").toEqual([]);
 
       await page.getByRole("button", { name: "Change password" }).click();
       await expect(page.getByRole("dialog")).toBeVisible();
