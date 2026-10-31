@@ -96,7 +96,8 @@ body {
 }
 
 button { font: inherit; cursor: pointer; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+summary:focus-visible, pre.raw:focus-visible, .table-scroll:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -152,6 +153,13 @@ main { padding: 18px; max-width: 1500px; width: 100%; margin: 0 auto; }
   min-width: min-content;
 }
 
+/* Text for screen readers only. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* The list item around each tile; flex so the tile still fills the row's height. */
+.bay-slot { display: flex; }
 .bay {
   width: 82px; min-height: 128px;
   border: 1px solid var(--border); border-radius: 6px;
@@ -168,6 +176,12 @@ main { padding: 18px; max-width: 1500px; width: 100%; margin: 0 auto; }
 .bay:hover { border-color: var(--accent); }
 .bay[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .bay.dim { opacity: 0.35; }
+/* The selected tile already wears an accent ring, so the focus ring is drawn
+   in the text colour and further out: focused and selected stay distinct.
+   A tile dimmed by the search comes back to full strength while focused, or
+   its ring would be dimmed with it. */
+.bay:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+.bay.dim:focus-visible { opacity: 1; }
 
 .bay-no { font-weight: 700; font-size: 15px; }
 .bay-ses { font-size: 10px; color: var(--muted); font-family: var(--mono); }
@@ -227,6 +241,7 @@ table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; }
 td.mono, .mono { font-family: var(--mono); }
+/* Focusable (tabIndex=0) so a table too wide for a phone can be scrolled by keyboard. */
 .table-scroll { overflow-x: auto; }
 
 pre.raw {

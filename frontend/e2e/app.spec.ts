@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /**
  * End-to-end tests (spec §44). These drive the real backend against the
@@ -26,7 +27,7 @@ async function bootstrapAndLogin(page: Page) {
 /** Locate the IDENT indicator on one specific bay tile rather than counting
  *  every dot on the page, so a lit LED elsewhere cannot affect the assertion. */
 const identDot = (page: Page, bay: number) =>
-  page.getByRole("listitem", { name: new RegExp(`^Bay ${bay}, `) }).locator(".ident-dot");
+  page.getByRole("button", { name: new RegExp(`^Bay ${bay}\\b`) }).locator(".ident-dot");
 
 test.describe("authentication", () => {
   test("first run requires creating an administrator", async ({ page }, testInfo) => {
@@ -67,17 +68,17 @@ test.describe("drive map", () => {
       [15, 14],
     ]) {
       await expect(
-        page.getByRole("listitem", { name: new RegExp(`^Bay ${bay}, SES slot ${ses},`) }),
+        page.getByRole("button", { name: new RegExp(`^Bay ${bay}\\b.*SES slot ${ses}\\b`) }),
       ).toHaveCount(1);
     }
   });
 
   test("bay one shows the expected disk", async ({ page }) => {
-    await expect(page.getByRole("listitem", { name: /^Bay 1, / })).toContainText("K1A00001");
+    await expect(page.getByRole("button", { name: /^Bay 1\b/ })).toContainText("K1A00001");
   });
 
   test("selecting a bay opens the detail panel", async ({ page }) => {
-    await page.getByRole("listitem", { name: /^Bay 8, / }).click();
+    await page.getByRole("button", { name: /^Bay 8\b/ }).click();
     const detail = page.getByTestId("bay-detail");
     await expect(detail.getByRole("heading", { name: /Bay 8.*SES slot 7/ })).toBeVisible();
     // Scoped to the detail panel: the serial also appears on the tile itself.
@@ -95,11 +96,11 @@ test.describe("identify", () => {
   test.beforeEach(async ({ page }) => bootstrapAndLogin(page));
 
   test("timed identify turns on, shows a countdown, and clears", async ({ page }) => {
-    await page.getByRole("listitem", { name: /^Bay 1, / }).click();
+    await page.getByRole("button", { name: /^Bay 1\b/ }).click();
     await page.getByLabel("Identify for").selectOption("60");
     await page.getByRole("button", { name: "Identify", exact: true }).click();
 
-    await expect(page.getByRole("listitem", { name: /^Bay 1,.*identify active/i })).toBeVisible({
+    await expect(page.getByRole("button", { name: /^Bay 1\b.*identify active/i })).toBeVisible({
       timeout: 10_000,
     });
     await expect(identDot(page, 1)).toHaveCount(1);
@@ -110,7 +111,7 @@ test.describe("identify", () => {
   });
 
   test("identify is recorded in the audit log", async ({ page }) => {
-    await page.getByRole("listitem", { name: /^Bay 3, / }).click();
+    await page.getByRole("button", { name: /^Bay 3\b/ }).click();
     await page.getByRole("button", { name: "Identify", exact: true }).click();
     await expect(identDot(page, 3)).toHaveCount(1, { timeout: 10_000 });
 
@@ -128,14 +129,14 @@ test.describe("identify", () => {
     // lit after the audit test) cannot mask a false negative here.
     await page.route("**/api/enclosures/*/slots/*/identify", (route) => route.abort());
 
-    await page.getByRole("listitem", { name: /^Bay 5, / }).click();
+    await page.getByRole("button", { name: /^Bay 5\b/ }).click();
     await page.getByRole("button", { name: "Identify", exact: true }).click();
 
     // The rejection text is fetch's browser-specific wording ("Failed to
     // fetch" on Chromium), so assert the banner itself, not the prose.
     await expect(page.locator("main > .notice.error")).toBeVisible();
     await expect(identDot(page, 5)).toHaveCount(0);
-    await expect(page.getByRole("listitem", { name: /^Bay 5,.*identify active/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Bay 5\b.*identify active/i })).toHaveCount(0);
   });
 });
 
@@ -269,7 +270,7 @@ test.describe("identify expiry", () => {
       await advanceTo(page, fake, deadline + 300);
       await expect(identDot(page, BAY)).toHaveCount(0);
       await expect(
-        page.getByRole("listitem", { name: new RegExp(`^Bay ${BAY},.*identify active`, "i") }),
+        page.getByRole("button", { name: new RegExp(`^Bay ${BAY}\\b.*identify active`, "i") }),
       ).toHaveCount(0);
       // Exactly one refetch, fired at the expiry itself ...
       expect(requestsIn(fake, deadline - STEP_MS, deadline + 300)).toBe(1);
@@ -374,7 +375,7 @@ test.describe("freshness", () => {
     // the enclosure block claimed the same freshness. Here they cannot - the
     // enclosure is live and TrueNAS is switched off, and the panel says so
     // separately for each.
-    await page.getByRole("listitem", { name: /^Bay 8, / }).click();
+    await page.getByRole("button", { name: /^Bay 8\b/ }).click();
     const detail = page.getByTestId("bay-detail");
 
     await expect(detail.getByTestId("section-physical")).toContainText(
@@ -510,9 +511,8 @@ test.describe("responsive", () => {
     const overflows = await scroller.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
     expect(overflows).toBe(true);
     // The physical order must be preserved even when scrolled.
-    await expect(page.getByRole("listitem").first()).toHaveAttribute(
-      "aria-label",
-      /^Bay 1, SES slot 0/,
+    await expect(page.getByRole("listitem").first().getByRole("button")).toHaveAccessibleName(
+      /^Bay 1\b.*SES slot 0\b/,
     );
   });
 });
@@ -627,6 +627,65 @@ async function lowContrast(page: Page, selector: string) {
   }, selector);
 }
 
+/**
+ * WCAG 1.4.11 contrast of `target`'s keyboard focus ring: the outline colour
+ * (with the opacity of the element and its ancestors, which dims an outline
+ * too) against the surface it is drawn on, which is whatever is painted behind
+ * the element's parent - the ring sits outside the element's own box. The
+ * element is reached by keyboard, so :focus-visible applies.
+ * Returns the ratio, or 0 when no outline is drawn.
+ */
+async function focusRing(page: Page, target: Locator) {
+  // Focus it, then leave and come back by keyboard: a ring is only promised
+  // for keyboard focus, and a mouse click earlier in the test would otherwise
+  // leave :focus-visible unset.
+  await target.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(target).toBeFocused();
+  return target.evaluate((el) => {
+    type C = { r: number; g: number; b: number; a: number };
+    const parse = (s: string): C => {
+      const p = (s.match(/rgba?\(([^)]+)\)/)?.[1] ?? "0 0 0 0")
+        .split(/[ ,/]+/).filter(Boolean).map(Number);
+      return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+    };
+    const over = (t: C, u: C): C => ({
+      r: t.r * t.a + u.r * (1 - t.a),
+      g: t.g * t.a + u.g * (1 - t.a),
+      b: t.b * t.a + u.b * (1 - t.a),
+      a: 1,
+    });
+    const lum = (c: C) => {
+      const f = (v: number) =>
+        (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+    };
+    if (!el.matches(":focus-visible")) return 0;
+    const cs = getComputedStyle(el);
+    if (cs.outlineStyle === "none" || parseFloat(cs.outlineWidth) < 2) return 0;
+    let surface: C = { r: 255, g: 255, b: 255, a: 1 };
+    const chain: Element[] = [];
+    for (let n = el.parentElement; n; n = n.parentElement) chain.unshift(n);
+    for (const n of chain) surface = over(parse(getComputedStyle(n).backgroundColor), surface);
+    let alpha = 1;
+    for (let n: Element | null = el; n; n = n.parentElement) alpha *= Number(getComputedStyle(n).opacity);
+    const ring = parse(cs.outlineColor);
+    const [hi, lo] = [lum(over({ ...ring, a: ring.a * alpha }, surface)), lum(surface)].sort((a, b) => b - a);
+    return (hi + 0.05) / (lo + 0.05);
+  });
+}
+
+/** axe-core's serious and critical findings on the page as it stands. */
+async function seriousAxe(page: Page) {
+  const { violations } = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"])
+    .analyze();
+  return violations
+    .filter((v) => v.impact === "serious" || v.impact === "critical")
+    .map((v) => `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
+}
+
 test.describe("theme contrast", () => {
   // The three theme settings, with the OS preference emulated both ways for
   // System. The explicit choices run against the *opposite* OS preference, so
@@ -690,8 +749,8 @@ test.describe("theme contrast", () => {
       // colour, and .bay-no had none of its own, so the bay numbers rendered
       // the UA's black on the dark panel. Plain, selected and hovered tiles.
       await expect(page.locator(".bay-no")).toHaveCount(16);
-      await page.getByRole("listitem", { name: /^Bay 1, / }).click();
-      await page.getByRole("listitem", { name: /^Bay 2, / }).hover();
+      await page.getByRole("button", { name: /^Bay 1\b/ }).click();
+      await page.getByRole("button", { name: /^Bay 2\b/ }).hover();
       const numbers = await lowContrast(page, ".bay-no");
       expect(numbers.checked).toBe(16);
       expect(numbers.low.map((l) => l.detail), "bay numbers").toEqual([]);
@@ -776,7 +835,7 @@ test.describe("theme contrast", () => {
       await expect(warn).toHaveCount(2, { timeout: 10_000 });
       const degraded = page.getByTestId("freshness").locator("summary .badge.warning");
       await expect(degraded).toHaveText("▲ degraded");
-      await page.getByRole("listitem", { name: /^Bay 1, / }).click();
+      await page.getByRole("button", { name: /^Bay 1\b/ }).click();
       const tooHot = page.getByTestId("bay-detail").locator(".badge.warning");
       await expect(tooHot).toHaveText("▲ too hot");
 
@@ -808,6 +867,75 @@ test.describe("theme contrast", () => {
       const infos = await lowContrast(page, "main .notice.info");
       expect(infos.checked).toBe(1);
       expect(failures(infos.low), ".notice.info").toEqual([]);
+    });
+
+    test(`${mode.name}: axe finds nothing serious or critical on any screen`, async ({ page }) => {
+      await signInAs(page, mode);
+      await page.getByRole("button", { name: /^Bay 1\b/ }).click();
+      await expect(page.getByTestId("bay-detail")).toBeVisible();
+      expect(await seriousAxe(page), "drive map with a bay selected").toEqual([]);
+
+      await page.getByRole("tab", { name: "Chassis" }).click();
+      await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
+      expect(await seriousAxe(page), "chassis tab").toEqual([]);
+
+      await page.getByRole("tab", { name: "Diagnostics" }).click();
+      await expect(page.locator("pre.raw").first()).toContainText("app_version");
+      await page.getByRole("button", { name: "Run" }).click();
+      await expect(page.locator("pre.raw")).toHaveCount(2);
+      expect(await seriousAxe(page), "diagnostics tab").toEqual([]);
+
+      await page.getByRole("button", { name: "Change password" }).click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      expect(await seriousAxe(page), "change-password dialog").toEqual([]);
+      await page.keyboard.press("Escape");
+
+      await page.getByRole("button", { name: /Sign out/ }).click();
+      await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+      expect(await seriousAxe(page), "login screen").toEqual([]);
+    });
+
+    test(`${mode.name}: every keyboard focus ring reaches 3:1 against its surface`, async ({
+      page,
+    }) => {
+      await signInAs(page, mode);
+      const rings: Record<string, number> = {};
+      const ring = async (name: string, target: Locator) => {
+        rings[name] = Number((await focusRing(page, target)).toFixed(2));
+      };
+      // Drive map: tab, search, theme select, freshness summary, and a bay
+      // tile plain, selected and dimmed by a search that does not match it.
+      await ring("tab", page.getByRole("tab", { name: "Drive map" }));
+      await ring("search", page.getByLabel("Search bays"));
+      await ring("theme select", page.getByLabel("Theme"));
+      await ring("freshness summary", page.getByTestId("freshness").locator("summary"));
+      await ring("bay tile", page.getByRole("button", { name: /^Bay 2\b/ }));
+      await page.getByRole("button", { name: /^Bay 1\b/ }).click();
+      await ring("selected bay tile", page.getByRole("button", { name: /^Bay 1\b/ }));
+      await ring("identify select", page.getByLabel("Identify for"));
+      await ring("identify button", page.getByRole("button", { name: "Identify", exact: true }));
+      await page.getByLabel("Search bays").fill("K1A00001");
+      await ring("dimmed bay tile", page.getByRole("button", { name: /^Bay 2\b/ }));
+      await page.getByLabel("Search bays").fill("");
+
+      await page.getByRole("tab", { name: "Chassis" }).click();
+      await expect(page.getByText("Chassis health")).toBeVisible({ timeout: 15_000 });
+      await ring("chassis table", page.locator(".table-scroll").first());
+
+      await page.getByRole("tab", { name: "Diagnostics" }).click();
+      await expect(page.locator("pre.raw").first()).toContainText("app_version");
+      await ring("diagnostics output", page.locator("pre.raw").first());
+      await ring("raw-page select", page.getByLabel("Page", { exact: true }));
+
+      await page.getByRole("button", { name: "Change password" }).click();
+      const dialog = page.getByRole("dialog");
+      await ring("dialog field", dialog.getByLabel("Current password"));
+      await ring("dialog primary button", dialog.getByRole("button", { name: "Change password" }));
+      await ring("dialog secondary button", dialog.getByRole("button", { name: "Cancel" }));
+
+      const low = Object.entries(rings).filter(([, r]) => r < 3);
+      expect(Object.keys(rings)).toHaveLength(15);
+      expect(low, "focus rings below 3:1 (0 = no ring drawn)").toEqual([]);
     });
 
     test(`${mode.name}: the login screen, its notices and the unauthenticated badge stay readable`, async ({
@@ -906,6 +1034,46 @@ test.describe("theme contrast", () => {
     const filled = await lowContrast(page, field);
     expect(filled.low.map((l) => l.label)).toEqual(["input[type=search] value (text-fill)"]);
     await search.fill("");
+  });
+});
+
+test.describe("keyboard", () => {
+  test("the password dialog keeps focus, closes on Escape and hands focus back", async ({
+    page,
+  }) => {
+    await bootstrapAndLogin(page);
+    const opener = page.getByRole("button", { name: "Change password" });
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByLabel("Current password")).toBeFocused();
+    // The page behind is inert: nothing in it can take focus or be clicked.
+    await expect(page.locator("header.topbar")).toHaveAttribute("inert", "");
+    await expect(page.locator("main")).toHaveAttribute("inert", "");
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("Tab");
+      const inDialog = await page.evaluate(
+        () => !document.activeElement || document.activeElement === document.body
+          || !!document.activeElement.closest('[role="dialog"]'),
+      );
+      expect(inDialog, `Tab ${i + 1} left the dialog`).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(page.locator("main")).not.toHaveAttribute("inert");
+  });
+
+  test("a bay tile is selected from the keyboard and announces it", async ({ page }) => {
+    await bootstrapAndLogin(page);
+    const tile = page.getByRole("button", { name: /^Bay 3\b/ });
+    await tile.focus();
+    await page.keyboard.press("Enter");
+    await expect(tile).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("bay-detail")).toContainText("Bay 3");
+    await page.getByRole("button", { name: /^Bay 4\b/ }).focus();
+    await page.keyboard.press("Space");
+    await expect(tile).toHaveAttribute("aria-pressed", "false");
   });
 });
 

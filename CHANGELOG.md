@@ -62,6 +62,18 @@ On main, not yet released (likely 1.6.2): #57 (light-theme contrast), #58
   quoted the whole `user:password@host` part of the URL, and that message
   was logged with the traceback: a credential leak, now closed. The warning
   now names the endpoint as `<malformed webhook url>` instead.
+- **Accessibility: axe-core now finds nothing serious or critical in Light,
+  Dark or System** (before, on desktop: 3 rules, 18
+  elements per theme). Bay tiles are
+  buttons inside list items, so the selected bay is announced, and each
+  tile's name now includes its printed text, `/dev` node and temperature.
+  The raw-page select has a label, and the diagnostics output and the
+  chassis tables (which overflow on a phone) can be scrolled from the
+  keyboard. The change-password dialog closes on Escape,
+  keeps Tab inside it and returns focus to its button. Error notices are
+  announced. The freshness summary has a focus ring. A dimmed or selected
+  bay tile's focus ring is now clearly visible (it was 1.6:1 when dimmed).
+  The theme tests now also run axe and check every focus ring reaches 3:1.
 
 ## [1.6.1] — 2026-10-29
 
