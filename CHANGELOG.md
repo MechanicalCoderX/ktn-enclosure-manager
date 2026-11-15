@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **Runtime base image: Python 3.14 → 3.15** (`python:3.15-slim`, digest
+  `8c13a3f`; Dependabot #64). CI's backend and E2E jobs now run on 3.15 too,
+  so the suite tests the interpreter the image ships
+  (`tests/test_version_consistency.py` enforces this). No data migration and
+  no configuration change.
+
 ## [1.6.2] — 2026-10-31
 
 No data migration and no configuration change. Upgrading and rolling back are
