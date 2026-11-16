@@ -75,7 +75,10 @@ VOLUME ["/data"]
 
 # A script rather than an inline URL: it reads KTN_PORT and KTN_TLS_ENABLED,
 # so a changed port or a TLS deployment is probed where it actually listens.
+# Docker runs it as root every 30 s, so Python starts isolated: -I ignores
+# PYTHON* variables and the user site, -S skips site-packages and every .pth
+# and sitecustomize there. The script needs only the standard library.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD python /app/docker-healthcheck.py
+  CMD python -I -S /app/docker-healthcheck.py
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -9,7 +9,11 @@ the same KTN_PORT and KTN_TLS_ENABLED the entrypoint used.
 
 The TLS probe does not verify the certificate. It is a loopback liveness
 check, not an authentication: the certificate names the public host, never
-127.0.0.1, so a verifying probe could only fail. Standard library only.
+127.0.0.1, so a verifying probe could only fail.
+
+Standard library only, and it must stay that way: Docker runs this as root,
+so the image starts it with `python -I -S` - no site-packages, .pth files or
+sitecustomize, which a lesser process might have planted (see the Dockerfile).
 """
 
 from __future__ import annotations
