@@ -32,6 +32,36 @@ cd frontend && npm run typecheck
 The suite runs entirely against captured fixtures in `tests/fixtures/`.
 Regenerate the synthetic sysfs tree with `python3 tests/build_sysfs_fixture.py`.
 
+## Dependency lock
+
+`backend/pyproject.toml` declares the runtime dependencies as ranges; dev
+installs (`pip install -e 'backend[dev]'`) resolve from those. The image
+installs `backend/requirements.txt` instead: every version pinned, every file
+hash-checked (`pip install --require-hashes`), so two builds of one commit ship
+the same libraries. `backend/requirements.in` is a copy of pyproject's list,
+because Dependabot recompiles a lock only from a `.in` file.
+
+After changing `[project].dependencies`, copy the change into
+`requirements.in` and recompile, from `backend/`:
+
+```bash
+uv pip compile --universal --python-version 3.15 --generate-hashes \
+    requirements.in -o requirements.txt
+```
+
+- `--python-version` is the image's Python (`FROM python:3.15-slim` in the
+  Dockerfile); uv targets it without that interpreter installed.
+- `--universal` and `--generate-hashes` keep one lock valid for both published
+  architectures: the hashes cover every file of each pinned version, arm64
+  wheels included.
+- Re-running keeps existing pins. Add `--upgrade-package <name>` to move one,
+  or `--upgrade` to move everything.
+
+`tests/test_image_build_inputs.py` fails if the two lists differ, if a pin
+falls outside pyproject's range, or if the lock's Python differs from the
+image's. Dependabot (`uv` ecosystem, `/backend`) recompiles with the same
+options, read back from the lock header.
+
 ## Adding support for another enclosure
 
 Discovery, mapping and IDENT are generic; they should need no changes. The
