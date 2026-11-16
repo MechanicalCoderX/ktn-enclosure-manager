@@ -12,6 +12,13 @@ a delivery failure is retried on later evaluations instead of silently
 committing - the network hiccup that degrades a pool is exactly the hiccup
 likely to eat the webhook that reports it. Restarting the app does not
 re-announce conditions the operator has already been told about.
+
+How much a message says is ``detail`` (KTN_ALERT_DETAIL). ``full`` names the
+drive: bay, serial, /dev/sdX, pool/vdev, ZFS state, error counts, temperature,
+and in the JSON style the enclosure id. ``minimal`` is for an endpoint on
+someone else's server, such as a public ntfy.sh topic that anyone with the
+name can read: the bay number and the condition, with no serial, device path,
+pool/vdev names, SES slot or enclosure id.
 """
 
 from __future__ import annotations
@@ -40,6 +47,14 @@ DEFAULT_RETRY_SECONDS = 60.0
 
 #: Health values that warrant telling somebody.
 BAD = (SlotHealth.WARNING, SlotHealth.FAILED)
+
+#: KTN_ALERT_DETAIL values; config.ALERT_DETAIL_VALUES is the same pair.
+DETAIL_FULL = "full"
+DETAIL_MINIMAL = "minimal"
+
+#: JSON keys that inventory the machine; null under the minimal detail. The
+#: keys stay present so a consumer's parser sees the same shape either way.
+_IDENTIFYING_JSON_KEYS = ("enclosure", "ses_slot", "serial", "device", "pool", "vdev")
 
 #: ntfy priority and tags per health, so a phone can filter on severity.
 _NTFY_STYLE: dict[str, tuple[str, str]] = {
@@ -76,9 +91,14 @@ class HealthNotifier:
         notify_recovery: bool = True,
         timeout: float = DEFAULT_TIMEOUT,
         retry_seconds: float = DEFAULT_RETRY_SECONDS,
+        detail: str = DETAIL_FULL,
     ) -> None:
         self.url = url.rstrip("/") if url else ""
         self.style = style if style in ("ntfy", "json") else "ntfy"
+        # Settings refuses an unknown KTN_ALERT_DETAIL at startup. A caller
+        # that bypasses Settings with a typo gets the smaller message: an
+        # unknown value must never send more than the operator asked for.
+        self.detail = detail if detail in (DETAIL_FULL, DETAIL_MINIMAL) else DETAIL_MINIMAL
         self.state_path = Path(state_path) if state_path else None
         self.notify_recovery = notify_recovery
         self.timeout = timeout
@@ -125,15 +145,19 @@ class HealthNotifier:
 
     # -------------------------------------------------------------- message
 
-    @staticmethod
-    def _describe(bay: Bay) -> str:
-        bits = [f"Bay {bay.display_bay} (SES slot {bay.ses_slot})"]
-        if bay.disk.serial:
-            bits.append(f"serial {bay.disk.serial}")
-        if bay.device:
-            bits.append(bay.device)
-        if bay.zfs.pool:
-            bits.append(f"{bay.zfs.pool}/{bay.zfs.vdev}")
+    def _describe(self, bay: Bay) -> str:
+        if self.detail == DETAIL_FULL:
+            bits = [f"Bay {bay.display_bay} (SES slot {bay.ses_slot})"]
+            if bay.disk.serial:
+                bits.append(f"serial {bay.disk.serial}")
+            if bay.device:
+                bits.append(bay.device)
+            if bay.zfs.pool:
+                bits.append(f"{bay.zfs.pool}/{bay.zfs.vdev}")
+        else:
+            # The bay number and the condition only: nothing below names a
+            # drive, a pool or the enclosure.
+            bits = [f"Bay {bay.display_bay}"]
         if bay.zfs.state and bay.zfs.state != "UNKNOWN":
             bits.append(f"ZFS {bay.zfs.state}")
         errors = [
@@ -180,23 +204,23 @@ class HealthNotifier:
                         headers={"Title": title, "Priority": priority, "Tags": tag},
                     )
                 else:
-                    response = await client.post(
-                        self.url,
-                        json={
-                            "title": title,
-                            "message": body,
-                            "health": health.value,
-                            "previous": previous,
-                            "enclosure": bay.enclosure_id,
-                            "bay": bay.display_bay,
-                            "ses_slot": bay.ses_slot,
-                            "serial": bay.disk.serial,
-                            "device": bay.device,
-                            "pool": bay.zfs.pool,
-                            "vdev": bay.zfs.vdev,
-                            "zfs_state": bay.zfs.state,
-                        },
-                    )
+                    payload = {
+                        "title": title,
+                        "message": body,
+                        "health": health.value,
+                        "previous": previous,
+                        "enclosure": bay.enclosure_id,
+                        "bay": bay.display_bay,
+                        "ses_slot": bay.ses_slot,
+                        "serial": bay.disk.serial,
+                        "device": bay.device,
+                        "pool": bay.zfs.pool,
+                        "vdev": bay.zfs.vdev,
+                        "zfs_state": bay.zfs.state,
+                    }
+                    if self.detail != DETAIL_FULL:
+                        payload.update(dict.fromkeys(_IDENTIFYING_JSON_KEYS))
+                    response = await client.post(self.url, json=payload)
         except httpx.InvalidURL as exc:
             # A malformed URL (a typo'd port, a stray control character) fails
             # while the request is built, and InvalidURL is not an HTTPError, so
