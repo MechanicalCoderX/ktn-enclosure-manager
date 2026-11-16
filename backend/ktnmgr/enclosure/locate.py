@@ -53,7 +53,7 @@ class LocateError(RuntimeError):
     """An IDENT operation could not be performed."""
 
 
-def validate_request(enclosure_id: str, slot: int) -> tuple[str, int]:
+def validate_request(enclosure_id: object, slot: object) -> tuple[str, int]:
     """Semantic validation applied identically on both sides of the socket.
 
     Rejects everything in the spec's hostile-input list (§43) by construction:
@@ -341,6 +341,13 @@ class SesLocateWriter:
     def write(self, enclosure_id: str, slot: int, on: bool) -> bool:
         enclosure_id, slot = validate_request(enclosure_id, slot)
         ref = self.backend.resolve(enclosure_id)
+        # Checked on every write, not left to _array_type_index: that check
+        # runs only on a cold cache, and the caches are keyed by logical id,
+        # so an enclosure that re-resolves without an sg node after a warm-up
+        # would otherwise hand None to set_ident (a TypeError, not a refusal).
+        device = ref.sg_device
+        if not device:
+            raise LocateError("enclosure has no sg device for SES IDENT")
         type_index, expected_count = self._array_type_index(ref)
         element_index = self._element_index_for(ref, type_index, expected_count, slot)
 
@@ -351,7 +358,7 @@ class SesLocateWriter:
         # cache a half-applied locate state for the UI to render.
         with enclosure_access(self.backend.lock_path):
             try:
-                self.ses.set_ident(ref.sg_device, type_index, element_index, on)
+                self.ses.set_ident(device, type_index, element_index, on)
             except SesError as exc:
                 raise LocateError(f"IDENT command failed: {exc}") from exc
 

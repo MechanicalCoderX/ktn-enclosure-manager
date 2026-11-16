@@ -25,7 +25,7 @@ cd frontend && npm install
 ```bash
 PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q   # backend, no hardware
 cd frontend && npx playwright test                        # E2E, real backend + fixtures
-.venv/bin/ruff check backend && .venv/bin/mypy backend
+.venv/bin/ruff check backend helper tests && .venv/bin/mypy --config-file backend/pyproject.toml backend/ktnmgr helper
 cd frontend && npm run typecheck
 ```
 

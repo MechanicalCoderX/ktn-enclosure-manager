@@ -44,6 +44,16 @@ jobs:
       - name: Lint
         run: ruff check backend helper tests
 
+      - name: Type check
+        # Pinned so a new mypy release cannot turn the gate red on an
+        # unchanged commit; bump it deliberately. 2.4.1 ships cp315 wheels,
+        # so it runs natively on the 3.15 interpreter above. --config-file is
+        # required: run from the repo root without it, mypy finds no config
+        # and silently drops disallow_untyped_defs.
+        run: |
+          pip install 'mypy==2.4.1'
+          mypy --config-file backend/pyproject.toml backend/ktnmgr helper
+
       - name: Tests
         # The suite runs entirely against captured fixtures; no hardware and no
         # TrueNAS instance is required.

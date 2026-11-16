@@ -229,6 +229,24 @@ def test_aes_read_failure_becomes_locate_error(tmp_path: Path) -> None:
     assert ses.ident_calls == []
 
 
+def test_sg_device_lost_with_warm_caches_is_a_locate_error(
+    stl3: tuple[SesLocateWriter, FakeSes],
+) -> None:
+    """The cold path refuses an enclosure with no sg device while reading the
+    configuration page, but both topology caches are keyed by logical id, so
+    once they are warm that read never happens again. If the enclosure then
+    re-resolves without an sg node (the device went away between requests),
+    the write must still be refused as a LocateError - not reach set_ident
+    with None, which the real SesRunner turns into a TypeError from Path()."""
+    writer, ses = stl3
+    assert writer.write(STL3_ID, 3, True) is True  # warms both caches
+    calls_before = list(ses.ident_calls)
+    writer.backend.ref.sg_device = None  # type: ignore[attr-defined]  # FakeBackend's ref
+    with pytest.raises(LocateError, match="no sg device"):
+        writer.write(STL3_ID, 4, True)
+    assert ses.ident_calls == calls_before, "a refused IDENT must not reach the enclosure"
+
+
 # ---------------------------------------------------- coordinate systems
 #
 # The four fixtures below are the regression suite for the global-vs-per-type

@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
@@ -77,6 +78,20 @@ def _write_private(path: Path, text: str) -> None:
     # Explicit, in case the file already existed with looser permissions:
     # O_CREAT's mode applies only when creating.
     os.chmod(path, 0o600)
+
+
+class UserRecord(TypedDict, total=False):
+    """One account in users.json, as written by create_user.
+
+    ``total=False`` because the file is read back without schema validation
+    and accounts created by older releases lack fields: ``session_epoch``
+    did not always exist (see _epoch_of), and the code that reads
+    ``password_hash`` already treats its absence as invalid credentials.
+    """
+
+    password_hash: str
+    created_at: str
+    session_epoch: int
 
 
 class AuthError(Exception):
@@ -190,7 +205,7 @@ class AuthService:
 
     # ------------------------------------------------------------------ users
 
-    def _read_users(self) -> dict[str, dict[str, str]]:
+    def _read_users(self) -> dict[str, UserRecord]:
         """Load the account file.
 
         An absent file means "no accounts yet" and is the normal first-run
@@ -215,7 +230,7 @@ class AuthService:
             raise AuthError(f"account file {self.users_path} is not a JSON object")
         return data
 
-    def _write_users(self, users: dict[str, dict[str, str]]) -> None:
+    def _write_users(self, users: dict[str, UserRecord]) -> None:
         """Replace the account file atomically, never world-readable.
 
         The mode is set by os.open rather than a chmod after the fact: writing
@@ -300,7 +315,7 @@ class AuthService:
         self._write_users(users)
 
     @staticmethod
-    def _epoch_of(record: dict[str, object]) -> int:
+    def _epoch_of(record: UserRecord) -> int:
         """Session epoch for a user record.
 
         Accounts created before this field existed have no epoch; they are

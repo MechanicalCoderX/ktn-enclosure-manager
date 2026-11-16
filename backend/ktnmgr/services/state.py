@@ -18,7 +18,7 @@ from typing import Any, Generic, TypeVar
 from ktnmgr import __version__
 from ktnmgr.config import Settings
 from ktnmgr.enclosure.disks import DiskIdentityUnreadable, DiskInfoReader
-from ktnmgr.enclosure.ses import SesError, SesRunner
+from ktnmgr.enclosure.ses import SesError, SesReader
 from ktnmgr.enclosure.ses_parser import (
     BAY_ELEMENT_TYPES,
     array_slot_type_index,
@@ -205,7 +205,7 @@ class StateService:
         settings: Settings,
         backend: SysfsEnclosureBackend,
         disks: DiskInfoReader,
-        ses: SesRunner,
+        ses: SesReader,
         ident: IdentManager,
         truenas: TrueNASClient | None,
         notifier: HealthNotifier | None = None,

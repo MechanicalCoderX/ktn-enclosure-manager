@@ -17,7 +17,7 @@ import shutil
 import subprocess  # noqa: S404 - argv-only, shell=False, allow-listed arguments
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from ktnmgr.enclosure.access import enclosure_access
 
@@ -83,6 +83,22 @@ class SesResult:
     page: str
     stdout: str
     returncode: int
+
+
+class SesReader(Protocol):
+    """The read-only SES interface StateService and the API layer consume.
+
+    Satisfied structurally by both SesRunner (sg_ses in-process) and
+    HelperSesRunner (through the privileged helper); main.py picks one at
+    startup. Callers depend on this rather than on either class so neither
+    has to know which one is in use.
+    """
+
+    @property
+    def binary(self) -> str: ...
+    def available(self) -> bool: ...
+    def version(self) -> str | None: ...
+    def read_for(self, ref: Any, page: str) -> SesResult: ...
 
 
 class SesRunner:

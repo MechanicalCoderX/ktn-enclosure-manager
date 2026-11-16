@@ -40,6 +40,10 @@ ignore = ["S101"]
 
 [tool.mypy]
 python_version = "3.11"
+# Lets helper/ktn_ident_helper.py (checked with the same settings) resolve
+# `ktnmgr`, which it puts on sys.path itself at runtime. CI runs:
+#   mypy --config-file backend/pyproject.toml backend/ktnmgr helper
+mypy_path = "$MYPY_CONFIG_FILE_DIR"
 warn_unused_ignores = true
 disallow_untyped_defs = true
 
