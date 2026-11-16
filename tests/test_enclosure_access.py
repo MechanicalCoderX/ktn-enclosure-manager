@@ -269,10 +269,13 @@ def test_hard_link_at_lock_path_is_refused_and_target_mode_unchanged(tmp_path: P
     assert _mode(victim) == 0o640, f"the linked file was chmod'ed to {_mode(victim):o}"
 
 
-def test_fifo_at_lock_path_is_refused_without_blocking(tmp_path: Path) -> None:
-    """A FIFO must not be opened as the lock, chmod'ed, or allowed to block
-    the opener (a reader-only or writer-only open of a FIFO waits for the
-    other end; O_NONBLOCK makes that impossible)."""
+def test_fifo_at_lock_path_is_refused_and_not_chmodded(tmp_path: Path) -> None:
+    """A FIFO must not be taken as the lock or chmod'ed.
+
+    The time bound is only a guard against a future change of open mode:
+    Linux never blocks an O_RDWR open of a FIFO, so this test cannot tell
+    whether O_NONBLOCK is set. test_lock_is_opened_with_the_defensive_flags
+    pins that flag instead."""
     import os
 
     lock = tmp_path / "enclosure.lock"
@@ -286,7 +289,10 @@ def test_fifo_at_lock_path_is_refused_without_blocking(tmp_path: Path) -> None:
     assert _mode(lock) == 0o600, f"the FIFO was chmod'ed to {_mode(lock):o}"
 
 
-def test_socket_at_lock_path_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_socket_at_lock_path_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
     import socket
 
     # Relative bind: an absolute pytest path can exceed the 108-byte sun_path.
@@ -294,10 +300,18 @@ def test_socket_at_lock_path_is_refused(tmp_path: Path, monkeypatch: pytest.Monk
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         sock.bind("enclosure.lock")
-        with enclosure_access(tmp_path / "enclosure.lock") as held:
+        with (
+            caplog.at_level(logging.WARNING, logger="ktnmgr.enclosure.access"),
+            enclosure_access(tmp_path / "enclosure.lock") as held,
+        ):
             assert held is False
     finally:
         sock.close()
+
+    # Refused as a substitute (ERROR, named), not lumped in with an ordinary
+    # failure to open (WARNING).
+    messages = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("socket" in m for m in messages), messages
 
 
 def test_a_refused_lock_degrades_the_caller_instead_of_failing_it(
@@ -380,6 +394,188 @@ def test_pre_existing_lock_owned_by_another_uid_is_used_but_not_chmodded(
         assert held is True
 
     assert _mode(lock) == 0o646, "a lock owned by another uid was chmod'ed"
+
+
+def _refusal_lines(caplog: pytest.LogCaptureFixture, lock: Path) -> list[str]:
+    import logging
+
+    return [
+        r.getMessage() for r in caplog.records
+        if r.levelno == logging.ERROR and str(lock) in r.getMessage()
+    ]
+
+
+def _plant(lock: Path, kind: str, victim: Path) -> None:
+    """Replace whatever is at ``lock`` with one kind of substitute."""
+    import os
+    import shutil
+
+    if lock.is_dir() and not lock.is_symlink():
+        shutil.rmtree(lock)
+    elif lock.exists() or lock.is_symlink():
+        lock.unlink()
+    if kind == "symlink":
+        lock.symlink_to(victim)
+    elif kind == "fifo":
+        os.mkfifo(lock, 0o600)
+    elif kind == "directory":
+        lock.mkdir()
+    elif kind == "hard link":
+        os.link(victim, lock)
+
+
+def test_each_kind_of_refusal_is_logged_but_bounded(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A different kind of substitute is reported at once, but however often
+    the web process swaps plants - it drives the helper's request rate - the
+    log gets at most one line per kind per interval, not one per request."""
+    import logging
+
+    victim = tmp_path / "victim"
+    victim.write_text("not a lock\n")
+    lock = tmp_path / "enclosure.lock"
+    kinds = ["symlink", "fifo", "directory", "hard link"]
+
+    with caplog.at_level(logging.WARNING, logger="ktnmgr.enclosure.access"):
+        for count, kind in enumerate(kinds, start=1):
+            _plant(lock, kind, victim)
+            for _ in range(3):
+                with enclosure_access(lock) as held:
+                    assert held is False
+            assert len(_refusal_lines(caplog, lock)) == count, (
+                f"{kind}: {_refusal_lines(caplog, lock)}"
+            )
+
+        for _ in range(25):  # a hostile swap loop
+            for kind in kinds:
+                _plant(lock, kind, victim)
+                with enclosure_access(lock):
+                    pass
+
+    lines = _refusal_lines(caplog, lock)
+    assert len(lines) == len(kinds), lines
+    for phrase in ("is a symlink", "is not a regular file", "is a directory",
+                   "has a link count other than 1"):
+        assert any(phrase in line for line in lines), (phrase, lines)
+
+
+def test_a_refusal_that_persists_is_logged_again_after_the_interval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    import os
+
+    from ktnmgr.enclosure import access
+
+    monkeypatch.setattr(access, "_REFUSAL_LOG_INTERVAL", 0.0)
+    lock = tmp_path / "enclosure.lock"
+    lock.symlink_to(tmp_path / "elsewhere")
+
+    with caplog.at_level(logging.WARNING, logger="ktnmgr.enclosure.access"):
+        for _ in range(3):
+            with enclosure_access(lock):
+                pass
+
+    lines = _refusal_lines(caplog, lock)
+    assert len(lines) == 3, lines
+    # Which process refused: only the root helper's refusal is the event.
+    assert f"(euid {os.geteuid()})" in lines[0]
+
+
+def test_parent_symlink_loop_is_refused_and_named_as_a_loop(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ELOOP also comes from a looping directory above the lock. That is a
+    misconfigured path, not a planted link, and the message says so."""
+    import logging
+
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop)
+    lock = loop / "enclosure.lock"
+
+    with (
+        caplog.at_level(logging.WARNING, logger="ktnmgr.enclosure.access"),
+        enclosure_access(lock) as held,
+    ):
+        assert held is False
+
+    lines = _refusal_lines(caplog, lock)
+    assert len(lines) == 1 and "symlink loop" in lines[0], lines
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").is_dir(), reason="needs /proc/self/fd")
+def test_refusals_do_not_leak_descriptors(tmp_path: Path) -> None:
+    """The root helper hits the refusal path on every poll and every IDENT
+    while a plant is in place. One leaked descriptor per refusal would
+    exhaust its fd limit in hours and take IDENT and all SES telemetry down
+    with it - turning a harmless refusal into the outage it exists to avoid.
+    The FIFO and the hard link are the cases where a descriptor was opened
+    before the refusal, so it must be closed."""
+    import os
+
+    victim = tmp_path / "victim"
+    victim.write_text("not a lock\n")
+    fifo = tmp_path / "fifo.lock"
+    os.mkfifo(fifo, 0o600)
+    linked = tmp_path / "linked.lock"
+    os.link(victim, linked)
+    unusable = tmp_path / "no-such-dir" / "enclosure.lock"
+
+    def open_fds() -> int:
+        return len(os.listdir("/proc/self/fd"))
+
+    before = open_fds()
+    for _ in range(50):
+        for path in (fifo, linked, unusable):
+            with enclosure_access(path) as held:
+                assert held is False
+    assert open_fds() == before, f"{open_fds() - before} descriptors leaked"
+
+
+def test_lock_is_opened_with_the_defensive_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pins the flags no behavioural test here can see. O_NOFOLLOW is also
+    covered by the symlink tests; O_NONBLOCK and O_NOCTTY only matter for a
+    device node (or a FIFO on a non-Linux kernel), which an unprivileged test
+    cannot create."""
+    import os
+
+    seen: list[int] = []
+    real_open = os.open
+
+    def spy(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        seen.append(flags)
+        return real_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "open", spy)
+    with enclosure_access(tmp_path / "enclosure.lock") as held:
+        assert held is True
+    monkeypatch.undo()
+
+    assert seen, "the lock was not opened through os.open"
+    for name in ("O_NOFOLLOW", "O_NONBLOCK", "O_NOCTTY", "O_CLOEXEC", "O_CREAT", "O_RDWR"):
+        assert seen[0] & getattr(os, name) == getattr(os, name), f"{name} missing"
+
+
+@pytest.mark.parametrize("plant", ["symlink", "unusable"])
+def test_a_caller_exception_is_not_chained_to_the_open_failure(
+    tmp_path: Path, plant: str
+) -> None:
+    """While a plant is in place, an unrelated error in the caller's block
+    must not carry "is a symlink" in its traceback as its __context__."""
+    if plant == "symlink":
+        lock = tmp_path / "enclosure.lock"
+        lock.symlink_to(tmp_path / "elsewhere")
+    else:
+        lock = tmp_path / "no-such-dir" / "enclosure.lock"
+
+    with pytest.raises(RuntimeError) as info, enclosure_access(lock) as held:
+        assert held is False
+        raise RuntimeError("caller's own failure")
+
+    assert info.value.__context__ is None, repr(info.value.__context__)
 
 
 def test_settings_lock_path_prefers_the_explicit_override(
