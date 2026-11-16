@@ -202,6 +202,186 @@ def test_lock_is_openable_by_a_second_uid(tmp_path: Path) -> None:
     )
 
 
+# --------------------------------------------------- a substituted lock path
+#
+# The root helper opens this path on every poll, and its directory (/run/ktn)
+# is writable by the web process's gid with no sticky bit. Whatever a
+# compromised web process leaves at the path must therefore be refused, and
+# refused before root touches it: no chmod of another file, no file created
+# somewhere else, no open that blocks. Refusal takes the same degraded path
+# as any other unusable lock (yield False, proceed unsynchronised), so no
+# caller has a new failure to handle.
+
+
+def _mode(path: Path) -> int:
+    """Permission bits of the entry itself, never of what a link points at."""
+    import os
+    import stat
+
+    return stat.S_IMODE(os.lstat(path).st_mode)
+
+
+def test_symlink_at_lock_path_is_refused_and_target_mode_unchanged(tmp_path: Path) -> None:
+    """The reviewed primitive: root followed the link and fchmod'ed the target
+    to 0666. Root owns the target, so the chmod needs no capability at all."""
+    victim = tmp_path / "victim"
+    victim.write_text("not a lock\n")
+    victim.chmod(0o640)
+    lock = tmp_path / "enclosure.lock"
+    lock.symlink_to(victim)
+
+    with enclosure_access(lock) as held:
+        assert held is False, "a symlink was accepted as the enclosure lock"
+
+    assert _mode(victim) == 0o640, f"the link target was chmod'ed to {_mode(victim):o}"
+    assert victim.read_text() == "not a lock\n"
+    assert lock.is_symlink(), "the refused entry must be left alone, not replaced"
+
+
+def test_dangling_symlink_at_lock_path_creates_nothing(tmp_path: Path) -> None:
+    """O_CREAT follows a dangling link and creates its target - as root, mode
+    0666, anywhere root may write. That is a stronger primitive than the
+    chmod: the attacker picks the path, then fills the world-writable file."""
+    target = tmp_path / "created-by-root.pth"
+    lock = tmp_path / "enclosure.lock"
+    lock.symlink_to(target)
+
+    with enclosure_access(lock) as held:
+        assert held is False
+
+    assert not target.exists(), "the open created the dangling link's target"
+
+
+def test_hard_link_at_lock_path_is_refused_and_target_mode_unchanged(tmp_path: Path) -> None:
+    """A second name for some other file is the same inode, so a chmod
+    through it lands on that file. The lock is only ever a file of its own."""
+    import os
+
+    victim = tmp_path / "victim"
+    victim.write_text("not a lock\n")
+    victim.chmod(0o640)
+    lock = tmp_path / "enclosure.lock"
+    os.link(victim, lock)
+
+    with enclosure_access(lock) as held:
+        assert held is False, "a hard link to another file was accepted as the lock"
+
+    assert _mode(victim) == 0o640, f"the linked file was chmod'ed to {_mode(victim):o}"
+
+
+def test_fifo_at_lock_path_is_refused_without_blocking(tmp_path: Path) -> None:
+    """A FIFO must not be opened as the lock, chmod'ed, or allowed to block
+    the opener (a reader-only or writer-only open of a FIFO waits for the
+    other end; O_NONBLOCK makes that impossible)."""
+    import os
+
+    lock = tmp_path / "enclosure.lock"
+    os.mkfifo(lock, 0o600)
+
+    started = time.monotonic()
+    with enclosure_access(lock) as held:
+        assert held is False, "a FIFO was accepted as the enclosure lock"
+    assert time.monotonic() - started < 5
+
+    assert _mode(lock) == 0o600, f"the FIFO was chmod'ed to {_mode(lock):o}"
+
+
+def test_socket_at_lock_path_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    # Relative bind: an absolute pytest path can exceed the 108-byte sun_path.
+    monkeypatch.chdir(tmp_path)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.bind("enclosure.lock")
+        with enclosure_access(tmp_path / "enclosure.lock") as held:
+            assert held is False
+    finally:
+        sock.close()
+
+
+def test_a_refused_lock_degrades_the_caller_instead_of_failing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What a caller sees: the helper's SES read still runs and returns its
+    result, unsynchronised, exactly as for any other unusable lock - and the
+    planted link's target is untouched."""
+    from ktnmgr.enclosure import ses as ses_module
+
+    victim = tmp_path / "victim"
+    victim.write_text("not a lock\n")
+    victim.chmod(0o640)
+    lock = tmp_path / "enclosure.lock"
+    lock.symlink_to(victim)
+
+    class _Proc:
+        returncode = 0
+        stdout = "page text"
+        stderr = ""
+
+    monkeypatch.setattr(ses_module.subprocess, "run", lambda *_a, **_k: _Proc())
+    runner = ses_module.SesRunner(binary="/usr/bin/sg_ses", lock_path=lock)
+
+    assert runner.read_page("/dev/sg16", "join").stdout == "page text"
+    assert _mode(victim) == 0o640
+
+
+def test_refusal_is_logged_as_an_error_naming_the_path(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Tampering is a security event, not routine degradation: it is logged
+    at ERROR, once per path, and says what was found there."""
+    import logging
+
+    lock = tmp_path / "enclosure.lock"
+    lock.symlink_to(tmp_path / "elsewhere")
+
+    with caplog.at_level(logging.WARNING, logger="ktnmgr.enclosure.access"):
+        for _ in range(3):
+            with enclosure_access(lock):
+                pass
+
+    records = [r for r in caplog.records if str(lock) in r.getMessage()]
+    assert len(records) == 1, f"expected one log line, got {len(records)}"
+    assert records[0].levelno == logging.ERROR
+    assert "symlink" in records[0].getMessage()
+
+
+def test_pre_existing_regular_lock_is_used_and_its_mode_repaired(tmp_path: Path) -> None:
+    """The ordinary restart case: the file is already there. Its owner (this
+    process) may have created it under a restrictive umask, and the chmod
+    that makes it shareable must still happen."""
+    lock = tmp_path / "enclosure.lock"
+    lock.write_bytes(b"")
+    lock.chmod(0o600)
+
+    with enclosure_access(lock) as held:
+        assert held is True
+
+    assert _mode(lock) == 0o666
+
+
+def test_pre_existing_lock_owned_by_another_uid_is_used_but_not_chmodded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Root opening the web process's file (or the reverse) must still take
+    the lock, and must not try to chmod a file it does not own: that file's
+    mode is its creator's business, and in the container (no CAP_FOWNER)
+    the chmod could only fail anyway."""
+    import os
+
+    lock = tmp_path / "enclosure.lock"
+    lock.write_bytes(b"")
+    lock.chmod(0o646)
+    owner = os.stat(lock).st_uid
+    monkeypatch.setattr(os, "geteuid", lambda: owner + 1)
+
+    with enclosure_access(lock) as held:
+        assert held is True
+
+    assert _mode(lock) == 0o646, "a lock owned by another uid was chmod'ed"
+
+
 def test_settings_lock_path_prefers_the_explicit_override(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
