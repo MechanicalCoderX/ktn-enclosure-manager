@@ -2,10 +2,12 @@
 
 truenas/client.py turns http:// into ws:// and sends the key in
 auth.login_with_api_key on every new socket, so with an http:// URL the key
-crosses the network unencrypted. That stays allowed (refusing it would break
-a deployment that works today), but it is no longer silent: one WARNING at
-startup naming the scheme and host. The key, any userinfo and the path never
-appear in it. Every URL and key here is synthetic.
+crosses the network unencrypted - and TrueNAS documents that it revokes a
+user-linked key presented that way. This branch only warns: one WARNING at
+startup naming the scheme and host. The key, the path and query never appear
+in it, and when the URL contains "@" the host is withheld as well, because
+urlsplit's hostname of a userinfo holding "/", "?" or "#" is the username or
+part of a token. Every URL and key here is synthetic.
 """
 
 from __future__ import annotations
@@ -62,6 +64,8 @@ def test_plain_scheme_with_a_key_warns(
     assert "nas.example.invalid" in message
     assert url.split(":", 1)[0].lower() + "://" in message
     assert "KTN_TRUENAS_URL" in message and "https://" in message
+    # The vendor's own statement is cited, not paraphrased as "may".
+    assert "revokes" in message and "truenas.com/docs/scale/25.10/api" in message
 
 
 @pytest.mark.parametrize("url", ["https://nas.example.invalid", "wss://nas.example.invalid"])
@@ -96,12 +100,49 @@ def test_the_key_and_userinfo_never_reach_the_log(
     with caplog.at_level(logging.DEBUG):
         assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is True
     text = "\n".join(r.getMessage() for r in caplog.records)
-    assert caplog.records, "control: nothing was logged, so this proves nothing"
-    assert "nas.example.invalid" in text, "control: the host should be named"
+    assert len(warnings(caplog)) == 1, "control: the warning was not logged"
+    assert "host withheld" in text, "control: the userinfo guard did not run"
     assert KEY not in text
     assert USERINFO_SECRET not in text
     assert "svc" not in text
     assert "/private/path" not in text
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # urlsplit ends the netloc at the first "/", "?" or "#", so for these
+        # its hostname is the username or the front of a token, lowercased.
+        f"http://root:pa/{USERINFO_SECRET}@nas.example.invalid/",
+        f"http://root{USERINFO_SECRET}:pa/ss@nas.example.invalid/",
+        f"http://{USERINFO_SECRET}AbC/dEf+==@nas.example.invalid/",
+        f"http://{USERINFO_SECRET}:x?y@nas.example.invalid/",
+        f"http://{USERINFO_SECRET}:x#y@nas.example.invalid/",
+        f"ws://{USERINFO_SECRET}/tok@nas.example.invalid/",
+        f"  http://{USERINFO_SECRET}/tok@nas.example.invalid/",
+    ],
+)
+def test_userinfo_with_a_delimiter_never_reaches_the_log(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, url: str
+) -> None:
+    with caplog.at_level(logging.DEBUG):
+        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is True
+    found = warnings(caplog)
+    assert len(found) == 1, "control: the warning was not logged"
+    text = "\n".join(r.getMessage() for r in caplog.records).lower()
+    assert USERINFO_SECRET.lower() not in text
+    assert "root" not in text
+    assert "host withheld" in text
+
+
+def test_an_at_sign_only_in_the_path_still_withholds_the_host(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Conservative: any "@" withholds; the warning itself still fires."""
+    url = "http://nas.example.invalid/a@b"
+    with caplog.at_level(logging.DEBUG):
+        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is True
+    assert "host withheld" in "\n".join(warnings(caplog))
 
 
 def test_an_unparsable_host_is_not_echoed(

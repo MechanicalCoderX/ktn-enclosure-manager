@@ -16,11 +16,13 @@ against itself. Every URL here is synthetic.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Self
 
 import httpx
 import pytest
 from ktnmgr.config import Settings
+from ktnmgr.main import build_app
 from ktnmgr.models import Bay, SlotHealth, ZfsInfo
 from ktnmgr.services.notify import HealthNotifier
 from pydantic import ValidationError
@@ -36,7 +38,8 @@ ENCLOSURE = "0x50060480aabbcc00"
 #: because the text style names the slot that way.
 IDENTIFYING = (SERIAL, DEVICE, POOL, VDEV, ENCLOSURE, "SES slot")
 
-# Captured at 1549236 (scratch-L5L6/golden.py): httpx.Request(...).content.
+# Captured by running the code at 1549236 (before KTN_ALERT_DETAIL existed)
+# and recording httpx.Request(...).content for each message.
 GOLDEN_TEXT = {
     "failed": (
         b"Bay 8 (SES slot 7), serial K1A00008, /dev/sdq, tank/raidz3-0, ZFS FAULTED, "
@@ -79,6 +82,76 @@ def make_bay(health: SlotHealth) -> Bay:
     bay.disk.serial = SERIAL
     bay.smart.temperature_c = 41.4
     return bay
+
+
+def _no_serial(health: SlotHealth) -> Bay:
+    bay = make_bay(health)
+    bay.disk.serial = None
+    return bay
+
+
+def _no_pool(health: SlotHealth) -> Bay:
+    """No TrueNAS data: no pool, vdev or errors, and ZFS state UNKNOWN."""
+    bay = make_bay(health)
+    bay.zfs = ZfsInfo()
+    return bay
+
+
+def _no_temperature_no_device(health: SlotHealth) -> Bay:
+    bay = make_bay(health)
+    bay.smart.temperature_c = None
+    bay.device = None
+    bay.zfs.read_errors = bay.zfs.checksum_errors = 0
+    return bay
+
+
+#: More shapes, each alerted on first sight (no "was:" line, previous null).
+SHAPES = {
+    "no-serial": (_no_serial, SlotHealth.WARNING),
+    "no-pool": (_no_pool, SlotHealth.FAILED),
+    "no-temperature-no-device": (_no_temperature_no_device, SlotHealth.FAILED),
+}
+
+# Captured at 1549236 like the goldens above: (text body, headers, json body).
+GOLDEN_SHAPES: dict[str, tuple[bytes, dict[str, str], bytes]] = {
+    'no-pool': (
+        (
+            b'Bay 8 (SES slot 7), serial K1A00008, /dev/sdq, 41C'
+        ),
+        {'Title': 'Bay 8 is FAILED', 'Priority': 'urgent', 'Tags': 'rotating_light'},
+        (
+            b'{"title":"Bay 8 is FAILED","message":"Bay 8 (SES slot 7), serial K1A00008, /dev/sdq'
+            b', 41C","health":"failed","previous":null,"enclosure":"0x50060480aabbcc00","bay":8,"'
+            b'ses_slot":7,"serial":"K1A00008","device":"/dev/sdq","pool":null,"vdev":null,"zfs_st'
+            b'ate":"UNKNOWN"}'
+        ),
+    ),
+    'no-serial': (
+        (
+            b'Bay 8 (SES slot 7), /dev/sdq, tank/raidz3-0, ZFS FAULTED, errors read=3 cksum=12, 4'
+            b'1C'
+        ),
+        {'Title': 'Bay 8 is WARNING', 'Priority': 'high', 'Tags': 'warning'},
+        (
+            b'{"title":"Bay 8 is WARNING","message":"Bay 8 (SES slot 7), /dev/sdq, tank/raidz3-0,'
+            b' ZFS FAULTED, errors read=3 cksum=12, 41C","health":"warning","previous":null,"encl'
+            b'osure":"0x50060480aabbcc00","bay":8,"ses_slot":7,"serial":null,"device":"/dev/sdq",'
+            b'"pool":"tank","vdev":"raidz3-0","zfs_state":"FAULTED"}'
+        ),
+    ),
+    'no-temperature-no-device': (
+        (
+            b'Bay 8 (SES slot 7), serial K1A00008, tank/raidz3-0, ZFS FAULTED'
+        ),
+        {'Title': 'Bay 8 is FAILED', 'Priority': 'urgent', 'Tags': 'rotating_light'},
+        (
+            b'{"title":"Bay 8 is FAILED","message":"Bay 8 (SES slot 7), serial K1A00008, tank/rai'
+            b'dz3-0, ZFS FAULTED","health":"failed","previous":null,"enclosure":"0x50060480aabbcc'
+            b'00","bay":8,"ses_slot":7,"serial":"K1A00008","device":null,"pool":"tank","vdev":"ra'
+            b'idz3-0","zfs_state":"FAULTED"}'
+        ),
+    ),
+}
 
 
 @pytest.fixture
@@ -135,6 +208,22 @@ async def test_full_json_is_byte_identical_to_before(
     assert len(captured) == 2
     for sent, which in zip(captured, ("failed", "ok"), strict=True):
         assert wire_bytes(sent) == GOLDEN_JSON[which]
+
+
+@pytest.mark.parametrize("shape", sorted(SHAPES))
+@pytest.mark.parametrize("explicit", [False, True], ids=["default", "explicit-full"])
+async def test_full_is_byte_identical_to_before_for_more_shapes(
+    captured: list, shape: str, explicit: bool
+) -> None:
+    build, health = SHAPES[shape]
+    text, headers, body = GOLDEN_SHAPES[shape]
+    kwargs = {"detail": "full"} if explicit else {}
+    await HealthNotifier(URL, style="ntfy", **kwargs).evaluate([build(health)])
+    await HealthNotifier(URL, style="json", **kwargs).evaluate([build(health)])
+    assert len(captured) == 2
+    assert wire_bytes(captured[0]) == text
+    assert captured[0]["headers"] == headers
+    assert wire_bytes(captured[1]) == body
 
 
 # ------------------------------------------------------------------ minimal
@@ -221,7 +310,24 @@ def test_setting_accepts_both_values_in_any_case(raw: str, expected: str) -> Non
     assert settings(alert_detail=raw).alert_detail == expected
 
 
-@pytest.mark.parametrize("raw", ["minimial", "none", "", "redacted", "0"])
+@pytest.mark.parametrize("raw", ["", " ", "\t"], ids=["empty", "space", "tab"])
+def test_an_empty_value_means_the_default(raw: str) -> None:
+    """Like KTN_TLS_ENABLED, and like compose's ${KTN_ALERT_DETAIL:-full}.
+
+    `docker run -e KTN_ALERT_DETAIL=` or an empty catalog additional_env
+    must not crash-loop the container over an alerting setting.
+    """
+    assert settings(alert_detail=raw).alert_detail == "full"
+
+
+def test_an_empty_environment_value_means_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KTN_ALERT_DETAIL", "")
+    assert Settings(_env_file=None).alert_detail == "full"
+
+
+@pytest.mark.parametrize("raw", ["minimial", "none", "redacted", "0", "full minimal"])
 def test_setting_refuses_an_unknown_value(raw: str) -> None:
     with pytest.raises(ValidationError, match="KTN_ALERT_DETAIL must be"):
         settings(alert_detail=raw)
@@ -230,3 +336,21 @@ def test_setting_refuses_an_unknown_value(raw: str) -> None:
 def test_setting_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KTN_ALERT_DETAIL", "minimal")
     assert Settings(_env_file=None).alert_detail == "minimal"
+
+
+# -------------------------------------------------------------------- wiring
+
+
+@pytest.mark.parametrize("detail", ["minimal", "full"])
+def test_build_app_passes_alert_detail_to_the_notifier(tmp_path: Path, detail: str) -> None:
+    """The one line in main.build_app that makes the setting do anything.
+
+    Without it the notifier silently keeps its default (full) while the
+    operator believes the inventory is hidden; nothing else would go red.
+    """
+    s = Settings(
+        _env_file=None, data_dir=tmp_path / "d", sysfs_root=tmp_path / "s",
+        dev_root=tmp_path / "v", ident_method="sysfs",
+        alert_webhook_url=URL, alert_detail=detail,
+    )
+    assert build_app(s).state.service.notifier.detail == detail
