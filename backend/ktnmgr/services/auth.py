@@ -17,6 +17,7 @@ import os
 import re
 import secrets
 import stat
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -49,6 +50,60 @@ RESERVED_USERNAMES = frozenset({"anonymous"})
 #: entries - and the audit log is the record that is meant to establish what
 #: actually happened.
 USERNAME_RE = re.compile(r"[A-Za-z0-9._@-]{1,64}")
+
+ACCOUNT_EXISTS = "an administrator account already exists"
+
+#: One lock per account file, shared by every AuthService in this process that
+#: points at it.
+#:
+#: Every account change is a read-modify-write of one JSON file, and the
+#: routes that make them are plain ``def`` endpoints that FastAPI runs on a
+#: threadpool - so two of them really do run at once. Unserialised, two
+#: first-run bootstraps both saw "no accounts", both answered ``{"ok": true}``
+#: and the second silently replaced the first administrator; concurrent
+#: revocations lost epoch bumps; and a login's opportunistic rehash could write
+#: back the account list it read before a password change, undoing it.
+#:
+#: Keyed by path rather than held per instance so that two services on the
+#: same file (tests build several) still exclude each other.
+#:
+#: In-process only, deliberately: the web app is the only writer of this file
+#: and runs as a single uvicorn process (the entrypoint passes no --workers;
+#: the privileged helper never imports this module). A second process writing
+#: it is not a supported configuration - the login rate limiter is
+#: per-process too - and even then the unique temp file below keeps every
+#: write whole, so the worst case is last-writer-wins, never a torn file.
+_account_locks: dict[str, threading.Lock] = {}
+_account_locks_guard = threading.Lock()
+
+
+def _account_lock(path: Path) -> threading.Lock:
+    key = os.path.realpath(path)
+    with _account_locks_guard:
+        lock = _account_locks.get(key)
+        if lock is None:
+            lock = _account_locks[key] = threading.Lock()
+        return lock
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Make a rename inside ``directory`` durable. Best effort.
+
+    Without it a power cut shortly after the replace can bring back the
+    previous account file - the previous password, the previous session
+    epoch. Not every filesystem lets a directory be fsync'ed, and failing the
+    write over it would be worse than the risk it addresses.
+    """
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError as exc:
+        log.debug("could not fsync %s: %s", directory, exc)
+    finally:
+        os.close(fd)
 
 
 def _tighten(path: Path) -> None:
@@ -151,6 +206,10 @@ class AuthService:
         rate_window: int,
     ) -> None:
         self.users_path = Path(users_path)
+        #: Held across every read-modify-write of the account file; see
+        #: _account_locks. Plain reads do not take it: the file is only ever
+        #: swapped in whole, so a reader sees the old version or the new one.
+        self._accounts_lock = _account_lock(self.users_path)
         self.secret_path = Path(secret_path)
         self.max_age_seconds = max_age_seconds
         self.hasher = PasswordHasher()
@@ -216,16 +275,40 @@ class AuthService:
         return data
 
     def _write_users(self, users: dict[str, dict[str, str]]) -> None:
-        """Replace the account file atomically, never world-readable.
+        """Replace the account file atomically and durably, never world-readable.
 
-        The mode is set by os.open rather than a chmod after the fact: writing
-        first and tightening afterwards leaves the password hashes readable to
-        every local user for the width of that window.
+        The caller holds ``self._accounts_lock``: this is the write half of a
+        read-modify-write.
+
+        - The temp file is unique to this write. Every writer used to share one
+          ``users.tmp``: two at once truncated each other's half-written copy,
+          the copy renamed into place could still be written to after it had
+          become the live file, and the second rename failed outright. Readers
+          then saw invalid JSON, which fails closed - everyone locked out.
+        - It is 0600 from creation (mkstemp), pinned with fchmod whatever the
+          umask: writing first and tightening afterwards leaves the password
+          hashes readable to every local user for the width of that window.
+        - It is fsync'ed before the rename, so a crash cannot swap in an empty
+          or truncated file - which would also fail closed.
+        - It is removed again if anything fails before the rename, because it
+          holds the same hashes as the real file.
         """
-        self.users_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.users_path.with_suffix(".tmp")
-        _write_private(tmp, json.dumps(users, indent=1))
-        tmp.replace(self.users_path)
+        directory = self.users_path.parent
+        directory.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(users, indent=1).encode("utf-8")
+        fd, name = tempfile.mkstemp(dir=directory, prefix=f"{self.users_path.name}.", suffix=".tmp")
+        tmp = Path(name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                os.fchmod(handle.fileno(), 0o600)
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, self.users_path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        _fsync_directory(directory)
 
     @property
     def needs_bootstrap(self) -> bool:
@@ -241,12 +324,23 @@ class AuthService:
             return False
 
     def bootstrap(self, username: str, password: str) -> None:
-        """Create the first administrator. Refuses once any account exists."""
+        """Create the first administrator. Refuses once any account exists.
+
+        Checked twice. This first check keeps the existing answer for a closed
+        bootstrap, whatever else is wrong with the request. The second one
+        decides: it runs under the account lock immediately before the write,
+        so two bootstraps that both got past this one - the Argon2 hash between
+        check and write is tens of milliseconds wide - cannot both succeed. The
+        loser gets the same refusal as any bootstrap once an account exists.
+        """
         if not self.needs_bootstrap:
-            raise AuthError("an administrator account already exists")
-        self.create_user(username, password)
+            raise AuthError(ACCOUNT_EXISTS)
+        self._create_user(username, password, only_if_first=True)
 
     def create_user(self, username: str, password: str) -> None:
+        self._create_user(username, password, only_if_first=False)
+
+    def _create_user(self, username: str, password: str, *, only_if_first: bool) -> None:
         username = (username or "").strip()
         if not USERNAME_RE.fullmatch(username or ""):
             # An allow-list, not a length-and-isascii check. The previous test
@@ -266,16 +360,22 @@ class AuthService:
             raise AuthError(f"the username {username!r} is reserved")
         if len(password or "") < MIN_PASSWORD_LENGTH:
             raise AuthError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
-        users = self._read_users()
-        users[username] = {
-            "password_hash": self.hasher.hash(password),
-            "created_at": datetime.now(UTC).isoformat(),
-            # Bumped whenever every existing session for this user must stop
-            # being accepted. Carried in the session cookie and compared on
-            # each request.
-            "session_epoch": 0,
-        }
-        self._write_users(users)
+        # Hashed before the lock is taken: Argon2 is the slow part and touches
+        # no shared state.
+        password_hash = self.hasher.hash(password)
+        with self._accounts_lock:
+            if only_if_first and not self.needs_bootstrap:
+                raise AuthError(ACCOUNT_EXISTS)
+            users = self._read_users()
+            users[username] = {
+                "password_hash": password_hash,
+                "created_at": datetime.now(UTC).isoformat(),
+                # Bumped whenever every existing session for this user must stop
+                # being accepted. Carried in the session cookie and compared on
+                # each request.
+                "session_epoch": 0,
+            }
+            self._write_users(users)
         log.info("created account %s", username)
 
     def change_password(self, username: str, current: str, new: str) -> None:
@@ -285,19 +385,28 @@ class AuthService:
         changed their password - which is the one action a user takes when they
         suspect compromise, so it has to be the action that ends the attacker's
         access.
+
+        All of it runs under the account lock, verification included, because
+        "replace the password if it is still ``current``" has to be one step.
+        It used to read the account list, spend its Argon2 time, then write
+        back what it had read: revocations landing in between were discarded,
+        and a revocation or login rehash that had read earlier could write the
+        old password back over this change. Account changes are rare, so
+        holding the lock across the hashing costs nothing that matters; plain
+        sign-ins never take it.
         """
-        self.verify(username, current)
-        if len(new or "") < MIN_PASSWORD_LENGTH:
-            raise AuthError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
-        # Checked here and not only in the browser: a password change made
-        # because the old one was exposed has to actually change it, and the
-        # UI is not a control.
-        if new == current:
-            raise AuthError("new password must differ from the current one")
-        users = self._read_users()
-        users[username]["password_hash"] = self.hasher.hash(new)
-        users[username]["session_epoch"] = self._epoch_of(users[username]) + 1
-        self._write_users(users)
+        with self._accounts_lock:
+            users, record = self._check_password(username, current)
+            if len(new or "") < MIN_PASSWORD_LENGTH:
+                raise AuthError(f"password must be at least {MIN_PASSWORD_LENGTH} characters")
+            # Checked here and not only in the browser: a password change made
+            # because the old one was exposed has to actually change it, and
+            # the UI is not a control.
+            if new == current:
+                raise AuthError("new password must differ from the current one")
+            record["password_hash"] = self.hasher.hash(new)
+            record["session_epoch"] = self._epoch_of(record) + 1
+            self._write_users(users)
 
     @staticmethod
     def _epoch_of(record: dict[str, object]) -> int:
@@ -313,13 +422,28 @@ class AuthService:
 
     def revoke_sessions(self, username: str) -> None:
         """End every session for a user without changing their password."""
-        users = self._read_users()
-        if username not in users:
-            raise AuthError("no such account")
-        users[username]["session_epoch"] = self._epoch_of(users[username]) + 1
-        self._write_users(users)
+        with self._accounts_lock:
+            users = self._read_users()
+            if username not in users:
+                raise AuthError("no such account")
+            users[username]["session_epoch"] = self._epoch_of(users[username]) + 1
+            self._write_users(users)
 
     def verify(self, username: str, password: str) -> str:
+        _, record = self._check_password(username, password)
+        verified_hash = record["password_hash"]
+        if self.hasher.check_needs_rehash(verified_hash):
+            self._rehash(username, password, verified_hash)
+        return username
+
+    def _check_password(
+        self, username: str, password: str
+    ) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+        """Verify a password; return the account list and the matching record.
+
+        The record is the one inside the returned list, so a caller holding
+        the account lock can change it and write the list back.
+        """
         users = self._read_users()
         record = users.get(username or "")
         if record is None:
@@ -330,12 +454,27 @@ class AuthService:
             self.hasher.verify(record["password_hash"], password or "")
         except (VerifyMismatchError, InvalidHashError, KeyError) as exc:
             raise AuthError("invalid credentials") from exc
+        return users, record
 
-        if self.hasher.check_needs_rehash(record["password_hash"]):
-            record["password_hash"] = self.hasher.hash(password)
-            users[username] = record
+    def _rehash(self, username: str, password: str, verified_hash: str) -> None:
+        """Upgrade a hash made with older Argon2 parameters - without losing a
+        concurrent change.
+
+        Sign-in does not hold the account lock, or every login would queue
+        behind Argon2. So the new hash is computed first, and written only if
+        the stored hash is still the one just verified. The rehash used to
+        write back the whole account list it had read before verifying: a
+        password change that landed in between was undone, the old password
+        and the old session epoch with it.
+        """
+        new_hash = self.hasher.hash(password)
+        with self._accounts_lock:
+            users = self._read_users()
+            record = users.get(username)
+            if record is None or record.get("password_hash") != verified_hash:
+                return
+            record["password_hash"] = new_hash
             self._write_users(users)
-        return username
 
     # --------------------------------------------------------------- sessions
 
