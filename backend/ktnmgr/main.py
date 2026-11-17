@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ktnmgr import __version__
 from ktnmgr.api.routes import router
-from ktnmgr.config import Settings, check_tls_marker, get_settings
+from ktnmgr.config import Settings, check_tls_marker, check_truenas_transport, get_settings
 from ktnmgr.enclosure.disks import DiskInfoReader
 from ktnmgr.enclosure.helper_client import HelperUnavailableError
 from ktnmgr.enclosure.helper_client import send as helper_send
@@ -101,6 +101,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             ca_bundle=settings.truenas_ca_bundle,
             rest_fallback=settings.truenas_rest_fallback,
         )
+        check_truenas_transport(settings)
     else:
         log.warning("TrueNAS not configured; pool, vdev and SMART data will be unavailable")
 
@@ -109,9 +110,13 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         style=settings.alert_style,
         state_path=settings.notify_state_path,
         notify_recovery=settings.alert_on_recovery,
+        detail=settings.alert_detail,
     )
     if notifier.enabled:
-        log.info("health notifications enabled (%s)", settings.alert_style)
+        log.info(
+            "health notifications enabled (%s, %s detail)",
+            settings.alert_style, settings.alert_detail,
+        )
 
     service = StateService(
         settings=settings, backend=backend, disks=disks, ses=ses, ident=ident,
