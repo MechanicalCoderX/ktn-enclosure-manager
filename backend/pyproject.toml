@@ -23,8 +23,11 @@ dev = [
     # Exact pin, unlike the floors above: this install IS the CI type-check
     # gate (verify.yml runs mypy from it), so a new mypy release cannot turn
     # the gate red on an unchanged commit, and local runs match CI. Bump it
-    # deliberately; Dependabot's pip entry for /backend sees this line.
+    # deliberately; Dependabot's /backend entry sees this line.
     "mypy==2.4.1",
+    # Imported by tests; declared rather than left to arrive transitively.
+    "packaging>=24",
+    "pyyaml>=6.0",
 ]
 
 [build-system]

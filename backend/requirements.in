@@ -1,0 +1,13 @@
+# The image's runtime dependencies, compiled into requirements.txt (a
+# hash-pinned lock) for the interpreter the image runs. A copy of
+# pyproject.toml's [project].dependencies: Dependabot regenerates a compiled
+# lock only from a .in file. tests/test_image_build_inputs.py fails if the two
+# lists differ. Regenerate command: CONTRIBUTING.md, "Dependency lock".
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+pydantic-settings>=2.6
+httpx>=0.27
+websockets>=13.0
+argon2-cffi>=23.1
+itsdangerous>=2.2
