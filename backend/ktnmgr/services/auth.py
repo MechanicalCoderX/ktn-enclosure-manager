@@ -466,6 +466,13 @@ class AuthService:
             if only_if_first and not self.needs_bootstrap:
                 raise AuthError(ACCOUNT_EXISTS)
             users = self._read_users()
+            if username in users:
+                # Never replace an account: a fresh record resets
+                # session_epoch to 0, which would revive every epoch-0 cookie
+                # for this name still inside its max age, including sessions
+                # a password change or "sign out everywhere" had ended. Checked
+                # under the lock, against the file as it is now.
+                raise AuthError(f"an account named {username!r} already exists")
             users[username] = {
                 "password_hash": password_hash,
                 "created_at": datetime.now(UTC).isoformat(),
