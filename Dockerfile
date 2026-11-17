@@ -58,23 +58,28 @@ WORKDIR /app
 # lock"). Without it every build resolved whatever PyPI served that day, so two
 # builds of the same commit - and a rollback - shipped different libraries.
 COPY backend/ /app/backend/
-# Install the lock (every file checked against its recorded hash), then the
-# project itself with --no-deps so no runtime dependency outside the lock can
-# come in, then `pip check` to fail the build if the lock no longer covers the
-# names and versions pyproject declares (it does not check extras such as
-# uvicorn[standard]; CI's scripts/check-lock.sh covers those). Not covered by
-# the hashes: the build backends pip fetches to build PyYAML's sdist and the
-# project (setuptools, Cython) - newest at build time, run here, and their
-# output ships. Then remove pip itself. Nothing needs it at runtime - the image is
-# immutable and rebuilt from source - and it is not dead weight but live
-# attack surface: pip vendors its own copies of libraries (msgpack, setuptools)
-# which show up as HIGH findings in an image scan and would be usable by
-# anyone who got code execution in the container.
+# Install the lock (every file checked against its recorded hash) from wheels
+# only: every pin has a cp315 wheel for amd64 and arm64, so nothing in it is
+# built here, and a future pin without one fails the build rather than running
+# a build backend nobody hashed. Then the project itself with --no-deps so no
+# runtime dependency outside the lock can come in, then `pip check` to fail
+# the build if the lock no longer covers the names and versions pyproject
+# declares (pyproject uses no extras, so that is every runtime package). Not
+# covered by the hashes: the project's own build backend, setuptools, which
+# pip fetches into an isolated build environment - newest release matching
+# [build-system].requires at build time, run here as root, not left in the
+# image, but the project wheel it builds ships. Then remove pip itself.
+# Nothing needs it at runtime - the image is immutable and rebuilt from
+# source - and it is not dead weight but live attack surface: pip vendors its
+# own copies of libraries (msgpack, setuptools) which show up as HIGH findings
+# in an image scan and would be usable by anyone who got code execution in the
+# container.
 #
 # Only that last step may fail, hence the parentheses. Written as
 # `A && B || true`, the `|| true` also swallowed a failed install: the build
 # succeeded and the image had no fastapi or uvicorn.
-RUN pip install --no-cache-dir --require-hashes -r /app/backend/requirements.txt \
+RUN pip install --no-cache-dir --require-hashes --only-binary :all: \
+    -r /app/backend/requirements.txt \
  && pip install --no-cache-dir --no-deps /app/backend \
  && pip check \
  && (pip uninstall -y pip 2>/dev/null || true)

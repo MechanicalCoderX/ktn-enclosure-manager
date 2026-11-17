@@ -6,7 +6,14 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
     "fastapi>=0.115",
-    "uvicorn[standard]>=0.32",
+    # Not uvicorn[standard]: pip check ignores extras, and [standard] also
+    # brought PyYAML (no cp315 wheel, so the image built it from source)
+    # and watchfiles (--reload only). These two are the parts the server
+    # uses; uvicorn picks them up on its own (--loop/--http auto).
+    # websockets, below, is the TrueNAS client's transport.
+    "uvicorn>=0.32",
+    "uvloop>=0.15.1; sys_platform != 'win32' and sys_platform != 'cygwin' and platform_python_implementation != 'PyPy'",
+    "httptools>=0.8.0",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "httpx>=0.27",
