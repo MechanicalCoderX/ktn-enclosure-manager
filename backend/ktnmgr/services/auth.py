@@ -11,6 +11,7 @@ administrator sets the password in the browser.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -69,13 +70,27 @@ ACCOUNT_EXISTS = "an administrator account already exists"
 #: same file (tests build several) still exclude each other.
 #:
 #: In-process only, deliberately: the web app is the only writer of this file
-#: and runs as a single uvicorn process (the entrypoint passes no --workers;
-#: the privileged helper never imports this module). A second process writing
-#: it is not a supported configuration - the login rate limiter is
-#: per-process too - and even then the unique temp file below keeps every
-#: write whole, so the worst case is last-writer-wins, never a torn file.
+#: and runs as a single uvicorn process (the entrypoint passes no --workers,
+#: nothing in the image or the app templates sets WEB_CONCURRENCY - which
+#: uvicorn also reads - and the privileged helper never imports this module).
+#: A second process writing it is not a supported configuration - the login
+#: rate limiter is per-process too - and even then the unique temp file below
+#: keeps every write whole, so the worst case is last-writer-wins, never a
+#: torn file.
 _account_locks: dict[str, threading.Lock] = {}
 _account_locks_guard = threading.Lock()
+
+#: A leftover account temp file is removed at startup only once it is at least
+#: this old. Every write renames its temp file into place within milliseconds,
+#: and in this process none can be in flight during the sweep (it holds the
+#: account lock), so the age guard exists for a second process on the same
+#: directory - unsupported, but it must never lose a write to the sweep.
+STALE_TEMP_AGE_SECONDS = 60.0
+
+#: The random part of a tempfile.mkstemp name: 8 characters from this set
+#: (CPython's tempfile._RandomNameSequence). If a future Python changed it, the
+#: sweep would stop matching and remove nothing - a test pins it.
+_MKSTEMP_RANDOM = r"[a-z0-9_]{8}"
 
 
 def _account_lock(path: Path) -> threading.Lock:
@@ -102,7 +117,19 @@ def _fsync_directory(directory: Path) -> None:
     try:
         os.fsync(fd)
     except OSError as exc:
-        log.debug("could not fsync %s: %s", directory, exc)
+        if exc.errno in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
+            # The filesystem does not support fsync on a directory: expected
+            # on some, and nothing the operator can act on.
+            log.debug("could not fsync %s: %s", directory, exc)
+        else:
+            # Anything else (EIO above all) is a storage fault worth seeing.
+            # Still not raised: the new file is already in place and whole.
+            log.warning(
+                "could not fsync %s after replacing the account file; the change "
+                "may not survive a power loss: %s",
+                directory,
+                exc,
+            )
     finally:
         os.close(fd)
 
@@ -232,6 +259,62 @@ class AuthService:
         self._serializer = URLSafeTimedSerializer(
             session_secret or self._load_or_create_secret(), salt="ktn-session"
         )
+        self._sweep_stale_temp_files()
+
+    def _sweep_stale_temp_files(self) -> None:
+        """Remove account temp files a crash left behind. Best effort.
+
+        A process killed between creating its temp file and renaming it into
+        place leaves a ``users.json.<random>.tmp``, and releases before the
+        unique temp file left a fixed-name ``users.tmp``. Nothing reads
+        either, but each holds the password hashes of its moment - including
+        a hash that was changed *because* it leaked - and backups of the data
+        directory carry them on. So at startup, under the account lock:
+
+        - only names that match exactly are touched: the mkstemp pattern
+          _write_users uses, or the legacy ``users.tmp``;
+        - only regular files: never a symlink (not followed, not removed), a
+          directory or anything else;
+        - only once at least STALE_TEMP_AGE_SECONDS old.
+
+        A failure is logged and never stops the app starting.
+        """
+        directory = self.users_path.parent
+        own_temp = re.compile(
+            re.escape(f"{self.users_path.name}.") + _MKSTEMP_RANDOM + re.escape(".tmp")
+        )
+        legacy = self.users_path.with_suffix(".tmp").name
+        with self._accounts_lock:
+            try:
+                entries = list(os.scandir(directory))
+            except FileNotFoundError:
+                return  # first run: no data directory yet, nothing to sweep
+            except OSError as exc:
+                log.warning("could not list %s to remove stale temp files: %s", directory, exc)
+                return
+            now = time.time()
+            for entry in entries:
+                name = entry.name
+                if name == self.users_path.name:
+                    continue
+                if name != legacy and not own_temp.fullmatch(name):
+                    continue
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    continue
+                if now - info.st_mtime < STALE_TEMP_AGE_SECONDS:
+                    continue
+                try:
+                    os.unlink(entry.path)
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    log.warning("could not remove stale account temp file %s: %s", name, exc)
+                    continue
+                log.info("removed stale account temp file %s", name)
 
     # ---------------------------------------------------------------- secrets
 
@@ -306,7 +389,8 @@ class AuthService:
         - It is fsync'ed before the rename, so a crash cannot swap in an empty
           or truncated file - which would also fail closed.
         - It is removed again if anything fails before the rename, because it
-          holds the same hashes as the real file.
+          holds the same hashes as the real file. A crash cannot run that
+          cleanup; the next startup does (_sweep_stale_temp_files).
         """
         directory = self.users_path.parent
         directory.mkdir(parents=True, exist_ok=True)
@@ -508,6 +592,13 @@ class AuthService:
     def _rehash(self, username: str, password: str, verified_hash: str) -> None:
         """Upgrade a hash made with older Argon2 parameters - without losing a
         concurrent change.
+
+        Takes ``_accounts_lock``. Never call it - or verify(), login() or
+        _verify_record(), which reach it - with that lock held: the lock is
+        not re-entrant, so the caller hangs, and only once a rehash is due,
+        i.e. after an Argon2 parameter change, long after its tests passed. Do
+        not make the lock an RLock to "fix" that: the inner write would then
+        overwrite the caller's read-modify-write instead of hanging.
 
         Sign-in does not hold the account lock, or every login would queue
         behind Argon2. So the new hash is computed first, and written only if

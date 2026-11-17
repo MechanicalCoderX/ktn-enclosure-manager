@@ -25,10 +25,12 @@ race happen".
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -545,3 +547,302 @@ def test_account_file_is_flushed_to_disk_before_it_is_swapped_in(
     assert events[replaces[0]] == "replace mode=600", events
     assert stat.S_IMODE((tmp_path / "users.json").stat().st_mode) == 0o600
     assert stray_files(tmp_path) == []
+
+
+def test_account_file_rename_is_made_durable_with_a_directory_fsync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After the rename, the directory itself is fsync'ed: without it a power
+    cut shortly after can bring back the previous account file - the previous
+    password and session epoch."""
+    auth = make_auth(tmp_path)
+    auth.create_user("admin", PASSWORD)
+    events: list[str] = []
+    real_fsync, real_replace = os.fsync, os.replace
+
+    def recording_fsync(fd: int) -> None:
+        events.append("fsync-dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "fsync-file")
+        real_fsync(fd)
+
+    def recording_replace(
+        src: str | os.PathLike[str], dst: str | os.PathLike[str], **kwargs: object
+    ) -> None:
+        events.append("replace")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    monkeypatch.setattr(os, "replace", recording_replace)
+    auth.revoke_sessions("admin")
+    monkeypatch.undo()
+
+    assert events == ["fsync-file", "replace", "fsync-dir"], events
+
+
+@pytest.mark.parametrize(
+    ("err", "warned"),
+    [(errno.EIO, True), (errno.EINVAL, False), (errno.EOPNOTSUPP, False)],
+)
+def test_a_failed_directory_fsync_never_fails_the_write_and_a_real_fault_is_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+    err: int, warned: bool,
+) -> None:
+    """Best effort: the new file is already in place and whole, so the write
+    succeeds whatever the directory fsync says. A filesystem that simply does
+    not fsync directories (EINVAL, EOPNOTSUPP) stays at debug; a storage fault
+    (EIO) is logged as a warning, because it is one an operator should see."""
+    auth = make_auth(tmp_path)
+    auth.create_user("admin", PASSWORD)
+    real_fsync = os.fsync
+
+    def failing_dir_fsync(fd: int) -> None:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(err, os.strerror(err))
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", failing_dir_fsync)
+    with caplog.at_level("DEBUG", logger="ktnmgr.services.auth"):
+        auth.revoke_sessions("admin")
+    monkeypatch.undo()
+
+    assert epoch_on_disk(tmp_path, "admin") == 1, "the write must still land"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING" and "fsync" in r.message]
+    assert bool(warnings) is warned, [(r.levelname, r.message) for r in caplog.records]
+    assert any("fsync" in r.message for r in caplog.records), "control: the failure was seen"
+    assert stray_files(tmp_path) == []
+
+
+# ----------------------------------------- change_password's verify window
+
+
+class VerifyHookedHasher:
+    """Like HookedHasher, but runs ``before_verify`` ahead of each ``verify``."""
+
+    def __init__(self, inner: PasswordHasher, before_verify: Callable[[], None]) -> None:
+        self._inner = inner
+        self._before_verify = before_verify
+
+    def verify(self, hash_: str, password: str) -> bool:
+        self._before_verify()
+        return self._inner.verify(hash_, password)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+
+def test_revocations_during_a_password_changes_verify_are_kept(tmp_path: Path) -> None:
+    """change_password writes back the account list it read before its Argon2
+    VERIFY, so the lock must cover the verify too, not only the new hash.
+    Shrinking it to "just the write" - an obvious-looking optimisation - would
+    lose every revocation that lands during the verify, which the hash-window
+    test above cannot see. Here the revocations are released from inside the
+    password change's verify."""
+    auth = make_auth(tmp_path)
+    auth.create_user("admin", PASSWORD)
+    revokers = 6
+    released = threading.Event()
+    all_back = threading.Barrier(revokers + 1)
+    changer: list[int] = []  # thread ident of the password change
+    errors: list[BaseException] = []
+
+    def hold_the_verify() -> None:
+        if threading.get_ident() in changer:
+            released.set()
+            try:
+                all_back.wait(HOOK_TIMEOUT)
+            except threading.BrokenBarrierError:
+                pass  # correct code: the revokers are queued behind the lock
+
+    auth.hasher = VerifyHookedHasher(fast_hasher(), hold_the_verify)  # type: ignore[assignment]
+
+    def change() -> None:
+        changer.append(threading.get_ident())
+        try:
+            auth.change_password("admin", PASSWORD, NEW_PASSWORD)
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+
+    def revoke() -> None:
+        released.wait(JOIN_TIMEOUT)
+        try:
+            auth.revoke_sessions("admin")
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+        try:
+            all_back.wait(HOOK_TIMEOUT)
+        except threading.BrokenBarrierError:
+            pass
+
+    run_threads([*[revoke for _ in range(revokers)], change])
+
+    assert not errors, f"{errors!r}"
+    auth.hasher = fast_hasher()
+    assert password_works(auth, "admin", NEW_PASSWORD), "the password change was lost"
+    assert epoch_on_disk(tmp_path, "admin") == revokers + 1, (
+        "revocations that landed during the change's verify were lost"
+    )
+    assert stray_files(tmp_path) == []
+
+
+# ------------------------------------------------- leftover temp files
+
+
+#: Old enough for the startup sweep (its threshold is 60 s).
+STALE = 3600.0
+
+
+def age(path: Path, seconds: float) -> Path:
+    """Backdate ``path`` (itself, never a symlink's target)."""
+    when = time.time() - seconds
+    os.utime(path, (when, when), follow_symlinks=False)
+    return path
+
+
+def plant(tmp_path: Path, name: str, seconds: float = STALE) -> Path:
+    path = tmp_path / name
+    path.write_text('{"admin": {"password_hash": "stale"}}', encoding="utf-8")
+    os.chmod(path, 0o600)
+    return age(path, seconds)
+
+
+def test_startup_removes_stale_account_temp_files(tmp_path: Path) -> None:
+    """A crash between creating the temp file and renaming it leaves a copy of
+    the password hashes that nothing reads and nothing removes - including a
+    hash changed because it leaked. Releases before the unique temp file left
+    a fixed-name users.tmp. Both go at startup once they are stale."""
+    make_auth(tmp_path).create_user("admin", PASSWORD)
+    plant(tmp_path, "users.json.k3x_9q2a.tmp")
+    plant(tmp_path, "users.json.abcdefgh.tmp")
+    plant(tmp_path, "users.tmp")
+    assert len(stray_files(tmp_path)) == 3, "control: the leftovers are there"
+
+    auth = make_auth(tmp_path)
+
+    assert stray_files(tmp_path) == []
+    assert password_works(auth, "admin", PASSWORD), "the real account file is untouched"
+
+
+def test_startup_keeps_a_temp_file_that_may_still_be_in_use(tmp_path: Path) -> None:
+    """Younger than the threshold: possibly another writer's in-flight file.
+    Removing it would make that writer's rename fail."""
+    plant(tmp_path, "users.json.k3x_9q2a.tmp", seconds=5)
+    plant(tmp_path, "users.tmp", seconds=5)
+    make_auth(tmp_path)
+    assert stray_files(tmp_path) == ["users.json.k3x_9q2a.tmp", "users.tmp"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "users.json.tmp",  # no random part
+        "users.json.abcdefg.tmp",  # 7 random characters
+        "users.json.abcdefghi.tmp",  # 9
+        "users.json.ABCDEFGH.tmp",  # mkstemp never uses capitals
+        "users.json.abcd-fgh.tmp",  # nor hyphens
+        "users.json.abcdefgh.tmp.bak",
+        "xusers.json.abcdefgh.tmp",
+        "other.json.abcdefgh.tmp",
+        "users.tmp.bak",
+        "users.json.bak",
+        "notes.txt",
+    ],
+)
+def test_startup_never_touches_a_name_that_is_not_exactly_a_temp_file(
+    tmp_path: Path, name: str
+) -> None:
+    plant(tmp_path, name)
+    make_auth(tmp_path)
+    assert (tmp_path / name).exists(), f"{name} was removed"
+
+
+def test_startup_never_follows_or_removes_a_symlink(tmp_path: Path) -> None:
+    """A symlink named like a temp file is left alone, and so is its target -
+    the sweep must not become a way to delete files elsewhere."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    target = plant(elsewhere, "precious")
+    data = tmp_path / "data"
+    data.mkdir()
+    link = data / "users.json.abcdefgh.tmp"
+    link.symlink_to(target)
+    age(link, STALE)
+    legacy_link = data / "users.tmp"
+    legacy_link.symlink_to(target)
+    age(legacy_link, STALE)
+    # Control: a regular stale temp file beside them IS removed, so the sweep ran.
+    plant(data, "users.json.k3x_9q2a.tmp")
+
+    make_auth(data)
+
+    assert not (data / "users.json.k3x_9q2a.tmp").exists(), "control: the sweep did not run"
+    assert link.is_symlink() and legacy_link.is_symlink()
+    assert target.read_text(encoding="utf-8").startswith("{"), "the link's target was touched"
+
+
+def test_startup_never_removes_a_directory_named_like_a_temp_file(tmp_path: Path) -> None:
+    folder = tmp_path / "users.json.abcdefgh.tmp"
+    folder.mkdir()
+    age(folder, STALE)
+    make_auth(tmp_path)
+    assert folder.is_dir()
+
+
+def test_startup_survives_a_temp_file_it_cannot_remove(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    plant(tmp_path, "users.json.abcdefgh.tmp")
+
+    def refuse(path: object, *args: object, **kwargs: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(os, "unlink", refuse)
+    with caplog.at_level("WARNING", logger="ktnmgr.services.auth"):
+        auth = make_auth(tmp_path)
+    monkeypatch.undo()
+
+    assert auth.needs_bootstrap, "the service still came up"
+    assert any("stale account temp file" in r.message for r in caplog.records)
+
+
+def test_startup_with_no_data_directory_yet_is_fine(tmp_path: Path) -> None:
+    auth = AuthService(
+        users_path=tmp_path / "missing" / "users.json",
+        secret_path=tmp_path / "secret",
+        session_secret="fixed-for-the-test",
+        max_age_seconds=3600,
+        rate_limit=5,
+        rate_window=60,
+    )
+    assert auth.needs_bootstrap
+
+
+def test_the_sweep_pattern_matches_the_temp_files_writes_really_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pins the sweep to what tempfile.mkstemp actually names files on this
+    Python. If a future version changed the random part, the sweep would
+    quietly match nothing; this test makes that loud instead."""
+    auth = make_auth(tmp_path)
+    auth.create_user("admin", PASSWORD)
+    seen: list[str] = []
+    real_replace = os.replace
+
+    def keep_the_temp_file(
+        src: str | os.PathLike[str], dst: str | os.PathLike[str], **kwargs: object
+    ) -> None:
+        seen.append(Path(src).name)
+        raise OSError(errno.EIO, "simulated crash before the rename")
+
+    for _ in range(5):
+        monkeypatch.setattr(os, "replace", keep_the_temp_file)
+        monkeypatch.setattr(Path, "unlink", lambda self, missing_ok=False: None)
+        with pytest.raises(OSError):
+            auth.revoke_sessions("admin")
+        monkeypatch.undo()
+    assert os.replace is real_replace
+    assert len(seen) == 5 and sorted(stray_files(tmp_path)) == sorted(seen)
+    for name in seen:
+        age(tmp_path / name, STALE)
+
+    make_auth(tmp_path)
+
+    assert stray_files(tmp_path) == [], f"the sweep missed real temp names: {seen}"
