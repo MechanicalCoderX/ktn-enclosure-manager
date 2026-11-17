@@ -119,6 +119,30 @@ def _truenas_transport_target(url: str) -> tuple[str, str]:
     return scheme, host
 
 
+def truenas_url_for_display(url: str) -> str | None:
+    """KTN_TRUENAS_URL as ``scheme://host[:port]``, for /api/diagnostics.
+
+    Never the path, query, fragment or userinfo: any of them can carry a
+    credential, and diagnostics are made to be copied into bug reports. The
+    host follows _truenas_transport_target (withheld when the URL contains
+    "@"); the port is added only when the host is shown and it parses.
+    None when no URL is configured.
+    """
+    url = url.strip()
+    if not url:
+        return None
+    scheme, host = _truenas_transport_target(url)
+    shown = f"{scheme}://{host}"
+    if "@" not in url and not host.startswith("<"):
+        try:
+            port = urlsplit(url).port
+        except ValueError:
+            port = None
+        if port is not None:
+            shown += f":{port}"
+    return shown
+
+
 def check_truenas_transport(settings: Settings) -> str | None:
     """Decide, once at startup, whether the TrueNAS API key may be sent.
 
