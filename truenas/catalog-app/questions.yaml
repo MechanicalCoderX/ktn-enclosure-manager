@@ -94,7 +94,9 @@ questions:
           description: |
             Leave empty to run without it. The drive map, chassis telemetry and
             IDENT all work without the API; only pool, vdev, ZFS error and SMART
-            data need it.
+            data need it. Use https://, e.g. https://truenas.example.lan:
+            TrueNAS revokes an API key sent over plain http://, so with an
+            http:// URL the app does not send the key and shows why.
           schema:
             type: string
             default: ""
