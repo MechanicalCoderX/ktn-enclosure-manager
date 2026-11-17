@@ -31,8 +31,41 @@ import stat
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
+def _import_path() -> list[str]:
+    """Where this file imports from, as absolute paths, backend first.
+
+    The image starts this file as root with `python -I -S`
+    (docker-entrypoint.sh), as it runs its HEALTHCHECK: PYTHON* variables
+    (PYTHONPATH among them), the user site and the script's own directory are
+    ignored, and `site` does not run, so no .pth file or sitecustomize
+    anywhere executes as root. Anything beyond the standard library is
+    therefore put on the path here: the backend beside this file (ktnmgr),
+    then the directories this interpreter installs packages into, for
+    ktnmgr's third-party dependencies (pydantic, through ktnmgr.models).
+    Putting a directory on sys.path only makes it importable; unlike `site`
+    it executes none of the .pth files in it.
+    """
+    import sysconfig
+
+    backend = Path(__file__).resolve().parent.parent / "backend"
+    # `site` is also what switches a virtual environment to its own prefix,
+    # so under -S a venv (development and tests; the image has none) has to
+    # be recognised here, by the same pyvenv.cfg test the interpreter makes.
+    exe = Path(sys.executable)
+    venv = exe.parent.parent
+    if (exe.parent / "pyvenv.cfg").is_file() or (venv / "pyvenv.cfg").is_file():
+        paths = sysconfig.get_paths("venv", vars={"base": str(venv), "platbase": str(venv)})
+    else:
+        paths = sysconfig.get_paths()
+    return [str(backend), paths["purelib"], paths["platlib"]]
+
+
+_backend, *_packages = _import_path()
+sys.path.insert(0, _backend)
+sys.path.extend(p for p in dict.fromkeys(_packages) if p not in sys.path and os.path.isdir(p))
+
+# These imports need the path set just above.
 from ktnmgr.enclosure.access import default_lock_path
 from ktnmgr.enclosure.locate import (
     LocateError,
