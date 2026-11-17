@@ -14,12 +14,16 @@ mapping - instead of assuming identity.
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from ktnmgr.enclosure.locate import LocateError, SesLocateWriter
 from ktnmgr.enclosure.ses import SesError, SesResult
+from ktnmgr.services.audit import AuditLog
+from ktnmgr.services.ident import IdentManager, IdentRecord
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ktn-stl3"
 SYNTHETIC = Path(__file__).parent / "fixtures" / "synthetic"
@@ -71,6 +75,11 @@ class FakeSes:
         return SesResult(page=page, stdout=self.pages[page], returncode=0)
 
     def set_ident(self, device: str, type_index: int, element_index: int, on: bool) -> None:
+        # The real SesRunner.set_ident builds Path(device) before anything
+        # else, so a None device is a TypeError there, not a quiet success.
+        # Mirrored here so a test that lets None through fails the way
+        # production did, instead of with "DID NOT RAISE".
+        Path(device)
         self.ident_calls.append((device, type_index, element_index, on))
         target = self.wiring.get(element_index)
         if target is not None:
@@ -99,6 +108,9 @@ class FakeBackend:
 
     def read_locate_at(self, path: Path) -> bool:
         return path.read_text().strip() not in ("0", "", "off")
+
+    def read_locate(self, ref: SimpleNamespace, slot: int) -> bool:
+        return self.read_locate_at(self.dirs[slot] / "locate")
 
 
 def _writer(
@@ -244,6 +256,45 @@ def test_sg_device_lost_with_warm_caches_is_a_locate_error(
     writer.backend.ref.sg_device = None  # type: ignore[attr-defined]  # FakeBackend's ref
     with pytest.raises(LocateError, match="no sg device"):
         writer.write(STL3_ID, 4, True)
+    assert ses.ident_calls == calls_before, "a refused IDENT must not reach the enclosure"
+
+
+async def test_auto_clear_with_sg_device_lost_gives_up_after_bounded_attempts(
+    stl3: tuple[SesLocateWriter, FakeSes], tmp_path: Path
+) -> None:
+    """The timer's consequence of the same state. Its retry bookkeeping
+    (backoff, then give up after clear_max_attempts with a loud warning) only
+    catches LocateError and LookupError; a TypeError skipped it and was retried
+    on every tick forever, writing an audit line and a traceback each time.
+    The refusal must be a LocateError so the bounded path engages."""
+    writer, ses = stl3
+    assert writer.write(STL3_ID, 3, True) is True  # warms both caches
+    calls_before = list(ses.ident_calls)
+    writer.backend.ref.sg_device = None  # type: ignore[attr-defined]  # FakeBackend's ref
+
+    audit = AuditLog(tmp_path / "audit.log")
+    manager = IdentManager(writer, audit, tmp_path / "ident.json", tick_seconds=0.02,
+                           clear_max_attempts=3, clear_backoff_seconds=0.01)
+    past = datetime.now(UTC) - timedelta(seconds=20)
+    manager._records[(STL3_ID, 3)] = IdentRecord(
+        enclosure_id=STL3_ID, ses_slot=3, created_by="admin",
+        created_at=past, expires_at=past + timedelta(seconds=10),
+    )
+    manager.start()
+    try:
+        for _ in range(150):
+            await asyncio.sleep(0.02)
+            if manager.record_for(STL3_ID, 3) is None:
+                break
+    finally:
+        await manager.stop()
+
+    assert manager.record_for(STL3_ID, 3) is None, (
+        "the timer must give up after clear_max_attempts, not retry forever"
+    )
+    attempts = [e for e in audit.tail() if e.user == "system:timer"]
+    assert len(attempts) == 3, "exactly clear_max_attempts audited clear attempts"
+    assert all("no sg device" in (e.detail or "") for e in attempts)
     assert ses.ident_calls == calls_before, "a refused IDENT must not reach the enclosure"
 
 

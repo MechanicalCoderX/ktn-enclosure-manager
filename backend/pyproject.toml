@@ -20,7 +20,11 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "ruff>=0.7",
-    "mypy>=1.13",
+    # Exact pin, unlike the floors above: this install IS the CI type-check
+    # gate (verify.yml runs mypy from it), so a new mypy release cannot turn
+    # the gate red on an unchanged commit, and local runs match CI. Bump it
+    # deliberately; Dependabot's pip entry for /backend sees this line.
+    "mypy==2.4.1",
 ]
 
 [build-system]
@@ -40,9 +44,12 @@ ignore = ["S101"]
 
 [tool.mypy]
 python_version = "3.11"
-# Lets helper/ktn_ident_helper.py (checked with the same settings) resolve
-# `ktnmgr`, which it puts on sys.path itself at runtime. CI runs:
-#   mypy --config-file backend/pyproject.toml backend/ktnmgr helper
+# CI runs:  mypy --config-file backend/pyproject.toml backend/ktnmgr helper
+# That command does not need mypy_path: naming backend/ktnmgr puts backend/ on
+# the search path. It is for checking helper/ on its own (e.g. `... helper`):
+# the helper imports `ktnmgr`, which it puts on sys.path itself at runtime, and
+# mypy cannot follow the editable install's import hook. Resolved relative to
+# this file, so it works from any cwd.
 mypy_path = "$MYPY_CONFIG_FILE_DIR"
 warn_unused_ignores = true
 disallow_untyped_defs = true

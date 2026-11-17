@@ -38,6 +38,7 @@ from ktnmgr.enclosure.sysfs import (
     DEFAULT_SETTLE_TIMEOUT,
     SysfsEnclosureBackend,
 )
+from ktnmgr.models import EnclosureRef
 
 log = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ class SesLocateWriter:
         #: cache's key, so even that cannot serve a stale map.
         self._slot_to_element: dict[str, dict[int, int | None]] = {}
 
-    def _array_type_index(self, ref: object) -> tuple[int, int]:
+    def _array_type_index(self, ref: EnclosureRef, device: str) -> tuple[int, int]:
         """Which SES type descriptor holds the drive bays, and how many.
 
         Returns (type index, declared element count), both read from the
@@ -158,11 +159,8 @@ class SesLocateWriter:
         descriptor count disagrees with the configuration page has been
         shifted or truncated, and its positions cannot address anything.
         """
-        logical_id = ref.logical_id  # type: ignore[attr-defined]
+        logical_id = ref.logical_id
         if logical_id not in self._type_index:
-            device = getattr(ref, "sg_device", None)
-            if not device:
-                raise LocateError("enclosure has no sg device for SES IDENT")
             try:
                 page = self.ses.read_page(device, "configuration")
             except SesError as exc:
@@ -175,7 +173,7 @@ class SesLocateWriter:
         return self._type_index[logical_id]
 
     def _slot_element_map(
-        self, ref: object, type_index: int, expected_count: int
+        self, ref: EnclosureRef, device: str, type_index: int, expected_count: int
     ) -> dict[int, int | None]:
         """Device-slot-number -> element-index map for the bay type in use.
 
@@ -185,13 +183,10 @@ class SesLocateWriter:
         prevent. Read once per enclosure logical id (see _slot_to_element for
         why the cache cannot go stale).
         """
-        logical_id = ref.logical_id  # type: ignore[attr-defined]
+        logical_id = ref.logical_id
         if logical_id not in self._slot_to_element:
             try:
-                page = self.ses.read_page(
-                    ref.sg_device,  # type: ignore[attr-defined]
-                    "additional_element_status",
-                )
+                page = self.ses.read_page(device, "additional_element_status")
             except SesError as exc:
                 raise LocateError(
                     f"could not read SES additional element status: {exc}"
@@ -306,7 +301,7 @@ class SesLocateWriter:
         return mapping
 
     def _element_index_for(
-        self, ref: object, type_index: int, expected_count: int, slot: int
+        self, ref: EnclosureRef, device: str, type_index: int, expected_count: int, slot: int
     ) -> int:
         """Translate a sysfs slot number into the element index sg_ses needs.
 
@@ -316,7 +311,7 @@ class SesLocateWriter:
         bay - a wrong "pull this disk" indication. No LED at all is strictly
         safer than the wrong LED.
         """
-        mapping = self._slot_element_map(ref, type_index, expected_count)
+        mapping = self._slot_element_map(ref, device, type_index, expected_count)
         element_index = mapping.get(slot)
         if element_index is not None:
             return element_index
@@ -341,15 +336,18 @@ class SesLocateWriter:
     def write(self, enclosure_id: str, slot: int, on: bool) -> bool:
         enclosure_id, slot = validate_request(enclosure_id, slot)
         ref = self.backend.resolve(enclosure_id)
-        # Checked on every write, not left to _array_type_index: that check
-        # runs only on a cold cache, and the caches are keyed by logical id,
-        # so an enclosure that re-resolves without an sg node after a warm-up
-        # would otherwise hand None to set_ident (a TypeError, not a refusal).
+        # Checked on every write, before either cache is consulted: both are
+        # keyed by logical id, so after a warm-up an enclosure that
+        # re-resolves without an sg node would otherwise reach set_ident with
+        # None (a TypeError from Path(None), not a refusal). The checked
+        # device is then the one every page read and the command use.
         device = ref.sg_device
         if not device:
             raise LocateError("enclosure has no sg device for SES IDENT")
-        type_index, expected_count = self._array_type_index(ref)
-        element_index = self._element_index_for(ref, type_index, expected_count, slot)
+        type_index, expected_count = self._array_type_index(ref, device)
+        element_index = self._element_index_for(
+            ref, device, type_index, expected_count, slot
+        )
 
         # Held across the command AND its settle poll, exactly as the sysfs
         # writer does. This is the default IDENT path, so without it the

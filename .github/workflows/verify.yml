@@ -45,13 +45,14 @@ jobs:
         run: ruff check backend helper tests
 
       - name: Type check
-        # Pinned so a new mypy release cannot turn the gate red on an
-        # unchanged commit; bump it deliberately. 2.4.1 ships cp315 wheels,
-        # so it runs natively on the 3.15 interpreter above. --config-file is
+        # mypy comes from the Install step: it is pinned exactly in
+        # backend/pyproject.toml [dev], the one place its version is set, so
+        # this gate and a local `pip install -e 'backend[dev]'` cannot drift
+        # apart. Do not add a second inline pin here. --config-file is
         # required: run from the repo root without it, mypy finds no config
         # and silently drops disallow_untyped_defs.
         run: |
-          pip install 'mypy==2.4.1'
+          mypy --version
           mypy --config-file backend/pyproject.toml backend/ktnmgr helper
 
       - name: Tests

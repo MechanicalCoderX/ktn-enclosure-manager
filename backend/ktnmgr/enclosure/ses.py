@@ -17,9 +17,12 @@ import shutil
 import subprocess  # noqa: S404 - argv-only, shell=False, allow-listed arguments
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ktnmgr.enclosure.access import enclosure_access
+
+if TYPE_CHECKING:
+    from ktnmgr.models import EnclosureRef
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +101,7 @@ class SesReader(Protocol):
     def binary(self) -> str: ...
     def available(self) -> bool: ...
     def version(self) -> str | None: ...
-    def read_for(self, ref: Any, page: str) -> SesResult: ...
+    def read_for(self, ref: EnclosureRef, page: str) -> SesResult: ...
 
 
 class SesRunner:
@@ -173,12 +176,13 @@ class SesRunner:
             )
         return SesResult(page=page, stdout=proc.stdout, returncode=proc.returncode)
 
-    def read_for(self, ref: Any, page: str) -> SesResult:
+    def read_for(self, ref: EnclosureRef, page: str) -> SesResult:
         """Read a page for a discovered enclosure. Shared interface with
         HelperSesRunner so callers never have to know which one is in use."""
-        if not getattr(ref, "sg_device", None):
+        device = getattr(ref, "sg_device", None)
+        if not device:
             raise SesError("enclosure has no sg device")
-        return self.read_page(ref.sg_device, page)
+        return self.read_page(device, page)
 
     def set_ident(self, device: str, type_index: int, element_index: int, on: bool) -> None:
         """Set or clear one array device slot's identify bit.
@@ -261,7 +265,7 @@ class HelperSesRunner:
                 return None
         return self._version
 
-    def read_for(self, ref: Any, page: str) -> SesResult:
+    def read_for(self, ref: EnclosureRef, page: str) -> SesResult:
         return self.read_page_for(ref.logical_id, page)
 
     def read_page_for(self, enclosure_id: str, page: str) -> SesResult:
