@@ -7,8 +7,8 @@
 # markers, and which packages are in it at all. The two bodies are compared
 # with comments stripped, so a different uv's header or "# via" layout does
 # not count. A hand-edited pin, a dropped or altered hash, a missing package
-# (an extra such as uvloop) or a body compiled for another Python or platform
-# under this header all fail. This is consistency, not freshness: nothing is
+# (say uvloop) or a body compiled for another Python or platform under this
+# header all fail. This is consistency, not freshness: nothing is
 # upgraded. It also fails if PyPI later adds or yanks a file of a pinned
 # version; recompile then (CONTRIBUTING.md, "Dependency lock").
 #

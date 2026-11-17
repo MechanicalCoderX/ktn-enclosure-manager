@@ -8,6 +8,8 @@ Three properties of the Dockerfile that no other test reads:
 - The runtime dependencies are a hash-pinned lock, not whatever PyPI serves on
   the day of the build. Without it a "code-identical" release is not
   dependency-identical, and a rollback is also a dependency rollback (L1).
+  The lock installs from wheels only, so no build backend runs for it, and
+  it names every runtime package (no extras), so `pip check` sees them all.
 - The BuildKit frontend named on line 1 is executed by the publish job, which
   holds a packages:write token; like the base images it is pinned by digest
   (L4).
@@ -20,10 +22,12 @@ lock's body is re-derived from its inputs on every run.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import stat
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -235,6 +239,75 @@ def test_image_installs_the_lock_with_hashes_required() -> None:
     assert re.search(r"pip install [^&|;]*--no-deps[^&|;]*/app/backend(\s|$)", cmd), cmd
 
 
+def _declared() -> list[Requirement]:
+    deps = tomllib.loads((BACKEND / "pyproject.toml").read_text())["project"]["dependencies"]
+    return [Requirement(r) for r in deps]
+
+
+def test_image_lock_install_is_wheels_only() -> None:
+    """No pinned dependency is built from source inside the image.
+
+    The hashes pin an sdist's bytes, but building it runs its build backend
+    (for PyYAML, before ``uvicorn[standard]`` left: setuptools and a native
+    Cython wheel), which pip fetches unhashed, newest at build time, as root
+    in the build container - and the wheel it produces ships. Every pin has a wheel for the image's
+    Python on both architectures, so --only-binary turns a future sdist-only
+    pin into a failed build instead of a silent source build.
+    """
+    cmd = _pip_run_command()
+    lock_install = [s for s in cmd.split("&&") if "-r /app/backend/requirements.txt" in s]
+    assert len(lock_install) == 1, cmd
+    assert re.search(r"--only-binary[ =]:all:(\s|$)", lock_install[0]), lock_install[0]
+    # Present is not the same as in effect: a --no-binary on the same line
+    # (":all:", or the names it lists) switches source builds back on, and
+    # PIP_NO_BINARY does the same from the environment. REVIEW-164 N6: the
+    # mutant `--only-binary :all: --no-binary :all:` passed this test.
+    assert "--no-binary" not in cmd, cmd
+    assert not [i for i in _instructions() if "PIP_NO_BINARY" in i]
+
+
+def test_runtime_dependencies_use_no_extras() -> None:
+    """Every runtime package is named, so the image's `pip check` sees it.
+
+    `pip check` ignores extras: with ``uvicorn[standard]`` declared, a lock
+    missing uvloop or httptools installed and checked clean, and uvicorn then
+    fell back to asyncio and h11 without a word. A plain requirement is seen
+    by `pip check`, by the lock tests above and by the drift test.
+    """
+    with_extras = [str(r) for r in _declared() if r.extras]
+    assert not with_extras, f"declare the packages an extra brings directly: {with_extras}"
+
+
+def test_the_server_stack_is_declared_directly() -> None:
+    """What ``uvicorn[standard]`` brought that the app uses, by name.
+
+    uvloop and httptools are uvicorn's event loop and HTTP parser; uvicorn
+    picks them when installed (``--loop auto``, ``--http auto``). websockets is
+    the TrueNAS JSON-RPC client's transport (ktnmgr/truenas/client.py), and
+    what uvicorn's ``--ws auto`` picks. python-dotenv comes in as a hard
+    requirement of pydantic-settings (``env_file=".env"`` in config.py).
+    Left out on purpose: watchfiles (``--reload`` only) and PyYAML (a YAML
+    ``--log-config`` only, and the one pin with no cp315 wheel).
+    """
+    names = {canonicalize_name(r.name) for r in _declared()}
+    assert {"uvicorn", "uvloop", "httptools", "websockets"} <= names, names
+    pins = _lock_pins()
+    assert {"uvloop", "httptools", "websockets", "python-dotenv"} <= pins.keys(), sorted(pins)
+    assert not {"pyyaml", "watchfiles"} & pins.keys(), sorted(pins)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uvloop does not support Windows")
+def test_uvicorn_auto_selects_uvloop_and_httptools() -> None:
+    """Installed from these dependencies, uvicorn's ``auto`` choices are the
+    same implementations ``[standard]`` gave: httptools and uvloop.
+    """
+    from uvicorn.protocols.http.auto import AutoHTTPProtocol
+    from uvicorn.protocols.http.httptools_impl import HttpToolsProtocol
+
+    assert AutoHTTPProtocol is HttpToolsProtocol
+    assert importlib.util.find_spec("uvloop") is not None, "uvloop is not installed"
+
+
 def test_dependabot_regenerates_the_lock_for_the_image_python() -> None:
     """The uv ecosystem, not pip, owns /backend.
 
@@ -244,7 +317,7 @@ def test_dependabot_regenerates_the_lock_for_the_image_python() -> None:
     satisfies requires-python (>=3.11, so 3.11) with no --universal, and would
     rewrite the lock for an interpreter the image does not run.
 
-    Not covered by this choice: for the eight direct dependencies, which are
+    Not covered by this choice: for the ten direct dependencies, which are
     declared in pyproject.toml, uv still picks the *target version* under that
     same lowest Python. A release that needs Python 3.12+ is never proposed.
     """
