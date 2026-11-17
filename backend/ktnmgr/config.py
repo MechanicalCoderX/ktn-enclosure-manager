@@ -339,6 +339,19 @@ class Settings(BaseSettings):
         ),
     )
 
+    @field_validator("truenas_url", mode="before")
+    @classmethod
+    def _truenas_url_stripped(cls, value: Any) -> Any:
+        # Surrounding whitespace is never part of a URL, and a value that is
+        # only whitespace means "not configured" - everywhere: no client is
+        # built, startup says TrueNAS is not configured, and diagnostics show
+        # no URL. Unstripped, "   " passed main.py's "is a URL set" test and
+        # built a client for a URL that could never connect, with neither a
+        # refusal nor the "not configured" warning (REVIEW-164 N2).
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
     @field_validator("truenas_allow_insecure", mode="before")
     @classmethod
     def _allow_insecure_spelling(cls, value: Any) -> Any:
