@@ -57,9 +57,24 @@ uv pip compile --universal --python-version 3.15 --generate-hashes \
 - Re-running keeps existing pins. Add `--upgrade-package <name>` to move one,
   or `--upgrade` to move everything.
 
+Declare runtime packages by name, never through an extra: the image's
+`pip check` ignores extras, so a package an extra brings could drop out of the
+lock unnoticed. That is why pyproject names `uvloop` and `httptools` instead
+of `uvicorn[standard]`; the extra's other packages are not used (`watchfiles`
+is for `--reload`, PyYAML for a YAML `--log-config`).
+
+The image installs the lock with `--only-binary :all:`, so no pinned
+dependency is built from source there: building one runs a build backend that
+no hash covers. Every pin therefore needs a wheel for the image's Python on
+amd64 and arm64. If a new pin has only a source distribution for that Python,
+the image build fails; pick a version that has wheels, or do without the
+dependency, rather than removing the flag. The project itself is still built
+in the image, by setuptools, which pip fetches unhashed.
+
 `tests/test_image_build_inputs.py` fails if the two lists differ, if a pin
-falls outside pyproject's range, or if the lock's Python differs from the
-image's. `scripts/check-lock.sh` (run in CI, or locally with `uv` on PATH)
+falls outside pyproject's range, if the lock's Python differs from the
+image's, if a runtime dependency uses an extra, or if the lock install allows
+source builds. `scripts/check-lock.sh` (run in CI, or locally with `uv` on PATH)
 recompiles the lock with its own pins held and fails if the body differs, so
 a hand-edited pin or hash, or a lock compiled with other options, is caught.
 
