@@ -1,7 +1,8 @@
 """create_user() refuses an existing username instead of replacing the account.
 
-Replacing it reset ``session_epoch`` to 0, which brought back to life every
-epoch-0 session cookie for that name still inside its max age - including
+Replacing it reset ``session_epoch`` (to 0, before new accounts started at a
+random epoch), which brought back to life every session cookie for that name
+carrying the reset value and still inside its max age - including
 ones that a password change or "sign out everywhere" had ended. No route calls
 create_user() today (first-run setup goes through bootstrap(), which already
 refuses once any account exists), so this closes a trap for future callers
@@ -17,7 +18,12 @@ from typing import Any
 
 import pytest
 from argon2 import PasswordHasher
-from ktnmgr.services.auth import AuthError, AuthService
+from ktnmgr.services.auth import (
+    INITIAL_EPOCH_FLOOR,
+    INITIAL_EPOCH_RANDOM_BITS,
+    AuthError,
+    AuthService,
+)
 
 PASSWORD = "correct horse battery staple"
 OTHER = "a different long password"
@@ -51,8 +57,9 @@ def test_existing_username_is_refused_and_the_account_is_unchanged(tmp_path: Pat
 def test_refusal_does_not_revive_sessions_ended_by_a_revocation(tmp_path: Path) -> None:
     auth = make_auth(tmp_path)
     auth.create_user("admin", PASSWORD)
-    old_token = auth.issue_session("admin")  # epoch 0
-    auth.revoke_sessions("admin")  # epoch 1: old_token is dead
+    initial = json.loads((tmp_path / "users.json").read_text())["admin"]["session_epoch"]
+    old_token = auth.issue_session("admin")  # at the initial epoch
+    auth.revoke_sessions("admin")  # initial + 1: old_token is dead
     assert auth.read_session(old_token) is None
 
     with pytest.raises(AuthError):
@@ -60,7 +67,7 @@ def test_refusal_does_not_revive_sessions_ended_by_a_revocation(tmp_path: Path) 
 
     assert auth.read_session(old_token) is None
     record = json.loads((tmp_path / "users.json").read_text())["admin"]
-    assert record["session_epoch"] == 1
+    assert record["session_epoch"] == initial + 1
 
 
 def test_a_new_username_is_still_created_next_to_an_existing_one(tmp_path: Path) -> None:
@@ -168,7 +175,9 @@ def assert_exactly_one_admin(
     assert refused == ["an account named 'admin' already exists"], f"{label}: {refused!r}"
     accounts = json.loads((directory / "users.json").read_text())
     assert sorted(accounts) == ["admin", "ops"], f"{label}: {sorted(accounts)!r}"
-    assert accounts["admin"]["session_epoch"] == 0
+    # A fresh initial epoch: never bumped, never reset to 0.
+    epoch = accounts["admin"]["session_epoch"]
+    assert INITIAL_EPOCH_FLOOR <= epoch < INITIAL_EPOCH_FLOOR + 2**INITIAL_EPOCH_RANDOM_BITS
     # The stored account is the one whose caller was told it was created.
     # Same Argon2 parameters as the writer, so verify() has no rehash to do.
     checker = make_auth(directory)
