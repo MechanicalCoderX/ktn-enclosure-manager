@@ -445,11 +445,45 @@ class AuthService:
             self._write_users(users)
 
     def verify(self, username: str, password: str) -> str:
+        """Check a password; return the username. Raises AuthError.
+
+        For a sign-in use login(), which also issues the session: a session
+        issued separately after this returns reads the account again and can
+        pick up a password change that landed in between.
+        """
+        self._verify_record(username, password)
+        return username
+
+    def login(self, username: str, password: str) -> tuple[str, str]:
+        """Verify a password and issue a session; return (username, token).
+
+        The session carries the epoch of the record that was verified, not
+        one read afterwards. Sign-in used to verify, then issue a session by
+        re-reading the account file, so a password change that committed
+        during the verify (one Argon2 verify wide) handed the old-password
+        sign-in a cookie with the NEW epoch: a session that survived the
+        change meant to end it. A successful sign-in resets the rate limiter,
+        so someone holding the old password could keep that window open by
+        signing in back to back. Now such a sign-in gets a session that is
+        already dead, the same as if it had finished just before the change.
+        A sign-in racing "sign out everywhere" likewise gets a dead session
+        and signs in again. Both fail closed.
+        """
+        record = self._verify_record(username, password)
+        return username, self._session_token(username, self._epoch_of(record))
+
+    def _verify_record(self, username: str, password: str) -> UserRecord:
+        """Verify a password, rehash it if due, and return the record verified.
+
+        Takes ``_accounts_lock`` when a rehash is due (see _rehash): never call
+        this, verify() or login() with that lock held - it is not re-entrant,
+        and the hang would show only after an Argon2 parameter change.
+        """
         _, record = self._check_password(username, password)
         verified_hash = record["password_hash"]
         if self.hasher.check_needs_rehash(verified_hash):
             self._rehash(username, password, verified_hash)
-        return username
+        return record
 
     def _check_password(
         self, username: str, password: str
@@ -494,8 +528,16 @@ class AuthService:
     # --------------------------------------------------------------- sessions
 
     def issue_session(self, username: str) -> str:
+        """A session for ``username`` at its current epoch, read now.
+
+        Not for sign-in: see login(), which binds the session to the record
+        it verified.
+        """
         record = self._read_users().get(username, {})
-        return self._serializer.dumps({"u": username, "e": self._epoch_of(record)})
+        return self._session_token(username, self._epoch_of(record))
+
+    def _session_token(self, username: str, epoch: int) -> str:
+        return self._serializer.dumps({"u": username, "e": epoch})
 
     def read_session(self, token: str | None) -> str | None:
         if not token:

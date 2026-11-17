@@ -178,11 +178,13 @@ def login(
     except AuthError as exc:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
     try:
-        username = auth.verify(body.username, body.password)
+        # One call, not verify() then issue_session(): the session must carry
+        # the epoch of the account state that was verified (see login()).
+        username, token = auth.login(body.username, body.password)
     except AuthError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
     auth.limiter.reset(client)
-    _set_session(response, request, auth.issue_session(username), auth.max_age_seconds)
+    _set_session(response, request, token, auth.max_age_seconds)
     return {"ok": True, "user": username}
 
 
