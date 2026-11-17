@@ -59,8 +59,21 @@ uv pip compile --universal --python-version 3.15 --generate-hashes \
 
 `tests/test_image_build_inputs.py` fails if the two lists differ, if a pin
 falls outside pyproject's range, or if the lock's Python differs from the
-image's. Dependabot (`uv` ecosystem, `/backend`) recompiles with the same
-options, read back from the lock header.
+image's. `scripts/check-lock.sh` (run in CI, or locally with `uv` on PATH)
+recompiles the lock with its own pins held and fails if the body differs, so
+a hand-edited pin or hash, or a lock compiled with other options, is caught.
+
+CI installs the lock first and then the project constrained to it, so the
+tests, E2E and `pip-audit` run on the versions the image ships. A local
+`pip install -e 'backend[dev]'` still resolves pyproject's ranges to the
+newest releases; to match CI, install `backend/requirements.txt` with
+`--require-hashes` first.
+
+Dependabot (`uv` ecosystem, `/backend`) recompiles with the same options, read
+back from the lock header. It chooses the version of each direct dependency
+under the lowest Python that `requires-python` allows (3.11), not the image's
+3.15, so a release that drops 3.11 is not proposed and has to be bumped by
+hand with `--upgrade-package`.
 
 ## Adding support for another enclosure
 

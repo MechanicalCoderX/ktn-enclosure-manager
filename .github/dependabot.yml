@@ -8,6 +8,14 @@ updates:
   # pip ecosystem re-runs pip-compile under the lowest pre-installed Python that
   # satisfies requires-python (">=3.11", so 3.11) and has no --universal, so
   # its lock would be resolved for an interpreter the image does not run.
+  #
+  # The limit: uv recompiles the lock for 3.15, but it still *chooses* the
+  # target version of each direct dependency (the ones declared in
+  # pyproject.toml) under that lowest Python, 3.11, and so does a security
+  # update. A release that needs Python 3.12+ is never proposed; if it carries
+  # a security fix, CI's pip-audit of the lock fails and the bump is by hand.
+  # Only transitive dependencies are chosen for 3.15. uv's support for
+  # `uv pip compile` files is in dependabot-core's code and specs, not its docs.
   - package-ecosystem: uv
     directory: /backend
     schedule: { interval: weekly }
@@ -35,8 +43,9 @@ updates:
         update-types: [minor, patch]
 
   # Keeps the digest-pinned base images current. Pinning without this trades a
-  # supply-chain risk for a staleness one. It reads FROM lines only: the
-  # Dockerfile's `# syntax=` frontend pin is bumped by hand (see its comment).
+  # supply-chain risk for a staleness one. It reads FROM lines only, so the
+  # Dockerfile's `# syntax=` frontend pin is mirrored in a never-built
+  # `syntax-pin` stage that this entry bumps (see the Dockerfile's comment).
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }

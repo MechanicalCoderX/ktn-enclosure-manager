@@ -36,10 +36,25 @@ jobs:
         with:
           python-version: "3.15"
 
+      - name: Lock matches its inputs
+        # Recompiles backend/requirements.txt from requirements.in with its own
+        # pins held, and fails if the body differs: a hand-edited pin or hash,
+        # a dropped package, or a body compiled for another Python under this
+        # header. uv is pinned so the check does not move under us.
+        run: UV="pipx run --spec uv==0.13.8 uv" scripts/check-lock.sh
+
       - name: Install
+        # The same rule as the interpreter above, for libraries: the image
+        # installs the hash-pinned lock, so the suite runs on it. Lock first,
+        # hash-checked; then the project and dev tools, constrained to what is
+        # already installed, so resolving them cannot move a runtime pin to
+        # the newest release pyproject's ranges allow. A dev tool that needs a
+        # newer runtime library fails here instead of being tested silently.
         run: |
           python -m pip install --upgrade pip
-          pip install -e 'backend[dev]'
+          pip install --require-hashes -r backend/requirements.txt
+          pip freeze > "$RUNNER_TEMP/locked.txt"
+          pip install -c "$RUNNER_TEMP/locked.txt" -e 'backend[dev]'
 
       - name: Lint
         run: ruff check backend helper tests
@@ -55,8 +70,14 @@ jobs:
         # skipped distribution to a hard error, which would fail on our own
         # package forever. pip-audit still exits non-zero when it finds an
         # actual vulnerability, which is the behaviour we want.
+        #
+        # First the lock as a file: exactly what the image ships, read from
+        # the file rather than the environment (--disable-pip needs every
+        # line pinned and hashed, which the lock is). Then the environment,
+        # which adds the dev tools.
         run: |
           pip install pip-audit
+          pip-audit --desc --disable-pip -r backend/requirements.txt
           pip-audit --desc --skip-editable
 
   frontend:
@@ -101,9 +122,13 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install backend
+        # As in the backend job: the lock the image ships, then the project
+        # constrained to it.
         run: |
           python -m venv .venv
-          .venv/bin/pip install -e 'backend[dev]'
+          .venv/bin/pip install --require-hashes -r backend/requirements.txt
+          .venv/bin/pip freeze > "$RUNNER_TEMP/locked.txt"
+          .venv/bin/pip install -c "$RUNNER_TEMP/locked.txt" -e 'backend[dev]'
 
       - name: Install frontend
         working-directory: frontend

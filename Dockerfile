@@ -3,15 +3,21 @@
 # The line above names the BuildKit frontend, an image that is pulled and
 # executed at build time - in the publish job too, which holds packages:write.
 # So it is digest-pinned like the base images below. Dependabot's docker
-# ecosystem parses only FROM lines and will NOT bump it; do it by hand:
-#   docker buildx imagetools inspect docker/dockerfile:1.<x>.<y>
-# and copy the index "Digest:" into the line above, version and digest together.
+# ecosystem parses only FROM lines and never reads it, so the same reference
+# also sits in the `syntax-pin` stage below, where Dependabot does see it. Its
+# PR bumps that stage and fails tests/test_image_build_inputs.py until the
+# stage's version and digest are copied onto line 1.
 #
 # KTN Enclosure Manager.
 #
 # The image bundles sg3-utils so nothing has to be installed on the TrueNAS
 # host (spec §32). Nothing under /usr, /etc, systemd, middlewared or the
 # TrueNAS WebUI is touched.
+
+# -------------------------------------------------------------- syntax-pin
+# Never built: nothing copies from it and it is not the last stage, so BuildKit
+# skips it. It exists only so Dependabot proposes new frontend releases (above).
+FROM docker/dockerfile:1.27.1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e AS syntax-pin
 
 # ---------------------------------------------------------------- frontend
 # Pinned by digest: a floating tag makes today's build and next month's differ
@@ -53,9 +59,13 @@ WORKDIR /app
 # builds of the same commit - and a rollback - shipped different libraries.
 COPY backend/ /app/backend/
 # Install the lock (every file checked against its recorded hash), then the
-# project itself with --no-deps so nothing outside the lock can come in, then
-# `pip check` to fail the build if the lock no longer covers what pyproject
-# declares. Then remove pip itself. Nothing needs it at runtime - the image is
+# project itself with --no-deps so no runtime dependency outside the lock can
+# come in, then `pip check` to fail the build if the lock no longer covers the
+# names and versions pyproject declares (it does not check extras such as
+# uvicorn[standard]; CI's scripts/check-lock.sh covers those). Not covered by
+# the hashes: the build backends pip fetches to build PyYAML's sdist and the
+# project (setuptools, Cython) - newest at build time, run here, and their
+# output ships. Then remove pip itself. Nothing needs it at runtime - the image is
 # immutable and rebuilt from source - and it is not dead weight but live
 # attack surface: pip vendors its own copies of libraries (msgpack, setuptools)
 # which show up as HIGH findings in an image scan and would be usable by

@@ -11,6 +11,11 @@ Three properties of the Dockerfile that no other test reads:
 - The BuildKit frontend named on line 1 is executed by the publish job, which
   holds a packages:write token; like the base images it is pinned by digest
   (L4).
+
+And three properties of CI: the suite, the E2E run and the audit install that
+same lock, so they check the library versions the image ships rather than the
+newest ones pyproject's ranges allow; the lock is audited as a file; and the
+lock's body is re-derived from its inputs on every run.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
@@ -32,6 +38,8 @@ BACKEND = ROOT / "backend"
 LOCK = BACKEND / "requirements.txt"
 LOCK_INPUT = BACKEND / "requirements.in"
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
+VERIFY = ROOT / ".github" / "workflows" / "verify.yml"
+LOCK_CHECK = ROOT / "scripts" / "check-lock.sh"
 
 
 def _instructions() -> list[str]:
@@ -52,25 +60,34 @@ def _instructions() -> list[str]:
     return out
 
 
+# `pip install`, `pip3 install`, `python -m pip install`, `pip3.15 install`...
+_PIP_INSTALL = re.compile(r"\bpip[\d.]*\s+install\b")
+
+
 def _pip_run_command() -> str:
-    runs = [i for i in _instructions() if i.startswith("RUN ") and "pip install" in i]
-    assert len(runs) == 1, f"expected one RUN with pip install, found {len(runs)}"
+    runs = [i for i in _instructions() if i.startswith("RUN ") and _PIP_INSTALL.search(i)]
+    assert len(runs) == 1, f"expected one RUN that installs Python packages, found {runs}"
     return runs[0][len("RUN ") :]
 
 
-def _run_with_fake_pip(tmp_path: Path, fail_on: str) -> subprocess.CompletedProcess[str]:
+def _run_with_fake_pip(tmp_path: Path, fail_call: int) -> subprocess.CompletedProcess[str]:
     """Run the Dockerfile's pip RUN line under /bin/sh with a scripted pip.
 
-    The fake exits 1 when its first argument is ``fail_on`` and 0 otherwise,
-    and logs each call, so the test sees the real shell precedence of the line
-    as written rather than a re-statement of it.
+    The fake exits 1 on its ``fail_call``-th invocation and 0 otherwise, and
+    logs each call, so the test sees the real shell precedence of the line as
+    written rather than a re-statement of it. It fails by position, not by
+    subcommand: the line runs `install` twice, and a fake that failed on any
+    `install` would never reach the second one.
     """
     log = tmp_path / "calls.log"
+    count = tmp_path / "count"
     fake = tmp_path / "pip"
     fake.write_text(
         "#!/bin/sh\n"
         f'echo "$*" >> "{log}"\n'
-        f'[ "$1" = "{fail_on}" ] && exit 1\n'
+        f'n=$(( $(cat "{count}" 2>/dev/null || echo 0) + 1 ))\n'
+        f'echo "$n" > "{count}"\n'
+        f'[ "$n" -eq {fail_call} ] && exit 1\n'
         "exit 0\n"
     )
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
@@ -85,29 +102,45 @@ def _run_with_fake_pip(tmp_path: Path, fail_on: str) -> subprocess.CompletedProc
     )
 
 
+def _calls(tmp_path: Path) -> list[str]:
+    return [c.split()[0] for c in (tmp_path / "calls.log").read_text().splitlines()]
+
+
 # ------------------------------------------------------------------ M4
 
 
-def test_failed_pip_install_fails_the_build(tmp_path: Path) -> None:
-    result = _run_with_fake_pip(tmp_path, fail_on="install")
-    assert result.returncode != 0, "a failing `pip install` exits 0: the build would succeed"
-
-
-def test_failed_dependency_check_fails_the_build(tmp_path: Path) -> None:
-    result = _run_with_fake_pip(tmp_path, fail_on="check")
-    assert result.returncode != 0, "a failing `pip check` exits 0"
+@pytest.mark.parametrize(
+    ("fail_call", "step"),
+    [(1, "install"), (2, "install"), (3, "check")],
+    ids=["lock-install", "project-install", "pip-check"],
+)
+def test_a_failed_step_fails_the_build(tmp_path: Path, fail_call: int, step: str) -> None:
+    result = _run_with_fake_pip(tmp_path, fail_call)
+    assert result.returncode != 0, f"pip call {fail_call} (`pip {step}`) failed; the line exited 0"
+    calls = _calls(tmp_path)
+    assert calls[fail_call - 1] == step, calls
+    assert "uninstall" not in calls, f"the line carried on after a failed step: {calls}"
 
 
 def test_only_the_pip_uninstall_may_fail(tmp_path: Path) -> None:
-    """Control for the two tests above: the line is not simply `set -e`-strict.
+    """Control for the test above: the line is not simply `set -e`-strict.
 
     Removing pip is best-effort by design, so its failure must not fail the
     build - and every step must still have run.
     """
-    result = _run_with_fake_pip(tmp_path, fail_on="uninstall")
+    result = _run_with_fake_pip(tmp_path, fail_call=4)
     assert result.returncode == 0, result.stderr
-    calls = (tmp_path / "calls.log").read_text().splitlines()
-    assert [c.split()[0] for c in calls] == ["install", "install", "check", "uninstall"], calls
+    assert _calls(tmp_path) == ["install", "install", "check", "uninstall"]
+
+
+def test_no_other_run_installs_python_packages() -> None:
+    """The guarded line is the only way into site-packages.
+
+    It is located by its `pip install`, so a second, unguarded install (say
+    `RUN pip3 install requests`) would otherwise go unseen by every test here.
+    """
+    runs = [i for i in _instructions() if i.startswith("RUN ") and re.search(r"\bpip", i)]
+    assert len(runs) == 1, runs
 
 
 # ------------------------------------------------------------------ L1
@@ -129,6 +162,11 @@ def _lock_pins() -> dict[str, tuple[str, list[str]]]:
         hashes = re.findall(r"--hash=sha256:([0-9a-f]{64})", entry)
         pins[canonicalize_name(req.name)] = (specs[0].version, hashes)
     return pins
+
+
+def _lock_header() -> str:
+    lines = LOCK.read_text().splitlines()
+    return "\n".join(lines[: next(i for i, x in enumerate(lines) if not x.startswith("#"))])
 
 
 def test_lock_exists_and_every_pin_is_hashed() -> None:
@@ -176,8 +214,7 @@ def test_lock_targets_the_image_python_on_every_platform() -> None:
     """
     runtime = re.search(r"^FROM python:(\d+\.\d+)-slim@sha256:", DOCKERFILE.read_text(), re.MULTILINE)
     assert runtime, "runtime base image not found"
-    lines = LOCK.read_text().splitlines()
-    header = "\n".join(line for line in lines[: next(i for i, x in enumerate(lines) if not x.startswith("#"))])
+    header = _lock_header()
     assert "uv pip compile" in header, header
     assert "--universal" in header
     assert "--generate-hashes" in header
@@ -201,14 +238,76 @@ def test_image_installs_the_lock_with_hashes_required() -> None:
 def test_dependabot_regenerates_the_lock_for_the_image_python() -> None:
     """The uv ecosystem, not pip, owns /backend.
 
-    Dependabot's pip ecosystem re-runs pip-compile under the lowest
-    pre-installed Python satisfying requires-python (>=3.11, so 3.11), and has
-    no --universal. Its uv ecosystem reads --python-version and --universal
-    back from the lock header.
+    Dependabot's uv ecosystem reads --universal, --python-version and
+    --generate-hashes back from the lock header and recompiles with them; its
+    pip ecosystem runs pip-compile under the lowest pre-installed Python that
+    satisfies requires-python (>=3.11, so 3.11) with no --universal, and would
+    rewrite the lock for an interpreter the image does not run.
+
+    Not covered by this choice: for the eight direct dependencies, which are
+    declared in pyproject.toml, uv still picks the *target version* under that
+    same lowest Python. A release that needs Python 3.12+ is never proposed.
     """
     updates = yaml.safe_load(DEPENDABOT.read_text())["updates"]
     backend = [u for u in updates if u["directory"].rstrip("/") == "/backend"]
     assert [u["package-ecosystem"] for u in backend] == ["uv"], backend
+
+
+# ------------------------------------------------------------------ CI
+
+
+def _job_runs(job: str) -> list[str]:
+    jobs = yaml.safe_load(VERIFY.read_text())["jobs"]
+    return [step["run"] for step in jobs[job]["steps"] if "run" in step]
+
+
+def _compile_options(text: str) -> set[str]:
+    """The options of the `pip compile` command in ``text``, values attached."""
+    text = re.sub(r"\\\n", " ", text)  # shell line continuations
+    match = re.search(r"pip compile((?:\s+--[a-z][a-z-]*(?:[ =]\d+\.\d+)?)+)", text)
+    assert match, "no `pip compile` command found"
+    return set(re.findall(r"--[a-z][a-z-]*(?:[ =]\d+\.\d+)?", match.group(1)))
+
+
+@pytest.mark.parametrize("job", ["backend", "e2e"])
+def test_ci_tests_the_locked_dependency_set(job: str) -> None:
+    """The suite and E2E run on the versions the image ships.
+
+    The lock is installed first with its hashes; the project and its dev tools
+    then go in constrained to what is already installed, so resolving them
+    cannot move a runtime pin to the newest release pyproject allows.
+    """
+    script = "\n".join(_job_runs(job))
+    lock = re.search(r"pip install --require-hashes -r backend/requirements\.txt", script)
+    project = re.search(r"pip install (.*)-e 'backend\[dev\]'", script)
+    assert lock, f"{job}: the lock is not installed"
+    assert project, f"{job}: the project is not installed"
+    assert lock.start() < project.start(), f"{job}: the project goes in before the lock"
+    assert re.search(r"(^|\s)-c\s", project.group(1)), (
+        f"{job}: the project install is not constrained to the locked set"
+    )
+
+
+def test_ci_audits_the_lock_itself() -> None:
+    audits = [line for run in _job_runs("backend") for line in run.splitlines() if "pip-audit " in line]
+    assert any("-r backend/requirements.txt" in a for a in audits), audits
+
+
+def test_ci_rederives_the_lock_from_its_inputs() -> None:
+    """A lock edited by hand, or compiled differently, fails CI.
+
+    The header-only test above cannot see the body: a lock whose header says
+    --universal --python-version 3.15 over a body compiled for 3.11 on one
+    platform passes it. The script recompiles with the lock's own pins as
+    constraints and compares bodies, and must use the documented options.
+    """
+    assert any("scripts/check-lock.sh" in run for run in _job_runs("backend"))
+    assert LOCK_CHECK.is_file()
+    documented = _compile_options(_lock_header())
+    assert {"--universal", "--generate-hashes"} <= documented, documented
+    assert documented <= _compile_options(LOCK_CHECK.read_text()), (
+        "scripts/check-lock.sh does not compile with the lock header's options"
+    )
 
 
 # ------------------------------------------------------------------ L4
@@ -226,3 +325,21 @@ def test_every_from_is_digest_pinned() -> None:
     froms = re.findall(r"^FROM (\S+)", DOCKERFILE.read_text(), re.MULTILINE)
     assert froms
     assert all("@sha256:" in f for f in froms), froms
+
+
+def test_syntax_frontend_matches_the_stage_dependabot_bumps() -> None:
+    """Line 1 cannot go stale silently.
+
+    Dependabot's docker ecosystem reads only FROM lines, so the `syntax-pin`
+    stage (never built: nothing copies from it and it is not the target)
+    carries the same reference where Dependabot sees it. Its PR bumps the
+    stage alone and fails here until line 1 is copied across.
+    """
+    first = DOCKERFILE.read_text().splitlines()[0]
+    tracked = re.search(r"^FROM (docker/dockerfile:\S+) AS syntax-pin$", DOCKERFILE.read_text(), re.MULTILINE)
+    assert tracked, "no `FROM docker/dockerfile:... AS syntax-pin` stage"
+    assert first == f"# syntax={tracked.group(1)}", (
+        f"line 1 is {first!r} but the Dependabot-tracked stage is {tracked.group(1)!r}: "
+        "copy the stage's version and digest onto line 1"
+    )
+    assert not re.search(r"--from=syntax-pin\b", DOCKERFILE.read_text()), "syntax-pin must not be used"
