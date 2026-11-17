@@ -4,6 +4,124 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+Security hardening that follows up the 1.6.3 reviews. No data migration. One
+change in behaviour needs a look before upgrading (below), and there is one
+new optional setting, `KTN_TRUENAS_ALLOW_INSECURE` (default `false`). Rolling
+back to 1.6.3 is an image change only; 1.6.3 ignores the new setting.
+
+### Upgrading
+- **If `KTN_TRUENAS_URL` starts with `http://` or `ws://` and an API key is
+  set, the TrueNAS integration is off after the upgrade.** The app no longer
+  sends the key unencrypted: pool, vdev, ZFS error and SMART data are
+  unavailable until you act, and the dashboard's "TrueNAS unavailable" notice
+  says why. The drive map, chassis telemetry and Identify keep working. To
+  fix it, set `KTN_TRUENAS_URL` to `https://` with the name on the TrueNAS
+  certificate (SECURITY.md, "TLS: connect by the name on the certificate"),
+  and create a new API key if TrueNAS has already revoked the old one. To
+  keep sending the key in clear as 1.6.3 did, set
+  `KTN_TRUENAS_ALLOW_INSECURE=true` instead. The catalog app's form has no
+  field for that setting, so there the fix is `https://`. Nothing to do for
+  an `https://` or `wss://` URL, or when TrueNAS is not configured.
+- If you set uvicorn's own `UVICORN_LOG_CONFIG` to a `.yaml` or `.yml` file,
+  the app now fails to start (see Changed). KTN never set or documented it;
+  use a `.json` or `.ini` log config instead.
+
+### Security
+- **The TrueNAS API key is no longer sent over `http://` or `ws://`.** With
+  an insecure `KTN_TRUENAS_URL` (in any letter case) and an API key set, the
+  app builds no TrueNAS client at all, so nothing can send the key. Why: the
+  key would cross the network in clear, and TrueNAS documents that it
+  automatically revokes a user-linked API key presented over insecure HTTP
+  ([TrueNAS 25.10 API documentation](https://www.truenas.com/docs/scale/25.10/api/)),
+  so such an install very likely had a revoked key already. One `ERROR` is
+  logged at startup naming the scheme and host only (the host is withheld if
+  the URL contains `@`), never the key. The reason, starting "Not
+  connected:", appears where a failing TrueNAS already shows: the
+  dashboard's "TrueNAS unavailable" notice and degraded badge, and the
+  Diagnostics tab. The container keeps running and stays healthy, and the
+  drive map, chassis telemetry and Identify keep working.
+  `KTN_TRUENAS_ALLOW_INSECURE=true` restores the 1.6.3 behaviour: a startup
+  `WARNING`, which now names the setting, and the key sent unencrypted.
+  `https://` and `wss://` are unchanged. With no key set, the app reports
+  TrueNAS as not configured, as before. See Upgrading.
+- **The privileged IDENT helper now starts Python isolated (`python -I -S`),
+  as the HEALTHCHECK has since 1.6.3.** The entrypoint started it as root
+  with a normal Python start-up, which runs every `.pth` file and any
+  `sitecustomize` in site-packages and honours `PYTHON*` variables. The web
+  process can force that start at any time by exiting (the container
+  restarts), so any way for it to plant such a file would have become root
+  code execution. No such way is known since the 1.6.3 enclosure-lock fix;
+  this removes the start-up hook itself. The helper now sets its own import
+  path: the bundled backend, then the interpreter's own site-packages,
+  appended without running any `.pth` file in it. CI's plain-HTTP smoke test
+  now starts the real helper in the built image and requires `/healthz` to
+  report it up.
+- **The image's Python dependencies install from wheels only
+  (`--only-binary :all:`), so no build backend runs for them.**
+  `uvicorn[standard]` is replaced by `uvicorn` plus the two parts of it the
+  server uses, `uvloop` and `httptools` (see Changed). That drops PyYAML, the
+  one locked dependency with no Python 3.15 wheel, which the image built from
+  source with setuptools and Cython fetched unhashed at build time, and
+  `watchfiles`, used only by uvicorn's `--reload`. The lock goes from 29 pins
+  to 27; no version changed. A future pin without a wheel for the image's
+  Python now fails the image build instead of being built from source. Only
+  the project's own build (setuptools) is still fetched unhashed; it is not
+  left in the image.
+- Creating an account under a username that already exists is now refused
+  ("an account named '...' already exists") instead of replacing the
+  account. Replacing it reset the account's session epoch to 0, which would
+  have brought back every epoch-0 session cookie for that name still within
+  `KTN_SESSION_MAX_AGE_SECONDS`, including sessions that a password change or
+  "Sign out everywhere" had ended. No route calls this today (first-run setup
+  goes through bootstrap, which already refuses once any account exists), so
+  this closes a trap for future callers rather than a reachable hole. The
+  check runs under the account lock, and a test pins that.
+
+### Added
+- `KTN_TRUENAS_ALLOW_INSECURE` (default `false`): send the TrueNAS API key
+  over `http://` or `ws://` anyway (see Security). It takes the same
+  spellings as `KTN_TLS_ENABLED` (`1`/`true`/`yes`/`on` or
+  `0`/`false`/`no`/`off`, any letter case; empty means `false`); any other
+  value refuses to start. No effect on `https://` or `wss://`. The shipped
+  `docker-compose.yml` passes it through.
+
+### Changed
+- Runtime dependencies are declared by name, with no extra: `uvicorn`,
+  `uvloop` and `httptools` instead of `uvicorn[standard]`. The image's
+  `pip check` ignores extras, so before this a missing uvloop or httptools
+  passed the image build (only CI's lock check would have noticed), and
+  uvicorn would have fallen back to asyncio and h11. The image build now
+  checks them like any other dependency. Server behaviour is unchanged:
+  uvicorn still picks uvloop and httptools on its own.
+- `UVICORN_LOG_CONFIG` (an environment variable uvicorn reads itself)
+  pointing at a `.yaml` or `.yml` file no longer works: PyYAML is not in the
+  image, and uvicorn stops at startup with an `ImportError` asking for it. A
+  `.json` or `.ini` log config is unaffected. KTN never set or documented
+  this variable.
+
+### Fixed
+- `KTN_TRUENAS_URL` schemes are case-insensitive, as the insecure-transport
+  check already read them: `HTTPS://` now connects (the WebSocket refused
+  it), `WSS://` now honours `KTN_TRUENAS_VERIFY_TLS` and
+  `KTN_TRUENAS_CA_BUNDLE` (it silently used default verification), and an
+  opted-in `HTTP://` connects. Only the scheme is lower-cased; host, port and
+  path are kept as given. Surrounding whitespace is ignored, and a
+  whitespace-only value now means "not configured" (it built a client that
+  could never connect).
+
+### Documentation
+- SECURITY.md: `http://` and `ws://` are now refused rather than warned
+  about, both root Python starts (HEALTHCHECK and IDENT helper) are isolated,
+  and the supply-chain note says the lock installs from wheels only, with
+  setuptools for the project build as the one unhashed input.
+- README, `.env.example`, `docker-compose.yml`, the Install-via-YAML file,
+  docs/INSTALL-TRUENAS.md and the catalog app's URL help describe the
+  refusal and `KTN_TRUENAS_ALLOW_INSECURE`. CONTRIBUTING's "Dependency lock"
+  section says to declare runtime packages by name and keep the wheels-only
+  install.
+
 ## [1.6.3] — 2026-11-16
 
 Security hardening from the 1.5.6 deep review, and the Python 3.15 runtime.
