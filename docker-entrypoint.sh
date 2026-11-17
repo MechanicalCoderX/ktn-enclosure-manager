@@ -159,8 +159,17 @@ if [ -n "${KTN_IDENT_HELPER_SOCKET:-}" ]; then
     # The helper now sets the socket's group itself when it binds, so nothing
     # here depends on the directory's setgid bit.
 
+    # Root Python, so it starts isolated, as the HEALTHCHECK does. -I ignores
+    # PYTHON* variables, the user site and the script's directory; -S skips
+    # `site`, so no .pth file or sitecustomize runs as root. The web process
+    # can force this start at will by exiting (the container restarts), so a
+    # bug that let it plant start-up code would otherwise be root code
+    # execution. The helper sets its own import path (_import_path); PYTHONPATH
+    # is not read. PYTHONUNBUFFERED is not read either, which costs nothing:
+    # the helper only logs, to stderr, and logging flushes every record.
+    # tests/test_helper_isolated_start.py pins this line.
     echo "starting privileged IDENT helper on ${KTN_IDENT_HELPER_SOCKET}"
-    python /app/helper/ktn_ident_helper.py \
+    python -I -S /app/helper/ktn_ident_helper.py \
         --socket "$KTN_IDENT_HELPER_SOCKET" \
         --socket-group 1000 \
         --sysfs-root "${KTN_SYSFS_ROOT:-/sys}" \
