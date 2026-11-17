@@ -25,12 +25,55 @@ cd frontend && npm install
 ```bash
 PYTHONPATH=backend .venv/bin/python -m pytest tests/ -q   # backend, no hardware
 cd frontend && npx playwright test                        # E2E, real backend + fixtures
-.venv/bin/ruff check backend && .venv/bin/mypy backend
+.venv/bin/ruff check backend helper tests && .venv/bin/mypy --config-file backend/pyproject.toml backend/ktnmgr helper
 cd frontend && npm run typecheck
 ```
 
 The suite runs entirely against captured fixtures in `tests/fixtures/`.
 Regenerate the synthetic sysfs tree with `python3 tests/build_sysfs_fixture.py`.
+
+## Dependency lock
+
+`backend/pyproject.toml` declares the runtime dependencies as ranges; dev
+installs (`pip install -e 'backend[dev]'`) resolve from those. The image
+installs `backend/requirements.txt` instead: every version pinned, every file
+hash-checked (`pip install --require-hashes`), so two builds of one commit ship
+the same libraries. `backend/requirements.in` is a copy of pyproject's list,
+because Dependabot recompiles a lock only from a `.in` file.
+
+After changing `[project].dependencies`, copy the change into
+`requirements.in` and recompile, from `backend/`:
+
+```bash
+uv pip compile --universal --python-version 3.15 --generate-hashes \
+    requirements.in -o requirements.txt
+```
+
+- `--python-version` is the image's Python (`FROM python:3.15-slim` in the
+  Dockerfile); uv targets it without that interpreter installed.
+- `--universal` and `--generate-hashes` keep one lock valid for both published
+  architectures: the hashes cover every file of each pinned version, arm64
+  wheels included.
+- Re-running keeps existing pins. Add `--upgrade-package <name>` to move one,
+  or `--upgrade` to move everything.
+
+`tests/test_image_build_inputs.py` fails if the two lists differ, if a pin
+falls outside pyproject's range, or if the lock's Python differs from the
+image's. `scripts/check-lock.sh` (run in CI, or locally with `uv` on PATH)
+recompiles the lock with its own pins held and fails if the body differs, so
+a hand-edited pin or hash, or a lock compiled with other options, is caught.
+
+CI installs the lock first and then the project constrained to it, so the
+tests, E2E and `pip-audit` run on the versions the image ships. A local
+`pip install -e 'backend[dev]'` still resolves pyproject's ranges to the
+newest releases; to match CI, install `backend/requirements.txt` with
+`--require-hashes` first.
+
+Dependabot (`uv` ecosystem, `/backend`) recompiles with the same options, read
+back from the lock header. It chooses the version of each direct dependency
+under the lowest Python that `requires-python` allows (3.11), not the image's
+3.15, so a release that drops 3.11 is not proposed and has to be bumped by
+hand with `--upgrade-package`.
 
 ## Adding support for another enclosure
 

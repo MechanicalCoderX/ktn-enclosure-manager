@@ -1,10 +1,23 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.27.1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+#
+# The line above names the BuildKit frontend, an image that is pulled and
+# executed at build time - in the publish job too, which holds packages:write.
+# So it is digest-pinned like the base images below. Dependabot's docker
+# ecosystem parses only FROM lines and never reads it, so the same reference
+# also sits in the `syntax-pin` stage below, where Dependabot does see it. Its
+# PR bumps that stage and fails tests/test_image_build_inputs.py until the
+# stage's version and digest are copied onto line 1.
 #
 # KTN Enclosure Manager.
 #
 # The image bundles sg3-utils so nothing has to be installed on the TrueNAS
 # host (spec §32). Nothing under /usr, /etc, systemd, middlewared or the
 # TrueNAS WebUI is touched.
+
+# -------------------------------------------------------------- syntax-pin
+# Never built: nothing copies from it and it is not the last stage, so BuildKit
+# skips it. It exists only so Dependabot proposes new frontend releases (above).
+FROM docker/dockerfile:1.27.1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e AS syntax-pin
 
 # ---------------------------------------------------------------- frontend
 # Pinned by digest: a floating tag makes today's build and next month's differ
@@ -39,16 +52,32 @@ RUN groupadd -g 1000 ktn && useradd -u 1000 -g 1000 -M -s /usr/sbin/nologin ktn
 
 WORKDIR /app
 
-# Dependencies come from pyproject.toml, which is the single source of truth.
-# A hand-maintained duplicate list here silently drifts out of sync with it.
+# Dependencies are declared in pyproject.toml and installed from
+# backend/requirements.txt, a hash-pinned lock compiled from them for this
+# image's Python on both published architectures (CONTRIBUTING.md, "Dependency
+# lock"). Without it every build resolved whatever PyPI served that day, so two
+# builds of the same commit - and a rollback - shipped different libraries.
 COPY backend/ /app/backend/
-# Install, then remove pip itself. Nothing needs it at runtime - the image is
+# Install the lock (every file checked against its recorded hash), then the
+# project itself with --no-deps so no runtime dependency outside the lock can
+# come in, then `pip check` to fail the build if the lock no longer covers the
+# names and versions pyproject declares (it does not check extras such as
+# uvicorn[standard]; CI's scripts/check-lock.sh covers those). Not covered by
+# the hashes: the build backends pip fetches to build PyYAML's sdist and the
+# project (setuptools, Cython) - newest at build time, run here, and their
+# output ships. Then remove pip itself. Nothing needs it at runtime - the image is
 # immutable and rebuilt from source - and it is not dead weight but live
 # attack surface: pip vendors its own copies of libraries (msgpack, setuptools)
 # which show up as HIGH findings in an image scan and would be usable by
 # anyone who got code execution in the container.
-RUN pip install --no-cache-dir /app/backend \
- && pip uninstall -y pip 2>/dev/null || true
+#
+# Only that last step may fail, hence the parentheses. Written as
+# `A && B || true`, the `|| true` also swallowed a failed install: the build
+# succeeded and the image had no fastapi or uvicorn.
+RUN pip install --no-cache-dir --require-hashes -r /app/backend/requirements.txt \
+ && pip install --no-cache-dir --no-deps /app/backend \
+ && pip check \
+ && (pip uninstall -y pip 2>/dev/null || true)
 COPY helper/ /app/helper/
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 # Opt-in TLS (KTN_TLS_ENABLED): the pair check the entrypoint runs before
@@ -75,7 +104,10 @@ VOLUME ["/data"]
 
 # A script rather than an inline URL: it reads KTN_PORT and KTN_TLS_ENABLED,
 # so a changed port or a TLS deployment is probed where it actually listens.
+# Docker runs it as root every 30 s, so Python starts isolated: -I ignores
+# PYTHON* variables and the user site, -S skips site-packages and every .pth
+# and sitecustomize there. The script needs only the standard library.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD python /app/docker-healthcheck.py
+  CMD python -I -S /app/docker-healthcheck.py
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

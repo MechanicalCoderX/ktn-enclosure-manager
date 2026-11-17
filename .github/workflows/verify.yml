@@ -36,13 +36,39 @@ jobs:
         with:
           python-version: "3.15"
 
+      - name: Lock matches its inputs
+        # Recompiles backend/requirements.txt from requirements.in with its own
+        # pins held, and fails if the body differs: a hand-edited pin or hash,
+        # a dropped package, or a body compiled for another Python under this
+        # header. uv is pinned so the check does not move under us.
+        run: UV="pipx run --spec uv==0.13.8 uv" scripts/check-lock.sh
+
       - name: Install
+        # The same rule as the interpreter above, for libraries: the image
+        # installs the hash-pinned lock, so the suite runs on it. Lock first,
+        # hash-checked; then the project and dev tools, constrained to what is
+        # already installed, so resolving them cannot move a runtime pin to
+        # the newest release pyproject's ranges allow. A dev tool that needs a
+        # newer runtime library fails here instead of being tested silently.
         run: |
           python -m pip install --upgrade pip
-          pip install -e 'backend[dev]'
+          pip install --require-hashes -r backend/requirements.txt
+          pip freeze > "$RUNNER_TEMP/locked.txt"
+          pip install -c "$RUNNER_TEMP/locked.txt" -e 'backend[dev]'
 
       - name: Lint
         run: ruff check backend helper tests
+
+      - name: Type check
+        # mypy comes from the Install step: it is pinned exactly in
+        # backend/pyproject.toml [dev], the one place its version is set, so
+        # this gate and a local `pip install -e 'backend[dev]'` cannot drift
+        # apart. Do not add a second inline pin here. --config-file is
+        # required: run from the repo root without it, mypy finds no config
+        # and silently drops disallow_untyped_defs.
+        run: |
+          mypy --version
+          mypy --config-file backend/pyproject.toml backend/ktnmgr helper
 
       - name: Tests
         # The suite runs entirely against captured fixtures; no hardware and no
@@ -55,8 +81,14 @@ jobs:
         # skipped distribution to a hard error, which would fail on our own
         # package forever. pip-audit still exits non-zero when it finds an
         # actual vulnerability, which is the behaviour we want.
+        #
+        # First the lock as a file: exactly what the image ships, read from
+        # the file rather than the environment (--disable-pip needs every
+        # line pinned and hashed, which the lock is). Then the environment,
+        # which adds the dev tools.
         run: |
           pip install pip-audit
+          pip-audit --desc --disable-pip -r backend/requirements.txt
           pip-audit --desc --skip-editable
 
   frontend:
@@ -101,9 +133,13 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install backend
+        # As in the backend job: the lock the image ships, then the project
+        # constrained to it.
         run: |
           python -m venv .venv
-          .venv/bin/pip install -e 'backend[dev]'
+          .venv/bin/pip install --require-hashes -r backend/requirements.txt
+          .venv/bin/pip freeze > "$RUNNER_TEMP/locked.txt"
+          .venv/bin/pip install -c "$RUNNER_TEMP/locked.txt" -e 'backend[dev]'
 
       - name: Install frontend
         working-directory: frontend
@@ -266,8 +302,10 @@ jobs:
 
           code=$("${HTTPS[@]}" -o /dev/null -w '%{http_code}' https://ktn-smoke.test:18443/healthz)
           [ "$code" = 200 ] || fail "https /healthz returned $code"
-          "${HTTPS[@]}" https://ktn-smoke.test:18443/healthz | grep -q '"tls":{"enabled":true' \
-            || fail "/healthz has no tls block"
+          # Captured, then searched: nothing is piped into grep -q under the
+          # lib's pipefail (see log_has in tls-smoke-lib.sh).
+          health=$("${HTTPS[@]}" https://ktn-smoke.test:18443/healthz)
+          grep -qF '"tls":{"enabled":true' <<<"$health" || fail "/healthz has no tls block"
           if curl -sS --max-time 10 -o /dev/null http://127.0.0.1:18443/healthz; then
             fail "plain http answered on the TLS port"
           fi
@@ -277,7 +315,7 @@ jobs:
             -d "$body" https://ktn-smoke.test:18443/api/auth/bootstrap
           "${HTTPS[@]}" -o /dev/null -D smoke/login.headers -H 'X-KTN-Request: 1' \
             -H 'Content-Type: application/json' -d "$body" https://ktn-smoke.test:18443/api/auth/login
-          grep -i '^set-cookie: ktn_session=' smoke/login.headers | grep -qi '; *secure' \
+          grep -qi '^set-cookie: ktn_session=.*; *secure' smoke/login.headers \
             || fail "session cookie is not Secure over https"
 
       - name: The key stays root-only; the served copy is uid 1000, 0600, on tmpfs
@@ -316,8 +354,12 @@ jobs:
             || fail "the watcher did not log the renewal"
 
           expected=$(fingerprint < smoke/gen/second.crt)
-          served=$(openssl s_client -connect 127.0.0.1:18443 -servername ktn-smoke.test \
-                     </dev/null 2>/dev/null | fingerprint)
+          # To a file first: openssl x509 stops reading after the first PEM
+          # block while s_client may still be writing (TLS 1.3 session
+          # tickets), and under pipefail that broken pipe would fail the step.
+          openssl s_client -connect 127.0.0.1:18443 -servername ktn-smoke.test \
+            </dev/null >smoke/served.out 2>/dev/null || fail "s_client could not connect"
+          served=$(fingerprint < smoke/served.out)
           [ "$served" = "$expected" ] || fail "served $served, expected $expected"
 
       - name: A mismatched key refuses to start, with no plain-http fallback
@@ -353,7 +395,10 @@ jobs:
           wait_healthy ktn-plain
           code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:18420/healthz)
           [ "$code" = 200 ] || fail "plain /healthz returned $code"
-          if curl -sS --max-time 10 http://127.0.0.1:18420/healthz | grep -q '"tls"'; then
+          # Captured first: piped into grep -q under pipefail, a curl write
+          # error after the match would read as "no tls block" and pass.
+          health=$(curl -sS --max-time 10 http://127.0.0.1:18420/healthz)
+          if grep -qF '"tls"' <<<"$health"; then
             fail "a plain install reports a tls block"
           fi
 

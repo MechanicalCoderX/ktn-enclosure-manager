@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
@@ -28,8 +28,10 @@ from pydantic import BaseModel, Field
 from ktnmgr.enclosure.locate import LocateError
 from ktnmgr.enclosure.ses import READ_ONLY_PAGES, SesError
 from ktnmgr.enclosure.sysfs import EnclosureNotFoundError, SlotNotFoundError
+from ktnmgr.models import EnclosureRef
 from ktnmgr.services.auth import SESSION_COOKIE, AuthError, AuthService
 from ktnmgr.services.ident import ALLOWED_DURATIONS
+from ktnmgr.services.state import StateService
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +49,7 @@ def get_auth(request: Request) -> AuthService:
     return request.app.state.auth
 
 
-def get_state(request: Request) -> Any:
+def get_state(request: Request) -> StateService:
     return request.app.state.service
 
 
@@ -176,11 +178,13 @@ def login(
     except AuthError as exc:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
     try:
-        username = auth.verify(body.username, body.password)
+        # One call, not verify() then issue_session(): the session must carry
+        # the epoch of the account state that was verified (see login()).
+        username, token = auth.login(body.username, body.password)
     except AuthError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
     auth.limiter.reset(client)
-    _set_session(response, request, auth.issue_session(username), auth.max_age_seconds)
+    _set_session(response, request, token, auth.max_age_seconds)
     return {"ok": True, "user": username}
 
 
@@ -255,7 +259,9 @@ def revoke_sessions(
 
 
 @router.get("/enclosures")
-def list_enclosures(user: CurrentUser, service: Annotated[Any, Depends(get_state)]) -> list[dict]:
+def list_enclosures(
+    user: CurrentUser, service: Annotated[StateService, Depends(get_state)]
+) -> list[dict]:
     return [
         {
             **ref.model_dump(),
@@ -265,7 +271,7 @@ def list_enclosures(user: CurrentUser, service: Annotated[Any, Depends(get_state
     ]
 
 
-def _resolve(service: Any, enclosure_id: str) -> Any:
+def _resolve(service: StateService, enclosure_id: str) -> EnclosureRef:
     try:
         return service.enclosure(enclosure_id)
     except EnclosureNotFoundError as exc:
@@ -274,7 +280,7 @@ def _resolve(service: Any, enclosure_id: str) -> Any:
 
 @router.get("/enclosures/{enclosure_id}/bays")
 def list_bays(
-    enclosure_id: str, user: CurrentUser, service: Annotated[Any, Depends(get_state)]
+    enclosure_id: str, user: CurrentUser, service: Annotated[StateService, Depends(get_state)]
 ) -> dict:
     _resolve(service, enclosure_id)
     return {
@@ -310,7 +316,7 @@ def list_bays(
 
 @router.get("/enclosures/{enclosure_id}/chassis")
 def chassis(
-    enclosure_id: str, user: CurrentUser, service: Annotated[Any, Depends(get_state)]
+    enclosure_id: str, user: CurrentUser, service: Annotated[StateService, Depends(get_state)]
 ) -> dict:
     _resolve(service, enclosure_id)
     telemetry = service.chassis.value.get(enclosure_id.lower())
@@ -322,7 +328,7 @@ def chassis(
     return {"available": True, **telemetry.model_dump(mode="json")}
 
 
-def _bay_serial(service: Any, ref: Any, ses_slot: int) -> str | None:
+def _bay_serial(service: StateService, ref: EnclosureRef, ses_slot: int) -> str | None:
     """Serial of the disk that is in this bay *now*, or nothing at all.
 
     Deliberately not taken from ``service.bays()``. That view joins a slot cache
@@ -389,7 +395,7 @@ async def identify(
     body: IdentifyBody,
     request: Request,
     user: CurrentUser,
-    service: Annotated[Any, Depends(get_state)],
+    service: Annotated[StateService, Depends(get_state)],
 ) -> dict:
     """The only write this application exposes (§15, §43).
 
@@ -493,7 +499,7 @@ async def identify(
 
 
 @router.get("/diagnostics")
-def diagnostics(user: CurrentUser, service: Annotated[Any, Depends(get_state)]) -> dict:
+def diagnostics(user: CurrentUser, service: Annotated[StateService, Depends(get_state)]) -> dict:
     return service.diagnostics()
 
 
@@ -517,7 +523,7 @@ def raw_pages(user: CurrentUser) -> list[str]:
 @router.get("/raw/{enclosure_id}/{page}")
 def raw_page(
     enclosure_id: str, page: str, user: CurrentUser,
-    service: Annotated[Any, Depends(get_state)],
+    service: Annotated[StateService, Depends(get_state)],
 ) -> dict:
     """Predefined read-only diagnostic output only (§36).
 

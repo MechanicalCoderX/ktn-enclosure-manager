@@ -7,13 +7,17 @@ serialised to the browser (spec §21).
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = logging.getLogger(__name__)
 
 #: Where the container entrypoint puts the copies uvicorn actually serves. It
 #: sits on the private /run/ktn tmpfs so the key copy only ever lives in RAM.
@@ -29,6 +33,19 @@ TLS_BOOL_FALSE = frozenset({"0", "false", "no", "off", ""})
 #: Exported as "1" by docker-entrypoint.sh only once it has built uvicorn's
 #: --ssl-* arguments, and unset by it otherwise. See check_tls_marker.
 TLS_ACTIVE_MARKER = "KTN_TLS_ACTIVE"
+
+#: KTN_ALERT_DETAIL's values. "full" is the alert as it has always been;
+#: "minimal" drops the drive inventory. See services/notify.py.
+ALERT_DETAIL_VALUES = ("full", "minimal")
+
+#: The vendor statement the L5 warning rests on (TrueNAS 25.10 API docs):
+#: "TrueNAS automatically revokes any user-linked API keys passed as part of
+#: an authentication attempt via insecure (HTTP) transport."
+TRUENAS_API_DOCS_URL = "https://www.truenas.com/docs/scale/25.10/api/"
+
+#: URL schemes on which the TrueNAS client sends the API key unencrypted.
+#: truenas/client.py turns http:// into ws://; ws:// itself is taken as-is.
+INSECURE_TRUENAS_SCHEMES = frozenset({"http", "ws"})
 
 
 class TlsMismatchError(RuntimeError):
@@ -74,6 +91,52 @@ def check_tls_marker(settings: Settings, environ: Mapping[str, str] | None = Non
             "with TLS off here no renewal watcher would run, and a renewed certificate "
             "would never be installed. Remove the other spelling."
         )
+
+
+def check_truenas_transport(settings: Settings) -> bool:
+    """Warn, once at startup, when the TrueNAS API key would travel in clear.
+
+    The client sends the key in ``auth.login_with_api_key`` on every new
+    WebSocket, and an ``http://`` URL becomes ``ws://``, so anyone on the
+    network path can read it. Worse, TrueNAS documents (TRUENAS_API_DOCS_URL)
+    that it automatically revokes a user-linked API key presented over
+    insecure HTTP transport and requires HTTPS for API-key authentication, so
+    the key should be expected to stop working ("rejected the API key") after
+    the first attempt. This only warns; it does not refuse http://.
+
+    The warning names the scheme and host only: path and query can carry
+    credentials, and the key itself is never formatted into anything. When the
+    URL contains "@" the host is withheld too, because a userinfo holding an
+    unencoded "/", "?" or "#" ends urlsplit's netloc early and its
+    ``hostname`` is then the username or the front of a token.
+    Returns True when it warned. A client is only built with both a URL and a
+    key (main.build_app), so without both there is nothing to send.
+    """
+    url = settings.truenas_url.strip()
+    if not url or not settings.truenas_api_key.get_secret_value():
+        return False
+    try:
+        parts = urlsplit(url)
+        scheme = parts.scheme.lower()
+        host = parts.hostname or "?"
+    except ValueError:
+        # urlsplit refuses some malformed hosts (an unbalanced "["); the
+        # scheme is still the part before the first colon.
+        scheme = url.split(":", 1)[0].lower()
+        host = "<unparsable host>"
+    if scheme not in INSECURE_TRUENAS_SCHEMES:
+        return False
+    if "@" in url:
+        host = "<host withheld: URL contains userinfo>"
+    log.warning(
+        "KTN_TRUENAS_URL uses %s:// (host %s): the TrueNAS API key is sent "
+        "UNENCRYPTED, readable by anyone on the network path, and TrueNAS "
+        "documents that it automatically revokes a user-linked API key presented "
+        "over insecure HTTP (%s), so expect the key to stop working. Use https:// "
+        "and connect by the name on the certificate (see SECURITY.md).",
+        scheme, host, TRUENAS_API_DOCS_URL,
+    )
+    return True
 
 
 def parse_tls_bool(value: str) -> bool:
@@ -248,6 +311,33 @@ class Settings(BaseSettings):
         ),
     )
     alert_on_recovery: bool = True
+    #: How much drive inventory an alert carries. "full" (the default, and
+    #: the only behaviour before this setting existed) names the bay, serial,
+    #: /dev/sdX, pool/vdev, ZFS state, error counts, temperature and, in the
+    #: JSON style, the enclosure id. "minimal" keeps the bay number and the
+    #: condition (health, ZFS state, error counts, temperature) and drops the
+    #: serial, device path, pool/vdev names, SES slot and enclosure id - for a
+    #: webhook on a third-party host such as a public ntfy.sh topic, which
+    #: anyone with the topic name can read. Empty or whitespace-only means the
+    #: default, "full" (as KTN_TLS_ENABLED treats empty, and as compose's
+    #: ${KTN_ALERT_DETAIL:-full} already does). Any other unknown value
+    #: refuses to start rather than guess which way the operator meant.
+    alert_detail: str = "full"
+
+    @field_validator("alert_detail", mode="before")
+    @classmethod
+    def _alert_detail_value(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered == "":
+                return "full"
+            if lowered in ALERT_DETAIL_VALUES:
+                return lowered
+        raise ValueError(
+            "KTN_ALERT_DETAIL must be 'full' (the default: bay, serial, device, "
+            "pool/vdev; empty also means this) or 'minimal' (bay number and "
+            "condition only)"
+        )
 
     # --- polling (§29) ----------------------------------------------------
     poll_slots_seconds: float = 5.0

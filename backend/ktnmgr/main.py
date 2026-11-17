@@ -14,12 +14,12 @@ from fastapi.staticfiles import StaticFiles
 
 from ktnmgr import __version__
 from ktnmgr.api.routes import router
-from ktnmgr.config import Settings, check_tls_marker, get_settings
+from ktnmgr.config import Settings, check_tls_marker, check_truenas_transport, get_settings
 from ktnmgr.enclosure.disks import DiskInfoReader
 from ktnmgr.enclosure.helper_client import HelperUnavailableError
 from ktnmgr.enclosure.helper_client import send as helper_send
 from ktnmgr.enclosure.locate import build_locate_writer
-from ktnmgr.enclosure.ses import HelperSesRunner, SesRunner
+from ktnmgr.enclosure.ses import HelperSesRunner, SesReader, SesRunner
 from ktnmgr.enclosure.sysfs import SysfsEnclosureBackend
 from ktnmgr.services.audit import AuditLog
 from ktnmgr.services.auth import AuthService
@@ -78,7 +78,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     disks = DiskInfoReader(sysfs_root=settings.sysfs_root)
     # When a helper socket is configured the web process reads SES pages
     # through it, so it needs no access to /dev/sg* at all.
-    ses = (
+    ses: SesReader = (
         HelperSesRunner(settings.ident_helper_socket)
         if settings.ident_helper_socket
         else SesRunner(binary=settings.sg_ses_binary, lock_path=lock_path)
@@ -101,6 +101,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             ca_bundle=settings.truenas_ca_bundle,
             rest_fallback=settings.truenas_rest_fallback,
         )
+        check_truenas_transport(settings)
     else:
         log.warning("TrueNAS not configured; pool, vdev and SMART data will be unavailable")
 
@@ -109,9 +110,13 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         style=settings.alert_style,
         state_path=settings.notify_state_path,
         notify_recovery=settings.alert_on_recovery,
+        detail=settings.alert_detail,
     )
     if notifier.enabled:
-        log.info("health notifications enabled (%s)", settings.alert_style)
+        log.info(
+            "health notifications enabled (%s, %s detail)",
+            settings.alert_style, settings.alert_detail,
+        )
 
     service = StateService(
         settings=settings, backend=backend, disks=disks, ses=ses, ident=ident,

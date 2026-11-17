@@ -28,8 +28,9 @@ hardware identity, or touching the TrueNAS WebUI.
 
   ![Identify demo](docs/images/identify-demo.gif)
 - **Alerts** — posts to ntfy or any webhook when a bay's health changes, naming
-  the bay, serial and pool so you know which drive to pull. Transitions only, so
-  a degraded pool does not message every poll.
+  the bay, serial and pool so you know which drive to pull (or only the bay and
+  its condition, with `KTN_ALERT_DETAIL=minimal`, for a public ntfy topic).
+  Transitions only, so a degraded pool does not message every poll.
 - **Diagnostics and audit** — sanitised, copyable diagnostics; every write logged.
 
 | | |
@@ -114,7 +115,7 @@ annotated list. The essentials:
 
 | Variable | Meaning |
 |---|---|
-| `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | pool, vdev, ZFS error and SMART data. Leave empty to run without. Use a least-privilege key — see [SECURITY.md](SECURITY.md#the-truenas-api-key-use-a-least-privilege-one) |
+| `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | pool, vdev, ZFS error and SMART data. Leave empty to run without. Use a least-privilege key — see [SECURITY.md](SECURITY.md#the-truenas-api-key-use-a-least-privilege-one). Use `https://`. With `http://` the key is sent unencrypted, and the [TrueNAS 25.10 API documentation](https://www.truenas.com/docs/scale/25.10/api/) states that TrueNAS automatically revokes a user-linked API key presented over insecure HTTP and that API-key authentication requires HTTPS: expect the key to stop working. The app does not refuse `http://`, but logs a `WARNING` at startup naming the scheme and host (the host is withheld if the URL contains `@`) |
 | `KTN_TRUENAS_VERIFY_TLS` | defaults to `true`. If it fails, connect by the name on the certificate rather than by IP — see [SECURITY.md](SECURITY.md#tls-connect-by-the-name-on-the-certificate) |
 | `KTN_TRUENAS_REST_FALLBACK` | defaults to `false`. Legacy REST fallback for the JSON-RPC transport; only useful with a full-access key, and REST is removed in TrueNAS 26.04 — see `.env.example` |
 | `KTN_SG_DEVICE` | SES device node to expose to the container |
@@ -122,6 +123,7 @@ annotated list. The essentials:
 | `KTN_POLL_*_SECONDS` | polling intervals (5 / 20 / 30 / 120 by default) |
 | `KTN_ALERT_WEBHOOK_URL` | ntfy topic or webhook for health-change alerts; empty disables. Only a 2xx reply counts as delivered: a 3xx (redirects are not followed), 4xx, 5xx, connection error or malformed URL is a failure, and the alert is retried on a 60 s spacing until it is accepted. The URL is treated as a credential and never logged — see [SECURITY.md](SECURITY.md#health-alerts-the-webhook-url-is-a-credential) |
 | `KTN_ALERT_STYLE` | `ntfy` (plain text + headers) or `json` |
+| `KTN_ALERT_DETAIL` | defaults to `full`: the bay, SES slot, serial, `/dev/sdX`, pool/vdev, ZFS state, error counts and temperature, plus the enclosure id in the `json` style. `minimal` sends the bay number and the condition only (health, ZFS state, error counts, temperature): no serial, device path, pool/vdev names, SES slot or enclosure id, and in `json` those keys are present but `null`. Use `minimal` when the endpoint is on someone else's server, such as a public `ntfy.sh` topic, which keeps messages in its cache and lets anyone who has the topic name read them. `minimal` does not identify the enclosure, so with more than one shelf use the dashboard to tell which shelf the bay is on. Empty means `full`; any other value refuses to start |
 | `KTN_AUTH_REQUIRED` | defaults to `true`. `false` runs it as an open read-only dashboard, like scrutiny |
 | `KTN_ALLOW_ANONYMOUS_IDENT` | defaults to `false`, and stays false when auth is off. Permits the LED write with no account |
 | `KTN_TLS_ENABLED` | defaults to `false`. Serve HTTPS directly, e.g. with the TrueNAS UI's own certificate bound read-only (long bind syntax only) — see [INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md#serving-https-with-the-truenas-certificate) and the key note in [SECURITY.md](SECURITY.md#serving-https-with-the-truenas-certificate-opt-in). Fails closed, no plain-http fallback or redirect: use `https://`, update `http://` bookmarks and monitors; a browser that never opened the TrueNAS UI by name gets an empty response without `https://`; if the cert expires, `https://<NAS-IP>:8420` is the click-through fallback. Lockouts: see [Troubleshooting](#https-lockouts) |

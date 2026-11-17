@@ -56,3 +56,20 @@ def test_the_workflow_never_pipes_docker_logs_into_grep_q() -> None:
     text = WORKFLOW.read_text()
     assert "docker logs" in text  # control: the workflow still reads logs at all
     assert not re.findall(r"docker logs[^\n|]*\|\s*grep\s+-q", text)
+
+
+def test_the_workflow_never_pipes_anything_into_an_early_exiting_reader() -> None:
+    """grep -q and openssl x509 stop reading at their first match; under the
+    lib's pipefail the writer's broken pipe then fails the pipeline. Every
+    check in the job searches a captured string or a file instead."""
+    text = WORKFLOW.read_text()
+    assert "grep -q" in text  # control: the job still makes grep -q checks
+    assert "fingerprint <" in text  # control: and still fingerprints from a file
+    assert not re.findall(r"\|\s*grep\s+-q", text)
+    assert not re.findall(r"\|\s*fingerprint\b", text)
+
+
+def test_control_the_pipe_pattern_is_seen_when_present() -> None:
+    sample = 'x=$(curl -sS u | grep -q tls)\ny=$(openssl s_client </dev/null | fingerprint)'
+    assert re.findall(r"\|\s*grep\s+-q", sample)
+    assert re.findall(r"\|\s*fingerprint\b", sample)

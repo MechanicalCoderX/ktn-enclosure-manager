@@ -6,12 +6,145 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- **The privileged helper no longer follows a symlink, or anything else
+  substituted, at the enclosure lock path; on earlier versions a compromised
+  web process could use it to run code as root inside the container.** The
+  helper (root) opens `/run/ktn/enclosure.lock` on every poll, in a directory
+  the web process's group can write and that has no sticky bit. The open
+  followed symlinks and then set the result to `0666`. A web process that had
+  already been compromised could therefore plant a link and have root make
+  any root-owned file in the container world-writable, or, with a dangling
+  link, create one anywhere root can write - for example a `.pth` file in
+  site-packages. The image's HEALTHCHECK, which runs Python as root every
+  30 seconds, then executed it: root code execution within the container
+  inside one interval, with no restart. That escalation stays within the
+  container, which holds only `SETUID`/`SETGID`, with `no-new-privileges`.
+  The lock is now opened with `O_NOFOLLOW`, `O_NONBLOCK` and `O_NOCTTY` and
+  checked through its descriptor: it must be a regular file with exactly one
+  link, and only its owner changes its mode. Anything else at that path is
+  refused and enclosure access carries on unsynchronised, as it already did
+  for any unusable lock; nothing is deleted. Refusals are logged as errors,
+  once an hour per kind of substitute, naming what was found. The lock stays
+  `0666` and shared between root and uid 1000 exactly as before. Found by the
+  1.5.6 deep review.
+- **The image's HEALTHCHECK runs Python isolated (`python -I -S`).** Docker
+  runs it as root, and a normal Python start-up runs code from every `.pth`
+  file and any `sitecustomize` in site-packages, so any way for a lesser
+  process to plant one became root code execution within 30 seconds. The
+  check now ignores `PYTHON*` variables, the user site and site-packages
+  entirely; it needs only the standard library. Plain and HTTPS deployments
+  are probed exactly as before.
+- **Account-file race fixed.** Account changes were unlocked read-modify-writes
+  of `/data/users.json`, and the account routes run concurrently. Two
+  first-run bootstraps sent together were both told `{"ok": true}` while the
+  second silently replaced the first administrator; concurrent session
+  revocations lost updates; a password change could be undone - old password
+  and old session epoch restored - by a revocation or a sign-in rehash that
+  had read the file just before it; and writers sharing one `users.tmp` could
+  leave the file briefly unreadable, which fails closed and refuses everyone.
+  Every account change is now serialised in the web process; bootstrap
+  re-checks for an existing account immediately before writing (the second
+  caller gets the usual "an administrator account already exists"); the
+  sign-in rehash writes only if the password is unchanged; and each write
+  goes to its own `0600` temp file that is fsync'ed and atomically renamed
+  into place. Temp files a crash leaves behind, and the `users.tmp` of
+  earlier releases - each a copy of the password hashes - are removed at
+  startup. No data migration and no configuration change.
+- **A password change now ends a session that signs in during it.** Sign-in
+  verified the password, then read the account again to issue the session,
+  so a password change that landed in between gave a sign-in with the *old*
+  password a session that survived the change. A successful sign-in resets
+  the rate limiter, so someone who already had the old password could sign
+  in back to back and keep that window open. A sign-in's session now carries
+  the account state it actually verified; one that races a password change
+  (or "sign out everywhere") gets a session that is already ended and has to
+  sign in again.
+- A `WARNING` is logged once at startup when `KTN_TRUENAS_URL` is `http://`
+  (or `ws://`) with an API key set. The key is then sent unencrypted, and
+  TrueNAS documents that it automatically revokes a user-linked API key
+  presented over insecure HTTP
+  ([TrueNAS 25.10 API documentation](https://www.truenas.com/docs/scale/25.10/api/)),
+  so expect it to stop working. The warning names the scheme and host only
+  (the host is withheld if the URL contains `@`), never the key. `http://` is
+  not refused.
+- **The image's Python dependencies are installed from a hash-pinned lock**
+  (`backend/requirements.txt`, `pip install --require-hashes`) instead of
+  whatever PyPI served at build time, so two builds of one release ship the
+  same libraries and a rollback no longer silently changes them. The lock is
+  compiled for the image's Python 3.15 and covers both published
+  architectures, amd64 and arm64. Dependabot's `uv` ecosystem proposes its
+  updates, but it chooses each direct dependency's version under the lowest
+  Python `requires-python` allows (3.11), so a release that needs a newer
+  Python has to be bumped by hand (CONTRIBUTING.md, "Dependency lock"). Not
+  covered by the hashes: the build tools pip fetches during the image build
+  to build the project and PyYAML's source distribution (setuptools, Cython).
+- The Dockerfile's BuildKit frontend (`# syntax=`) is pinned by digest, like
+  the base images. Dependabot does not read that line, so the same reference
+  also sits in a never-built `syntax-pin` stage that it does bump, and a test
+  fails until line 1 is updated to match.
+
+### Added
+- `KTN_ALERT_DETAIL` (`full` | `minimal`, default `full`; empty also means
+  `full`). `minimal` sends a health alert with the bay number and condition
+  only (health, ZFS state, error counts, temperature) - no serial,
+  `/dev/sdX`, pool/vdev names, SES slot or enclosure id; in the `json` style
+  those keys are present but `null`. For webhooks on a third-party host such
+  as a public ntfy.sh topic. It does not identify the enclosure, so on a
+  multi-shelf setup the dashboard tells which shelf. `full` is unchanged,
+  byte for byte. Any other value refuses to start.
+
 ### Changed
 - **Runtime base image: Python 3.14 → 3.15** (`python:3.15-slim`, digest
   `8c13a3f`; Dependabot #64). CI's backend and E2E jobs now run on 3.15 too,
   so the suite tests the interpreter the image ships
   (`tests/test_version_consistency.py` enforces this). No data migration and
   no configuration change.
+- CI now type-checks the backend and the privileged helper with mypy, using
+  the project's mypy settings (`disallow_untyped_defs`, `warn_unused_ignores`);
+  mypy was configured but never run. Its version is pinned once, in the
+  backend's `dev` extra, which CI and local installs both use. CONTRIBUTING's
+  command now passes `--config-file`, without which those settings were
+  silently skipped.
+- CI's backend tests and E2E now run on the hash-pinned lock the image ships,
+  not on the newest versions pyproject's ranges allow, and `pip-audit` audits
+  the lock file as well as the test environment. A new CI step re-derives the
+  lock from `backend/requirements.in` and fails if it was edited by hand or
+  compiled differently.
+
+### Fixed
+- An IDENT request for an enclosure whose SCSI generic (sg) device went away
+  after its first IDENT is now refused cleanly: HTTP 400, "enclosure has no
+  sg device for SES IDENT". Where IDENT runs in the web process (no
+  privileged helper) it used to fail with an internal TypeError, so the
+  request got an HTTP 500, and an expired IDENT's automatic clear retried on
+  every timer tick, writing an audit line and a traceback each time, instead
+  of backing off and giving up after the usual bounded attempts. Under the
+  privileged helper (the catalog app and the shipped compose files) the
+  request was already refused; only its message changes.
+- **A failed `pip install` during the image build no longer exits 0.**
+  Written as `A && B || true`, the `|| true` meant for removing pip also
+  swallowed a failed install, so the build could succeed and produce an image
+  without fastapi or uvicorn. `pip check` now also fails the build if the
+  lock stops covering the names and versions pyproject declares (extras such
+  as `uvicorn[standard]` are checked by the CI lock step instead).
+- CI's TLS smoke test no longer pipes output into a reader that stops at its
+  first match (`grep -q`, the certificate fingerprint). Under the job's
+  `pipefail` the writer's broken pipe could fail a check that had passed (the
+  cause of one flaky run, fixed for `docker logs` in #63) or, in the
+  plain-HTTP check, pass one that should have failed. Output is now captured
+  first, and a test bans the pattern in the workflow.
+
+### Documentation
+- SECURITY.md: how the helper treats the shared `/run/ktn` tmpfs (the
+  enclosure lock and the helper socket), the isolated HEALTHCHECK, how
+  account changes are serialised and written, why `KTN_TRUENAS_URL` should be
+  `https://`, what an alert contains under each `KTN_ALERT_DETAIL`, and the
+  hash-pinned lock under supply chain.
+- CONTRIBUTING.md has a "Dependency lock" section: how the lock is compiled,
+  what checks it, and how Dependabot updates it. README and `.env.example`
+  document `KTN_ALERT_DETAIL` and the `https://` advice for
+  `KTN_TRUENAS_URL`.
 
 ## [1.6.2] — 2026-10-31
 
