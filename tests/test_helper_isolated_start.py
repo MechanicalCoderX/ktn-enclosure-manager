@@ -15,6 +15,7 @@ command from the entrypoint itself, so they fail if that line drifts.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -30,6 +31,7 @@ from pathlib import Path
 
 import pydantic
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 ENTRYPOINT = ROOT / "docker-entrypoint.sh"
@@ -37,6 +39,9 @@ HELPER = ROOT / "helper" / "ktn_ident_helper.py"
 IMAGE_HELPER = "/app/helper/ktn_ident_helper.py"
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
 FIXTURE_ENCLOSURE = "0x50060480aabbcc00"
+VERIFY = ROOT / ".github" / "workflows" / "verify.yml"
+SMOKE_LIB = ROOT / ".github" / "tls-smoke-lib.sh"
+HELPER_SOCKET_ENV = "-e KTN_IDENT_HELPER_SOCKET=/run/ktn/ident.sock"
 
 
 def helper_start_argv() -> list[str]:
@@ -224,3 +229,69 @@ def test_the_isolated_helper_needs_its_import_path() -> None:
     )
     assert out.returncode != 0
     assert "No module named 'pydantic'" in out.stderr, out.stderr
+
+
+# ----------------------------------------------- the image, in CI (REVIEW-164 F4)
+
+
+def test_a_ci_smoke_container_starts_the_real_helper() -> None:
+    """The tests above start the helper on CI's interpreter. Only a container
+    proves the image's own interpreter and layout (the non-venv sysconfig
+    branch, /usr/local, pip's site-packages) give it what it imports, so one
+    smoke container in verify.yml must configure the helper and check that
+    /healthz reports it ok - on the /run/ktn tmpfs, as the app runs it."""
+    steps = yaml.safe_load(VERIFY.read_text())["jobs"]["tls-smoke"]["steps"]
+    runs = [re.sub(r"\\\n\s*", " ", step.get("run", "")) for step in steps]
+    docker_runs = [
+        (run, line) for run in runs for line in run.splitlines()
+        if line.strip().startswith("docker run ")
+    ]
+    assert len(docker_runs) >= 3, "control: the job's docker run lines were found"
+
+    with_helper = [(run, line) for run, line in docker_runs if HELPER_SOCKET_ENV in line]
+    assert len(with_helper) == 1, "no smoke container starts the IDENT helper"
+    run, line = with_helper[0]
+    assert '"${HARDENING[@]}"' in line, "the helper's socket needs HARDENING's /run/ktn tmpfs"
+    assert "--tmpfs /run/ktn:" in SMOKE_LIB.read_text()
+    argv = shlex.split(line)
+    name = argv[argv.index("--name") + 1]
+    assert f"wait_healthy {name}" in run
+    # Captured, then searched (tests/test_smoke_lib_pipefail.py).
+    assert "grep -qF '\"helper\":\"ok\"' <<<\"$health\"" in run
+
+
+@pytest.mark.parametrize("cfg_at", ["bin", "root", None])
+def test_a_venv_is_recognised_without_site(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cfg_at: str | None
+) -> None:
+    """_import_path's pyvenv.cfg branch (REVIEW-164 N5), on any interpreter.
+
+    Under -S nothing switches a venv to its own prefix, so the helper looks
+    for pyvenv.cfg beside the interpreter or one level up, as the interpreter
+    does. On CI's 3.15 getpath already sets sys.prefix to the venv, so the
+    subprocess tests above pass with or without this branch; here a fake venv
+    layout, an interpreter path inside it and nothing else decide.
+    """
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    if cfg_at == "bin":
+        (venv / "bin" / "pyvenv.cfg").write_text("home = /nonexistent\n")
+    elif cfg_at == "root":
+        (venv / "pyvenv.cfg").write_text("home = /nonexistent\n")
+
+    monkeypatch.setattr(sys, "path", list(sys.path))  # the module extends it on load
+    spec = importlib.util.spec_from_file_location("ktn_ident_helper_venv_probe", HELPER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(sys, "executable", str(venv / "bin" / "python"))
+
+    backend, *packages = module._import_path()
+
+    assert backend == str(ROOT / "backend")
+    inside = [Path(p).is_relative_to(venv) for p in packages]
+    if cfg_at is None:
+        # Control: no pyvenv.cfg, so this interpreter's own install paths.
+        assert inside == [False, False], packages
+    else:
+        assert inside == [True, True], packages
