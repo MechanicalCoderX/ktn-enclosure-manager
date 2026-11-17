@@ -63,6 +63,19 @@ the IDENT write and the read-only `sg_ses` telemetry cross the socket. The
 helper re-validates every request independently — it does not trust the web
 process to have validated anything — and enforces the enclosure allow-list.
 
+The helper and the web process share one directory, the `/run/ktn` tmpfs
+(owned root:1000, mode `0770`/`2770`, no sticky bit), so the helper treats
+paths in it as controlled by the web process:
+
+- **Enclosure lock** (opened by root on every poll): opened with
+  `O_NOFOLLOW`, then checked through the descriptor - a regular file with a
+  single link - before root changes its mode. A symlink, hard link, FIFO,
+  socket or device planted there is refused, never followed.
+- **Helper socket**: checked once, at helper start, with `lstat` that the
+  entry is still the socket the helper just bound before root changes its
+  group and mode. The tmpfs is empty at every container start and the web
+  process is not yet running when this happens.
+
 ## Container privileges
 
 The shipped `docker-compose.yml` drops **all** capabilities and adds back only:
@@ -74,6 +87,11 @@ The shipped `docker-compose.yml` drops **all** capabilities and adds back only:
 `no-new-privileges` is set, the **default AppArmor profile is left in place**,
 `--privileged` is never used, and there is no `/sys` bind mount. The only host
 access is the SES device node.
+
+The image's HEALTHCHECK runs as root, so it starts Python with `-I -S`: no
+`PYTHON*` variables, no user site, and no site-packages, `.pth` files or
+`sitecustomize`. A file planted there by a lesser process is never executed
+by it.
 
 Notably absent: `CAP_DAC_OVERRIDE`. The LED is driven by a SCSI command rather
 than a sysfs write, so no capability is needed for it at all.
@@ -134,10 +152,20 @@ answers on that name (on TrueNAS, the appliance UI already sends its own).
 
 ## Supply chain
 
-Base images are pinned by digest. CodeQL (`security-extended`) runs on Python
-and TypeScript weekly and on every pull request, `pip-audit` and `npm audit`
-cover dependencies, Trivy scans the built image for HIGH/CRITICAL issues, and
-Dependabot keeps all four current.
+Base images and the BuildKit frontend are pinned by digest. Runtime Python
+dependencies are pinned with SHA-256 hashes in `backend/requirements.txt`, and
+the image build refuses any file that does not match. CI runs the tests and
+E2E on that same lock and fails if it no longer matches what
+`backend/requirements.in` compiles to. Not covered by the hashes: the build
+tools pip fetches during the image build to build the project and PyYAML's
+source distribution (setuptools, Cython).
+
+CodeQL (`security-extended`) runs on Python and TypeScript weekly and on every
+pull request, `pip-audit` (on the lock and on the test environment) and
+`npm audit` cover dependencies, Trivy scans the built image for HIGH/CRITICAL
+issues, and Dependabot keeps all four current. For the Python lock it picks
+each direct dependency's version under the lowest Python `requires-python`
+allows (3.11), so a release that needs a newer Python is bumped by hand.
 
 ## Authentication
 
@@ -165,9 +193,24 @@ below rather than left implicit.
   so every existing session for that account stops being accepted. That is the
   action a user takes when they suspect compromise, so it has to be the action
   that ends the attacker's access.
-- The account file and the session signing key are created `0600` by `os.open`,
-  not written and then `chmod`ed — the latter leaves them world-readable for
-  the width of that window.
+- The account file and the session signing key are `0600` from the moment they
+  exist - the key is created by `os.open` with that mode, the account file is
+  written to a fresh `mkstemp` temp file pinned `0600` - never written and then
+  `chmod`ed, which leaves them world-readable for the width of that window.
+- Account changes - first-run bootstrap, password change, session revocation and
+  the rehash on sign-in - are serialised in the web process, and each is written
+  to its own temp file, fsync'ed and atomically renamed into place. Two
+  simultaneous first-run bootstraps cannot both succeed: one creates the
+  administrator and the other is refused. The lock is in-process: the app runs
+  as a single uvicorn process and is the file's only writer. Running several
+  workers (`WEB_CONCURRENCY`) is not supported; it would also multiply the login
+  rate limit.
+- A temp file left by a crash mid-write (or the fixed-name `users.tmp` that
+  earlier releases wrote) is removed at the next startup once it is a minute
+  old: exact names only, regular files only, never through a symlink.
+- A sign-in's session is bound to the account state it verified, so a password
+  change ends every session, including one whose sign-in was still in flight
+  when the change landed.
 - An account file that exists but cannot be read or parsed **fails closed**. It
   is deliberately not treated as "no accounts": that would reopen the
   unauthenticated bootstrap endpoint and let anyone on the network claim an
@@ -367,7 +410,29 @@ A health change whose alert was not accepted is not recorded as notified; it
 is retried on a 60-second spacing until the endpoint accepts it. A failing
 endpoint never disturbs polling.
 
+**What an alert contains.** By default (`KTN_ALERT_DETAIL=full`) a message
+names the bay, SES slot, drive serial, `/dev/sdX`, pool/vdev, ZFS state, error
+counts and temperature, and the `json` style adds the enclosure's logical id.
+On a public ntfy.sh topic, that inventory sits in a third party's cache and
+anyone who has the topic name can read it. `KTN_ALERT_DETAIL=minimal` sends
+the bay number and condition only. It does not identify the enclosure either,
+so on a multi-shelf setup use the dashboard to tell which shelf. A self-hosted
+ntfy server avoids the issue entirely.
+
 ## TLS: connect by the name on the certificate
+
+**Use `https://` for `KTN_TRUENAS_URL`.** The key is sent in
+`auth.login_with_api_key` on every new connection, so with `http://` it
+crosses the network in clear. TrueNAS's own API documentation states that it
+"automatically revokes any user-linked API keys passed as part of an
+authentication attempt via insecure (HTTP) transport", and that HTTPS "is
+required for TrueNAS API authentication using API keys"
+([TrueNAS 25.10 API documentation](https://www.truenas.com/docs/scale/25.10/api/)).
+Expect a key used over `http://` to stop working: pool, vdev and SMART data
+then fail with an authentication error until you create a new key and switch
+to `https://`. KTN does not refuse `http://`, but it logs a `WARNING` at
+startup naming the scheme and host, never the key. The host is withheld too
+if the URL contains `@`.
 
 `KTN_TRUENAS_VERIFY_TLS` defaults to `true` and should stay there. If
 verification fails, the usual cause is not a missing trust store — it is
