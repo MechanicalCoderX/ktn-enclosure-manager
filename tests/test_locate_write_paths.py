@@ -363,3 +363,41 @@ def test_helper_ses_reader_degrades_when_the_helper_is_gone(tmp_path: Path) -> N
     assert runner.version() is None
     with pytest.raises(SesError, match="helper unreachable"):
         runner.read_page_for(STL3_ID, "configuration")
+
+
+# ------------------------------------------- sg node lost after warm-up (HTTP)
+
+
+def test_identify_after_sg_node_lost_is_a_400_with_the_reason(tmp_path: Path) -> None:
+    """The in-process SES path end to end: real build_app, real
+    SysfsEnclosureBackend over the captured tree, real SesRunner running the
+    fake-sg_ses replay. The first IDENT warms both topology caches (the replay
+    refuses the IDENT command itself, so it is a 400 for that reason). Then the
+    enclosure's scsi_generic node disappears; resolve() re-scans sysfs per
+    request, so the next IDENT sees no sg device. That must be the refusal
+    (400, with the reason), not an internal error (500)."""
+    from fastapi.testclient import TestClient
+    from ktnmgr.config import Settings
+    from ktnmgr.main import build_app
+
+    sysfs = tmp_path / "sys"
+    shutil.copytree(SYSFS_FIXTURE, sysfs)
+    settings = Settings(
+        _env_file=None, sysfs_root=sysfs, dev_root=tmp_path / "dev",
+        data_dir=tmp_path / "data", truenas_url="", poll_slots_seconds=3600,
+        ident_method="ses", sg_ses_binary=str(FAKE_SG_SES),
+        auth_required=False, allow_anonymous_ident=True,
+    )
+    url = f"/api/enclosures/{STL3_ID}/slots/3/identify"
+    body = {"on": True, "duration_seconds": 300}
+    csrf = {"x-ktn-request": "1"}
+    with TestClient(build_app(settings), raise_server_exceptions=False) as client:
+        warm = client.post(url, json=body, headers=csrf)
+        assert warm.status_code == 400 and "IDENT command failed" in warm.json()["detail"]
+        writer = client.app.state.service.ident.writer  # type: ignore[attr-defined]
+        assert STL3_ID in writer._type_index and STL3_ID in writer._slot_to_element
+
+        shutil.rmtree(sysfs / ENCLOSURE_DIR / "device" / "scsi_generic")
+        lost = client.post(url, json=body, headers=csrf)
+        assert lost.status_code == 400, lost.text
+        assert lost.json() == {"detail": "enclosure has no sg device for SES IDENT"}

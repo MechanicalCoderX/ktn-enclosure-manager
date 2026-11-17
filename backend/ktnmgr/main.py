@@ -19,7 +19,7 @@ from ktnmgr.enclosure.disks import DiskInfoReader
 from ktnmgr.enclosure.helper_client import HelperUnavailableError
 from ktnmgr.enclosure.helper_client import send as helper_send
 from ktnmgr.enclosure.locate import build_locate_writer
-from ktnmgr.enclosure.ses import HelperSesRunner, SesRunner
+from ktnmgr.enclosure.ses import HelperSesRunner, SesReader, SesRunner
 from ktnmgr.enclosure.sysfs import SysfsEnclosureBackend
 from ktnmgr.services.audit import AuditLog
 from ktnmgr.services.auth import AuthService
@@ -78,7 +78,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     disks = DiskInfoReader(sysfs_root=settings.sysfs_root)
     # When a helper socket is configured the web process reads SES pages
     # through it, so it needs no access to /dev/sg* at all.
-    ses = (
+    ses: SesReader = (
         HelperSesRunner(settings.ident_helper_socket)
         if settings.ident_helper_socket
         else SesRunner(binary=settings.sg_ses_binary, lock_path=lock_path)

@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 from ktnmgr.enclosure.access import default_lock_path
 from ktnmgr.enclosure.locate import (
     LocateError,
+    LocateWriter,
     build_local_locate_writer,
     validate_request,
 )
@@ -55,7 +56,7 @@ class IdentHandler(socketserver.StreamRequestHandler):
     backend: SysfsEnclosureBackend
     allowlist: set[str]
     ses: SesRunner
-    writer: object
+    writer: LocateWriter
 
     # Applied to every connection by StreamRequestHandler.setup(). Without it,
     # a client that connects and never sends a newline pins this thread - in

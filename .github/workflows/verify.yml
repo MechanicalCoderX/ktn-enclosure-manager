@@ -44,6 +44,17 @@ jobs:
       - name: Lint
         run: ruff check backend helper tests
 
+      - name: Type check
+        # mypy comes from the Install step: it is pinned exactly in
+        # backend/pyproject.toml [dev], the one place its version is set, so
+        # this gate and a local `pip install -e 'backend[dev]'` cannot drift
+        # apart. Do not add a second inline pin here. --config-file is
+        # required: run from the repo root without it, mypy finds no config
+        # and silently drops disallow_untyped_defs.
+        run: |
+          mypy --version
+          mypy --config-file backend/pyproject.toml backend/ktnmgr helper
+
       - name: Tests
         # The suite runs entirely against captured fixtures; no hardware and no
         # TrueNAS instance is required.
