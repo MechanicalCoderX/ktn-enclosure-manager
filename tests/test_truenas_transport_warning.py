@@ -1,13 +1,15 @@
-"""A TrueNAS API key configured with a plain http:// URL is warned about.
+"""With KTN_TRUENAS_ALLOW_INSECURE=true, a plain http:// URL is warned about.
 
 truenas/client.py turns http:// into ws:// and sends the key in
 auth.login_with_api_key on every new socket, so with an http:// URL the key
 crosses the network unencrypted - and TrueNAS documents that it revokes a
-user-linked key presented that way. This branch only warns: one WARNING at
-startup naming the scheme and host. The key, the path and query never appear
-in it, and when the URL contains "@" the host is withheld as well, because
-urlsplit's hostname of a userinfo holding "/", "?" or "#" is the username or
-part of a token. Every URL and key here is synthetic.
+user-linked key presented that way. Without the opt-in the key is not sent at
+all (tests/test_truenas_insecure_refusal.py). With it, the client is built
+and one WARNING is logged at startup naming the scheme and host. The key, the
+path and query never appear in it, and when the URL contains "@" the host is
+withheld as well, because urlsplit's hostname of a userinfo holding "/", "?"
+or "#" is the username or part of a token. Every URL and key here is
+synthetic.
 """
 
 from __future__ import annotations
@@ -32,6 +34,8 @@ def settings(tmp_path: Path, **overrides: object) -> Settings:
         "dev_root": tmp_path / "dev",
         "ident_method": "sysfs",
         "truenas_api_key": KEY,
+        # The opt-in: this module is about the path where the key IS sent.
+        "truenas_allow_insecure": True,
     }
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]
@@ -57,7 +61,7 @@ def test_plain_scheme_with_a_key_warns(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, url: str
 ) -> None:
     with caplog.at_level(logging.DEBUG):
-        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is True
+        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is None
     found = warnings(caplog)
     assert len(found) == 1
     message = found[0]
@@ -73,7 +77,7 @@ def test_encrypted_scheme_is_silent(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, url: str
 ) -> None:
     with caplog.at_level(logging.DEBUG):
-        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is False
+        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is None
     assert warnings(caplog) == []
 
 
@@ -89,7 +93,7 @@ def test_nothing_to_warn_about_when_truenas_is_not_configured(
     with caplog.at_level(logging.DEBUG):
         assert check_truenas_transport(
             settings(tmp_path, truenas_url=url, truenas_api_key=key)
-        ) is False
+        ) is None
     assert warnings(caplog) == []
 
 
@@ -98,7 +102,7 @@ def test_the_key_and_userinfo_never_reach_the_log(
 ) -> None:
     url = f"http://svc:{USERINFO_SECRET}@nas.example.invalid:8080/private/path?token={KEY}"
     with caplog.at_level(logging.DEBUG):
-        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is True
+        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is None
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert len(warnings(caplog)) == 1, "control: the warning was not logged"
     assert "host withheld" in text, "control: the userinfo guard did not run"
@@ -126,7 +130,7 @@ def test_userinfo_with_a_delimiter_never_reaches_the_log(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, url: str
 ) -> None:
     with caplog.at_level(logging.DEBUG):
-        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is True
+        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is None
     found = warnings(caplog)
     assert len(found) == 1, "control: the warning was not logged"
     text = "\n".join(r.getMessage() for r in caplog.records).lower()
@@ -141,7 +145,7 @@ def test_an_at_sign_only_in_the_path_still_withholds_the_host(
     """Conservative: any "@" withholds; the warning itself still fires."""
     url = "http://nas.example.invalid/a@b"
     with caplog.at_level(logging.DEBUG):
-        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is True
+        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is None
     assert "host withheld" in "\n".join(warnings(caplog))
 
 
@@ -151,7 +155,7 @@ def test_an_unparsable_host_is_not_echoed(
     """urlsplit refuses an unbalanced '['; the warning must still be safe."""
     url = f"http://[{USERINFO_SECRET}"
     with caplog.at_level(logging.DEBUG):
-        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is True
+        assert check_truenas_transport(settings(tmp_path, truenas_url=url)) is None
     text = "\n".join(warnings(caplog))
     assert text, "control: the warning was not logged"
     assert USERINFO_SECRET not in text
