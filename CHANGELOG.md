@@ -4,7 +4,12 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.6.3] — 2026-11-16
+
+Security hardening from the 1.5.6 deep review, and the Python 3.15 runtime.
+No data migration and no configuration change: upgrading and rolling back are
+image changes only. One new optional setting, `KTN_ALERT_DETAIL` (default
+`full`, unchanged behaviour).
 
 ### Security
 - **The privileged helper no longer follows a symlink, or anything else
