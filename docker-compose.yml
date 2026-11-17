@@ -91,6 +91,9 @@ services:
       KTN_TRUENAS_API_KEY: ${KTN_TRUENAS_API_KEY:-}
       KTN_TRUENAS_VERIFY_TLS: ${KTN_TRUENAS_VERIFY_TLS:-true}
       KTN_TRUENAS_CA_BUNDLE: ${KTN_TRUENAS_CA_BUNDLE:-}
+      # Off by default: over http:// the API key is then never sent (the app
+      # runs without TrueNAS data and says why). true sends it in clear.
+      KTN_TRUENAS_ALLOW_INSECURE: ${KTN_TRUENAS_ALLOW_INSECURE:-false}
       # Legacy REST /api/v2.0 fallback. Off by default: role-scoped keys are
       # refused by REST (403) while working over JSON-RPC, and REST is removed
       # in TrueNAS 26.04. Enable only with a full-access key.

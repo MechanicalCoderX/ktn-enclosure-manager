@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import ssl
 import time
 from typing import Any
@@ -34,6 +35,30 @@ DEFAULT_TIMEOUT = 15.0
 #: How long to stay on the REST fallback after a WebSocket transport failure
 #: before trying the preferred transport again.
 WS_RETRY_COOLDOWN = 300.0
+
+#: An RFC 3986 scheme directly followed by "://": the only part of the URL
+#: that normalise_url() changes.
+_SCHEME_PREFIX = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*(?=://)")
+
+
+def normalise_url(url: str) -> str:
+    """KTN_TRUENAS_URL as the client uses it.
+
+    Surrounding whitespace and trailing "/" are removed and the scheme is
+    lower-cased; host, port and path are left exactly as given. Schemes are
+    case-insensitive (RFC 3986 3.1), and check_truenas_transport() reads them
+    that way, but everything below compares them as text: unnormalised,
+    ``HTTPS://`` never reached the ws/wss mapping (websockets refused the URI),
+    ``WSS://`` skipped the TLS context, so KTN_TRUENAS_VERIFY_TLS and
+    KTN_TRUENAS_CA_BUNDLE were silently ignored, and an opted-in ``HTTP://``
+    never connected (REVIEW-164 N1). Normalised once here, every spelling
+    behaves exactly like its lower-case form.
+    """
+    url = url.strip().rstrip("/")
+    match = _SCHEME_PREFIX.match(url)
+    if match is not None:
+        url = match.group().lower() + url[match.end():]
+    return url
 
 
 class TrueNASError(RuntimeError):
@@ -71,7 +96,7 @@ class TrueNASClient:
         timeout: float = DEFAULT_TIMEOUT,
         rest_fallback: bool = False,
     ) -> None:
-        self.url = url.rstrip("/")
+        self.url = normalise_url(url)
         self._api_key = api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
         self.verify_tls = verify_tls
         self.ca_bundle = ca_bundle
@@ -102,7 +127,13 @@ class TrueNASClient:
 
     @property
     def _ws_url(self) -> str:
-        base = self.url.replace("https://", "wss://").replace("http://", "ws://")
+        # The scheme only (self.url's is already lower-case): a plain
+        # str.replace() would also rewrite an "http://" further along the URL.
+        base = self.url
+        for plain, socket_scheme in (("https://", "wss://"), ("http://", "ws://")):
+            if base.startswith(plain):
+                base = socket_scheme + base[len(plain):]
+                break
         return f"{base}/api/current"
 
     # -------------------------------------------------------------- transports

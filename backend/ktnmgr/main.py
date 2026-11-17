@@ -93,15 +93,20 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     ident = IdentManager(writer=writer, audit=audit, state_path=settings.ident_state_path)
 
     truenas: TrueNASClient | None = None
+    truenas_refused: str | None = None
     if settings.truenas_url and settings.truenas_api_key.get_secret_value():
-        truenas = TrueNASClient(
-            url=settings.truenas_url,
-            api_key=settings.truenas_api_key,
-            verify_tls=settings.truenas_verify_tls,
-            ca_bundle=settings.truenas_ca_bundle,
-            rest_fallback=settings.truenas_rest_fallback,
-        )
-        check_truenas_transport(settings)
+        # Decided before the client exists: over http:// or ws:// without
+        # KTN_TRUENAS_ALLOW_INSECURE=true no client is built, so nothing can
+        # send the key in clear. The rest of the app runs as without TrueNAS.
+        truenas_refused = check_truenas_transport(settings)
+        if truenas_refused is None:
+            truenas = TrueNASClient(
+                url=settings.truenas_url,
+                api_key=settings.truenas_api_key,
+                verify_tls=settings.truenas_verify_tls,
+                ca_bundle=settings.truenas_ca_bundle,
+                rest_fallback=settings.truenas_rest_fallback,
+            )
     else:
         log.warning("TrueNAS not configured; pool, vdev and SMART data will be unavailable")
 
@@ -120,7 +125,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     service = StateService(
         settings=settings, backend=backend, disks=disks, ses=ses, ident=ident,
-        truenas=truenas, notifier=notifier,
+        truenas=truenas, notifier=notifier, truenas_refused=truenas_refused,
     )
     auth = AuthService(
         users_path=settings.users_path,
