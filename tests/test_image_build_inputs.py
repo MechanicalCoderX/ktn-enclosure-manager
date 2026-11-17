@@ -258,6 +258,12 @@ def test_image_lock_install_is_wheels_only() -> None:
     lock_install = [s for s in cmd.split("&&") if "-r /app/backend/requirements.txt" in s]
     assert len(lock_install) == 1, cmd
     assert re.search(r"--only-binary[ =]:all:(\s|$)", lock_install[0]), lock_install[0]
+    # Present is not the same as in effect: a --no-binary on the same line
+    # (":all:", or the names it lists) switches source builds back on, and
+    # PIP_NO_BINARY does the same from the environment. REVIEW-164 N6: the
+    # mutant `--only-binary :all: --no-binary :all:` passed this test.
+    assert "--no-binary" not in cmd, cmd
+    assert not [i for i in _instructions() if "PIP_NO_BINARY" in i]
 
 
 def test_runtime_dependencies_use_no_extras() -> None:
