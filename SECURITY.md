@@ -175,7 +175,8 @@ pull request, `pip-audit` (on the lock and on the test environment) and
 `npm audit` cover dependencies, Trivy scans the built image for HIGH/CRITICAL
 issues, and Dependabot keeps all four current. For the Python lock it picks
 each direct dependency's version under the lowest Python `requires-python`
-allows (3.11), so a release that needs a newer Python is bumped by hand.
+allows, which is kept equal to the image's Python, so no release the image
+can run is held back.
 
 ## Authentication
 

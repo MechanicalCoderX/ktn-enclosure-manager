@@ -86,9 +86,9 @@ newest releases; to match CI, install `backend/requirements.txt` with
 
 Dependabot (`uv` ecosystem, `/backend`) recompiles with the same options, read
 back from the lock header. It chooses the version of each direct dependency
-under the lowest Python that `requires-python` allows (3.11), not the image's
-3.15, so a release that drops 3.11 is not proposed and has to be bumped by
-hand with `--upgrade-package`.
+under the lowest Python that `requires-python` allows, so that floor is kept
+equal to the image's Python (3.15); a test fails if the two drift apart. A
+local install therefore needs Python 3.15 or later.
 
 ## Adding support for another enclosure
 

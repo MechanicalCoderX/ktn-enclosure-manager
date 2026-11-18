@@ -313,13 +313,12 @@ def test_dependabot_regenerates_the_lock_for_the_image_python() -> None:
 
     Dependabot's uv ecosystem reads --universal, --python-version and
     --generate-hashes back from the lock header and recompiles with them; its
-    pip ecosystem runs pip-compile under the lowest pre-installed Python that
-    satisfies requires-python (>=3.11, so 3.11) with no --universal, and would
-    rewrite the lock for an interpreter the image does not run.
+    pip ecosystem runs pip-compile with no --universal, and would rewrite the
+    lock for one platform only.
 
-    Not covered by this choice: for the ten direct dependencies, which are
-    declared in pyproject.toml, uv still picks the *target version* under that
-    same lowest Python. A release that needs Python 3.12+ is never proposed.
+    For the direct dependencies declared in pyproject.toml, uv picks the
+    *target version* under the lowest Python requires-python allows; that
+    floor is held to the image's Python by test_version_consistency.py.
     """
     updates = yaml.safe_load(DEPENDABOT.read_text())["updates"]
     backend = [u for u in updates if u["directory"].rstrip("/") == "/backend"]

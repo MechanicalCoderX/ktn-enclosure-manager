@@ -5,17 +5,16 @@ updates:
   # requirements.in (CONTRIBUTING.md, "Dependency lock"). This is the uv
   # ecosystem, not pip, on purpose: uv reads --python-version, --universal and
   # --generate-hashes back from the lock header and recompiles with them. The
-  # pip ecosystem re-runs pip-compile under the lowest pre-installed Python that
-  # satisfies requires-python (">=3.11", so 3.11) and has no --universal, so
-  # its lock would be resolved for an interpreter the image does not run.
+  # pip ecosystem re-runs pip-compile with no --universal, so its lock would be
+  # resolved for one platform only.
   #
-  # The limit: uv recompiles the lock for 3.15, but it still *chooses* the
-  # target version of each direct dependency (the ones declared in
-  # pyproject.toml) under that lowest Python, 3.11, and so does a security
-  # update. A release that needs Python 3.12+ is never proposed; if it carries
-  # a security fix, CI's pip-audit of the lock fails and the bump is by hand.
-  # Only transitive dependencies are chosen for 3.15. uv's support for
-  # `uv pip compile` files is in dependabot-core's code and specs, not its docs.
+  # uv chooses the target version of each direct dependency (the ones declared
+  # in pyproject.toml), security updates included, under the lowest Python that
+  # requires-python allows. That floor is ">=3.15", the image's Python, so
+  # every release the image can run is proposed;
+  # tests/test_version_consistency.py fails if the image moves without it.
+  # uv's support for `uv pip compile` files is in dependabot-core's code and
+  # specs, not its docs.
   - package-ecosystem: uv
     directory: /backend
     schedule: { interval: weekly }
