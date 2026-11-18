@@ -38,7 +38,7 @@ lines marked `### EDIT ###`:
 |---|---|
 | `/mnt/YOURPOOL/...` | the dataset from step 1 |
 | `/dev/sg16` | your SES device from step 2 |
-| `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | optional, for pool/vdev/SMART data |
+| `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | optional, for pool/vdev/SMART data. Use `https://`: over `http://` the key is not sent unless `KTN_TRUENAS_ALLOW_INSECURE=true` (see the README) |
 
 **Step 4 — open it and create your administrator**
 

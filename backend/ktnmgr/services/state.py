@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
 from ktnmgr import __version__
-from ktnmgr.config import Settings
+from ktnmgr.config import Settings, truenas_url_for_display
 from ktnmgr.enclosure.disks import DiskIdentityUnreadable, DiskInfoReader
 from ktnmgr.enclosure.ses import SesError, SesReader
 from ktnmgr.enclosure.ses_parser import (
@@ -209,6 +209,7 @@ class StateService:
         ident: IdentManager,
         truenas: TrueNASClient | None,
         notifier: HealthNotifier | None = None,
+        truenas_refused: str | None = None,
     ) -> None:
         self.settings = settings
         self.backend = backend
@@ -225,6 +226,16 @@ class StateService:
         self.smart: Cached[dict[str, SmartInfo]] = Cached(value={})
         self.chassis: Cached[dict[str, ChassisTelemetry]] = Cached(value={})
         self.system_info: Cached[dict[str, Any]] = Cached(value={})
+        if truenas_refused is not None and truenas is None:
+            # The TrueNAS client was deliberately not built (an insecure
+            # KTN_TRUENAS_URL without the opt-in; config.check_truenas_transport).
+            # Recorded as each TrueNAS source's last error, so it reaches the
+            # operator exactly where a failing TrueNAS already does: the bays
+            # response's `truenas_error` (the dashboard's "TrueNAS unavailable"
+            # notice and degraded badge) and /api/diagnostics. With no client
+            # the poll_* methods return early, so nothing ever clears it.
+            for cache in (self.zfs, self.remote_disks, self.smart, self.system_info):
+                cache.fail(truenas_refused)
 
         # logical id -> {AES device slot number -> drive SAS address}. Kept
         # separate from the chassis telemetry cache because the two answer in
@@ -723,7 +734,8 @@ class StateService:
                 else self.system_info.last_error
             ),
             "truenas_configured": self.truenas is not None,
-            "truenas_url": self.settings.truenas_url or None,
+            # Scheme, host and port only: see truenas_url_for_display().
+            "truenas_url": truenas_url_for_display(self.settings.truenas_url),
             "truenas_tls_verified": self.settings.truenas_verify_tls,
             "sg_ses_binary": self.ses.binary,
             "sg_ses_version": self.ses.version(),

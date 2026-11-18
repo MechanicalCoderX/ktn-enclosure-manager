@@ -55,6 +55,36 @@ USERNAME_RE = re.compile(r"[A-Za-z0-9._@-]{1,64}")
 
 ACCOUNT_EXISTS = "an administrator account already exists"
 
+#: A new account's session epoch is drawn at random from
+#: [INITIAL_EPOCH_FLOOR, INITIAL_EPOCH_FLOOR + 2**INITIAL_EPOCH_RANDOM_BITS).
+#:
+#: It used to be 0 for every account. The session secret outlives the account
+#: file (it is a separate file, or KTN_SESSION_SECRET), and deleting users.json
+#: is how an operator recovers a lost password - so after delete + bootstrap,
+#: every epoch-0 cookie for that name still inside its max age was accepted
+#: again, including the ones "sign out everywhere" or a password change had
+#: ended. The same held for any account removed by hand and re-created.
+#:
+#: - Never 0, so a cookie from before the epoch field (no "e", read as 0)
+#:   cannot match a new account; and above any epoch an existing account can
+#:   have reached by counting up from 0, so no cookie issued by an older
+#:   release can either. Existing accounts are not touched: no migration, and
+#:   nobody is signed out on upgrade.
+#: - Two random epochs collide with probability 2**-51.
+#: - Below 2**53 with 2**51 increments of headroom: every value is exact as
+#:   an IEEE double, so a tool that reads users.json numbers as doubles (jq
+#:   1.6, JavaScript) cannot round one, and revocations cannot realistically
+#:   reach the limit (Python ints do not overflow regardless).
+#: - 16 digits in the cookie payload instead of 1: about 20 bytes after
+#:   base64, far inside any cookie limit.
+INITIAL_EPOCH_FLOOR = 1 << 52
+INITIAL_EPOCH_RANDOM_BITS = 51
+
+
+def _initial_session_epoch() -> int:
+    """A fresh account's session epoch: random, never 0. See INITIAL_EPOCH_FLOOR."""
+    return INITIAL_EPOCH_FLOOR + secrets.randbits(INITIAL_EPOCH_RANDOM_BITS)
+
 #: One lock per account file, shared by every AuthService in this process that
 #: points at it.
 #:
@@ -466,13 +496,22 @@ class AuthService:
             if only_if_first and not self.needs_bootstrap:
                 raise AuthError(ACCOUNT_EXISTS)
             users = self._read_users()
+            if username in users:
+                # Never replace an account: a fresh record resets
+                # session_epoch, which would revive every cookie for this
+                # name still inside its max age that carries the new value -
+                # including sessions a password change or "sign out
+                # everywhere" had ended. Checked under the lock, against the
+                # file as it is now.
+                raise AuthError(f"an account named {username!r} already exists")
             users[username] = {
                 "password_hash": password_hash,
                 "created_at": datetime.now(UTC).isoformat(),
                 # Bumped whenever every existing session for this user must stop
                 # being accepted. Carried in the session cookie and compared on
-                # each request.
-                "session_epoch": 0,
+                # each request. Starts at a random value, not 0, so no cookie
+                # for an earlier account of the same name can match it.
+                "session_epoch": _initial_session_epoch(),
             }
             self._write_users(users)
         log.info("created account %s", username)
@@ -512,7 +551,9 @@ class AuthService:
         """Session epoch for a user record.
 
         Accounts created before this field existed have no epoch; they are
-        treated as 0 so an upgrade does not sign everyone out.
+        treated as 0 so an upgrade does not sign everyone out. Accounts
+        created since start at a random epoch (_initial_session_epoch), never
+        0, so a cookie with no epoch cannot match one.
         """
         try:
             return int(record.get("session_epoch", 0) or 0)

@@ -47,6 +47,9 @@ TRUENAS_API_DOCS_URL = "https://www.truenas.com/docs/scale/25.10/api/"
 #: truenas/client.py turns http:// into ws://; ws:// itself is taken as-is.
 INSECURE_TRUENAS_SCHEMES = frozenset({"http", "ws"})
 
+#: The opt-in that lets the API key go over those schemes anyway.
+ALLOW_INSECURE_TRUENAS_ENV = "KTN_TRUENAS_ALLOW_INSECURE"
+
 
 class TlsMismatchError(RuntimeError):
     """The app's KTN_TLS_ENABLED disagrees with what the entrypoint started."""
@@ -93,28 +96,15 @@ def check_tls_marker(settings: Settings, environ: Mapping[str, str] | None = Non
         )
 
 
-def check_truenas_transport(settings: Settings) -> bool:
-    """Warn, once at startup, when the TrueNAS API key would travel in clear.
+def _truenas_transport_target(url: str) -> tuple[str, str]:
+    """The scheme and a host that is safe to show, for KTN_TRUENAS_URL.
 
-    The client sends the key in ``auth.login_with_api_key`` on every new
-    WebSocket, and an ``http://`` URL becomes ``ws://``, so anyone on the
-    network path can read it. Worse, TrueNAS documents (TRUENAS_API_DOCS_URL)
-    that it automatically revokes a user-linked API key presented over
-    insecure HTTP transport and requires HTTPS for API-key authentication, so
-    the key should be expected to stop working ("rejected the API key") after
-    the first attempt. This only warns; it does not refuse http://.
-
-    The warning names the scheme and host only: path and query can carry
-    credentials, and the key itself is never formatted into anything. When the
-    URL contains "@" the host is withheld too, because a userinfo holding an
+    The host is ``urlsplit().hostname`` only: path and query can carry
+    credentials, and port and userinfo are never formatted. When the URL
+    contains "@" the host is withheld too, because a userinfo holding an
     unencoded "/", "?" or "#" ends urlsplit's netloc early and its
     ``hostname`` is then the username or the front of a token.
-    Returns True when it warned. A client is only built with both a URL and a
-    key (main.build_app), so without both there is nothing to send.
     """
-    url = settings.truenas_url.strip()
-    if not url or not settings.truenas_api_key.get_secret_value():
-        return False
     try:
         parts = urlsplit(url)
         scheme = parts.scheme.lower()
@@ -124,28 +114,94 @@ def check_truenas_transport(settings: Settings) -> bool:
         # scheme is still the part before the first colon.
         scheme = url.split(":", 1)[0].lower()
         host = "<unparsable host>"
-    if scheme not in INSECURE_TRUENAS_SCHEMES:
-        return False
     if "@" in url:
         host = "<host withheld: URL contains userinfo>"
-    log.warning(
-        "KTN_TRUENAS_URL uses %s:// (host %s): the TrueNAS API key is sent "
-        "UNENCRYPTED, readable by anyone on the network path, and TrueNAS "
-        "documents that it automatically revokes a user-linked API key presented "
-        "over insecure HTTP (%s), so expect the key to stop working. Use https:// "
-        "and connect by the name on the certificate (see SECURITY.md).",
-        scheme, host, TRUENAS_API_DOCS_URL,
+    return scheme, host
+
+
+def truenas_url_for_display(url: str) -> str | None:
+    """KTN_TRUENAS_URL as ``scheme://host[:port]``, for /api/diagnostics.
+
+    Never the path, query, fragment or userinfo: any of them can carry a
+    credential, and diagnostics are made to be copied into bug reports. The
+    host follows _truenas_transport_target (withheld when the URL contains
+    "@"); the port is added only when the host is shown and it parses.
+    None when no URL is configured.
+    """
+    url = url.strip()
+    if not url:
+        return None
+    scheme, host = _truenas_transport_target(url)
+    shown = f"{scheme}://{host}"
+    if "@" not in url and not host.startswith("<"):
+        try:
+            port = urlsplit(url).port
+        except ValueError:
+            port = None
+        if port is not None:
+            shown += f":{port}"
+    return shown
+
+
+def check_truenas_transport(settings: Settings) -> str | None:
+    """Decide, once at startup, whether the TrueNAS API key may be sent.
+
+    The client sends the key in ``auth.login_with_api_key`` on every new
+    WebSocket, and an ``http://`` URL becomes ``ws://``, so over a plain
+    scheme anyone on the network path can read it. TrueNAS also documents
+    (TRUENAS_API_DOCS_URL) that it automatically revokes a user-linked API key
+    presented over insecure HTTP and requires HTTPS for API-key
+    authentication, so sending it would most likely cost the operator the key.
+
+    Returns None when a client may be built: the URL is https:// or wss://,
+    there is no URL or no key (nothing to send), or the operator opted in with
+    KTN_TRUENAS_ALLOW_INSECURE=true - in which case the WARNING from before
+    the refusal existed is logged. Otherwise logs one ERROR and returns the
+    reason, a short text for the dashboard and /api/diagnostics; the caller
+    then does not build the client at all. Neither text contains the key, and
+    both name the scheme and host only (see _truenas_transport_target).
+    """
+    url = settings.truenas_url.strip()
+    if not url or not settings.truenas_api_key.get_secret_value():
+        return None
+    scheme, host = _truenas_transport_target(url)
+    if scheme not in INSECURE_TRUENAS_SCHEMES:
+        return None
+    if settings.truenas_allow_insecure:
+        log.warning(
+            "KTN_TRUENAS_URL uses %s:// (host %s) and %s=true: the TrueNAS API key "
+            "is sent UNENCRYPTED, readable by anyone on the network path, and "
+            "TrueNAS documents that it automatically revokes a user-linked API key "
+            "presented over insecure HTTP (%s), so expect the key to stop working. "
+            "Use https:// and connect by the name on the certificate (see "
+            "SECURITY.md).",
+            scheme, host, ALLOW_INSECURE_TRUENAS_ENV, TRUENAS_API_DOCS_URL,
+        )
+        return None
+    log.error(
+        "KTN_TRUENAS_URL uses %s:// (host %s): refusing to send the TrueNAS API key "
+        "UNENCRYPTED. TrueNAS documents that it automatically revokes a user-linked "
+        "API key presented over insecure HTTP (%s). The TrueNAS integration is OFF: "
+        "pool, vdev, ZFS error and SMART data are unavailable, while the drive map, "
+        "chassis telemetry and Identify keep working. Fix: use https:// and connect "
+        "by the name on the certificate (see SECURITY.md); or, to send the key in "
+        "clear anyway, set %s=true.",
+        scheme, host, TRUENAS_API_DOCS_URL, ALLOW_INSECURE_TRUENAS_ENV,
     )
-    return True
+    return (
+        f"Not connected: KTN_TRUENAS_URL uses {scheme}:// (host {host}), so the API "
+        "key would be sent unencrypted, and TrueNAS revokes a key sent that way. "
+        f"Use https://, or set {ALLOW_INSECURE_TRUENAS_ENV}=true to send it anyway."
+    )
 
 
-def parse_tls_bool(value: str) -> bool:
-    """KTN_TLS_ENABLED's spelling rules; ValueError on anything else.
+def parse_strict_bool(value: str, name: str) -> bool:
+    """KTN_TLS_ENABLED's spelling rules for a boolean; ValueError otherwise.
 
     Narrower than pydantic's own bool parsing on purpose (no 't', 'y', 'f'
     or 'n'), so a shell ``case`` can match it exactly. ASCII only, because
     ``str.lower()`` maps a few non-ASCII letters onto ASCII ones and the shell
-    would not.
+    would not. ``name`` is the variable the error message names.
     """
     if value.isascii():
         lowered = value.lower()
@@ -154,8 +210,13 @@ def parse_tls_bool(value: str) -> bool:
         if lowered in TLS_BOOL_FALSE:
             return False
     raise ValueError(
-        "KTN_TLS_ENABLED must be one of 1/true/yes/on or 0/false/no/off (or empty)"
+        f"{name} must be one of 1/true/yes/on or 0/false/no/off (or empty)"
     )
+
+
+def parse_tls_bool(value: str) -> bool:
+    """KTN_TLS_ENABLED; scripts/tls-bool.sh implements the same table."""
+    return parse_strict_bool(value, "KTN_TLS_ENABLED")
 
 
 class Settings(BaseSettings):
@@ -283,6 +344,13 @@ class Settings(BaseSettings):
     truenas_api_key: SecretStr = SecretStr("")
     truenas_verify_tls: bool = True
     truenas_ca_bundle: str | None = None
+    #: Send the API key over http:// or ws:// anyway. Off by default: without
+    #: it an insecure KTN_TRUENAS_URL with a key set builds no TrueNAS client
+    #: at all (see check_truenas_transport), because the key would cross the
+    #: network in clear and TrueNAS documents that it revokes a key presented
+    #: that way. Same spellings as KTN_TLS_ENABLED; anything else refuses to
+    #: start rather than guess which way the operator meant.
+    truenas_allow_insecure: bool = False
     truenas_rest_fallback: bool = Field(
         default=False,
         description=(
@@ -294,6 +362,26 @@ class Settings(BaseSettings):
             "26.04. Enable only on a deployment using a full-access key."
         ),
     )
+
+    @field_validator("truenas_url", mode="before")
+    @classmethod
+    def _truenas_url_stripped(cls, value: Any) -> Any:
+        # Surrounding whitespace is never part of a URL, and a value that is
+        # only whitespace means "not configured" - everywhere: no client is
+        # built, startup says TrueNAS is not configured, and diagnostics show
+        # no URL. Unstripped, "   " passed main.py's "is a URL set" test and
+        # built a client for a URL that could never connect, with neither a
+        # refusal nor the "not configured" warning (REVIEW-164 N2).
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("truenas_allow_insecure", mode="before")
+    @classmethod
+    def _allow_insecure_spelling(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return parse_strict_bool(value, ALLOW_INSECURE_TRUENAS_ENV)
+        return value
 
     # --- notifications ----------------------------------------------------
     alert_webhook_url: str = Field(

@@ -88,10 +88,16 @@ The shipped `docker-compose.yml` drops **all** capabilities and adds back only:
 `--privileged` is never used, and there is no `/sys` bind mount. The only host
 access is the SES device node.
 
-The image's HEALTHCHECK runs as root, so it starts Python with `-I -S`: no
-`PYTHON*` variables, no user site, and no site-packages, `.pth` files or
-`sitecustomize`. A file planted there by a lesser process is never executed
-by it.
+Both Python processes that run as root start isolated, with `-I -S`: the
+image's HEALTHCHECK and the privileged IDENT helper. Neither reads `PYTHON*`
+variables or the user site, and Python's `site` start-up does not run, so no
+`.pth` file or `sitecustomize` is executed by them: a file planted there by a
+lesser process never runs as root. The HEALTHCHECK needs only the standard
+library and has no site-packages on its path at all. The helper puts only the
+bundled backend and the interpreter's own site-packages on its import path,
+appended directly, which makes them importable without running any `.pth`
+file in them; none of those directories is writable by the web process's
+uid.
 
 Notably absent: `CAP_DAC_OVERRIDE`. The LED is driven by a SCSI command rather
 than a sysfs write, so no capability is needed for it at all.
@@ -156,9 +162,13 @@ Base images and the BuildKit frontend are pinned by digest. Runtime Python
 dependencies are pinned with SHA-256 hashes in `backend/requirements.txt`, and
 the image build refuses any file that does not match. CI runs the tests and
 E2E on that same lock and fails if it no longer matches what
-`backend/requirements.in` compiles to. Not covered by the hashes: the build
-tools pip fetches during the image build to build the project and PyYAML's
-source distribution (setuptools, Cython).
+`backend/requirements.in` compiles to. The lock is installed from wheels only
+(`--only-binary :all:`), so none of the dependencies is built during the
+image build, and a pin without a wheel fails the build rather than running a
+build backend nobody hashed. Runtime dependencies are declared by name, never
+through an extra, so the image's `pip check` covers every one. Not covered by
+the hashes: setuptools, which pip fetches during the image build to build the
+project itself; it is not left in the image.
 
 CodeQL (`security-extended`) runs on Python and TypeScript weekly and on every
 pull request, `pip-audit` (on the lock and on the test environment) and
@@ -193,6 +203,9 @@ below rather than left implicit.
   so every existing session for that account stops being accepted. That is the
   action a user takes when they suspect compromise, so it has to be the action
   that ends the attacker's access.
+- New accounts start at a random session epoch, not 0, so deleting the
+  account file and setting up again cannot revive a cookie that a password
+  change or "Sign out everywhere" had ended.
 - The account file and the session signing key are `0600` from the moment they
   exist - the key is created by `os.open` with that mode, the account file is
   written to a fresh `mkstemp` temp file pinned `0600` - never written and then
@@ -234,6 +247,9 @@ option exists.
 Be clear about what it opens: **everything readable**, including
 `/api/diagnostics`, the audit log, and raw `sg_ses` page output. Enable it only
 on a network you would already let read those.
+(Diagnostics show `KTN_TRUENAS_URL` as scheme, host and port only, never its
+path, query or any `user:password@`; the host is withheld when the URL contains
+`@`.)
 
 One consideration specific to running open: **DNS rebinding**. A malicious page
 can repoint its own hostname's DNS at this app and then read API responses as
@@ -428,11 +444,16 @@ crosses the network in clear. TrueNAS's own API documentation states that it
 authentication attempt via insecure (HTTP) transport", and that HTTPS "is
 required for TrueNAS API authentication using API keys"
 ([TrueNAS 25.10 API documentation](https://www.truenas.com/docs/scale/25.10/api/)).
-Expect a key used over `http://` to stop working: pool, vdev and SMART data
-then fail with an authentication error until you create a new key and switch
-to `https://`. KTN does not refuse `http://`, but it logs a `WARNING` at
-startup naming the scheme and host, never the key. The host is withheld too
-if the URL contains `@`.
+KTN therefore does not send the key over `http://` or `ws://` (in any letter
+case). With such a URL and a key set, it builds no TrueNAS client, logs one
+`ERROR` at startup naming the scheme and host - never the key, and the host
+is withheld too if the URL contains `@` - and shows the reason in the
+dashboard's "TrueNAS unavailable" notice and on the Diagnostics tab. The
+drive map, chassis telemetry and Identify keep working. Setting
+`KTN_TRUENAS_ALLOW_INSECURE=true` sends the key in clear anyway, with a
+`WARNING` at startup. Expect TrueNAS to revoke a key used that way: pool,
+vdev and SMART data then fail with an authentication error until you create
+a new key and switch to `https://`.
 
 `KTN_TRUENAS_VERIFY_TLS` defaults to `true` and should stay there. If
 verification fails, the usual cause is not a missing trust store — it is

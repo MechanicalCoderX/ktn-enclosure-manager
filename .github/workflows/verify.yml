@@ -387,11 +387,18 @@ jobs:
             fail "https answered"
           fi
 
-      - name: Back-compat control - TLS unset is plain HTTP, healthy
+      # Also the one container that starts the real privileged IDENT helper,
+      # as the TrueNAS app does: root, `python -I -S`, its socket on the
+      # /run/ktn tmpfs from HARDENING. The unit tests start the helper on CI's
+      # interpreter; only this proves the image's own interpreter and layout
+      # (/usr/local, pip's site-packages) give it everything it imports.
+      - name: Back-compat control - TLS unset is plain HTTP, healthy, helper up
         run: |
           source .github/tls-smoke-lib.sh
           docker run -d --name ktn-plain --restart unless-stopped "${HARDENING[@]}" \
-            -v "$PWD/smoke/data-plain:/data" -p 127.0.0.1:18420:8420 "$IMAGE"
+            -v "$PWD/smoke/data-plain:/data" -p 127.0.0.1:18420:8420 \
+            -e KTN_IDENT_HELPER_SOCKET=/run/ktn/ident.sock \
+            "$IMAGE"
           wait_healthy ktn-plain
           code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:18420/healthz)
           [ "$code" = 200 ] || fail "plain /healthz returned $code"
@@ -400,6 +407,15 @@ jobs:
           health=$(curl -sS --max-time 10 http://127.0.0.1:18420/healthz)
           if grep -qF '"tls"' <<<"$health"; then
             fail "a plain install reports a tls block"
+          fi
+          # /healthz asks the helper for ses_version over its socket: "ok"
+          # means it started under -I -S, imported ktnmgr and pydantic, and
+          # answered. A helper that failed to start reads "unreachable" (503).
+          grep -qF '"helper":"ok"' <<<"$health" || fail "/healthz helper is not ok: $health"
+          log_has ktn-plain 'starting privileged IDENT helper' \
+            || fail "the entrypoint did not start the helper"
+          if log_has ktn-plain 'IDENT helper socket did not appear'; then
+            fail "the helper socket did not appear"
           fi
 
       - name: Container logs
