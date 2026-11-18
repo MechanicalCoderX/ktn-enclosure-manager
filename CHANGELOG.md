@@ -78,6 +78,22 @@ back to 1.6.3 is an image change only; 1.6.3 ignores the new setting.
   goes through bootstrap, which already refuses once any account exists), so
   this closes a trap for future callers rather than a reachable hole. The
   check runs under the account lock, and a test pins that.
+- **New accounts start at a random session epoch instead of 0.** The session
+  secret outlives the account file, so deleting `users.json` (the only way to
+  recover a lost password) and running first-run setup again brought back
+  every epoch-0 session cookie for that name still within
+  `KTN_SESSION_MAX_AGE_SECONDS`, including sessions that a password change or
+  "Sign out everywhere" had ended. Bootstrap and account creation now pick a
+  random epoch in [2^52, 2^52 + 2^51): never 0, above anything an older
+  release could have issued, and exact as a JSON double. Existing accounts
+  keep their epochs, so nobody is signed out by the upgrade, and a rollback
+  to 1.6.3 reads the larger epochs unchanged.
+- **`/api/diagnostics` shows `KTN_TRUENAS_URL` as `scheme://host[:port]`
+  only.** It returned the URL verbatim, so a token in the query string or a
+  `user:password@` in it was readable by anyone who could open diagnostics
+  (anyone at all with `KTN_AUTH_REQUIRED=false`), and diagnostics are made to
+  be pasted into bug reports. The host is withheld when the URL contains `@`,
+  the same rule as the startup line about an insecure URL.
 
 ### Added
 - `KTN_TRUENAS_ALLOW_INSECURE` (default `false`): send the TrueNAS API key

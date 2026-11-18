@@ -203,6 +203,9 @@ below rather than left implicit.
   so every existing session for that account stops being accepted. That is the
   action a user takes when they suspect compromise, so it has to be the action
   that ends the attacker's access.
+- New accounts start at a random session epoch, not 0, so deleting the
+  account file and setting up again cannot revive a cookie that a password
+  change or "Sign out everywhere" had ended.
 - The account file and the session signing key are `0600` from the moment they
   exist - the key is created by `os.open` with that mode, the account file is
   written to a fresh `mkstemp` temp file pinned `0600` - never written and then
@@ -244,6 +247,9 @@ option exists.
 Be clear about what it opens: **everything readable**, including
 `/api/diagnostics`, the audit log, and raw `sg_ses` page output. Enable it only
 on a network you would already let read those.
+(Diagnostics show `KTN_TRUENAS_URL` as scheme, host and port only, never its
+path, query or any `user:password@`; the host is withheld when the URL contains
+`@`.)
 
 One consideration specific to running open: **DNS rebinding**. A malicious page
 can repoint its own hostname's DNS at this app and then read API responses as
