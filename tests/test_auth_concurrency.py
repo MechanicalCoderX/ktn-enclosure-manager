@@ -239,6 +239,7 @@ def test_concurrent_revocations_lose_no_epoch_bumps(tmp_path: Path) -> None:
     """
     auth = make_auth(tmp_path)
     auth.create_user("admin", PASSWORD)
+    initial = epoch_on_disk(tmp_path, "admin")  # random, not 0: count from it
     workers, per_worker = 8, 25
     start = threading.Barrier(workers)
     unexpected: list[BaseException] = []
@@ -256,7 +257,7 @@ def test_concurrent_revocations_lose_no_epoch_bumps(tmp_path: Path) -> None:
     run_threads([revoker] * workers)
 
     assert not unexpected, f"{len(unexpected)} revocations failed: {unexpected[:3]!r}"
-    assert epoch_on_disk(tmp_path, "admin") == workers * per_worker
+    assert epoch_on_disk(tmp_path, "admin") == initial + workers * per_worker
     assert stray_files(tmp_path) == []
 
 
@@ -271,6 +272,7 @@ def test_password_change_racing_revocations_keeps_both(tmp_path: Path) -> None:
     """
     auth = make_auth(tmp_path)
     auth.create_user("admin", PASSWORD)
+    initial = epoch_on_disk(tmp_path, "admin")  # random, not 0: count from it
     revokers = 6
     go_revoke = threading.Event()
     revokes_done = threading.Barrier(revokers + 1)
@@ -322,7 +324,7 @@ def test_password_change_racing_revocations_keeps_both(tmp_path: Path) -> None:
     auth.hasher = fast_hasher()
     assert password_works(auth, "admin", NEW_PASSWORD), "the password change was lost"
     assert not password_works(auth, "admin", PASSWORD), "the old password still works"
-    assert epoch_on_disk(tmp_path, "admin") == revokers + 1, "revocations were lost"
+    assert epoch_on_disk(tmp_path, "admin") == initial + revokers + 1, "revocations were lost"
     assert stray_files(tmp_path) == []
 
 
@@ -339,6 +341,7 @@ def test_login_rehash_does_not_undo_a_concurrent_password_change(tmp_path: Path)
     # successful verify wants to rehash - the path under test.
     auth.hasher = fast_hasher(time_cost=1)
     auth.create_user("admin", PASSWORD)
+    initial = epoch_on_disk(tmp_path, "admin")  # random, not 0: count from it
     current = fast_hasher(time_cost=2)
     login_thread: list[threading.Thread] = []
     change_errors: list[BaseException] = []
@@ -381,7 +384,7 @@ def test_login_rehash_does_not_undo_a_concurrent_password_change(tmp_path: Path)
     auth.hasher = current
     assert password_works(auth, "admin", NEW_PASSWORD), "the password change was undone"
     assert not password_works(auth, "admin", PASSWORD), "the old password works again"
-    assert epoch_on_disk(tmp_path, "admin") == 1, "the session revocation was undone"
+    assert epoch_on_disk(tmp_path, "admin") == initial + 1, "the session revocation was undone"
     assert stray_files(tmp_path) == []
 
 
@@ -390,6 +393,7 @@ def test_login_rehash_still_upgrades_an_old_hash(tmp_path: Path) -> None:
     auth = make_auth(tmp_path)
     auth.hasher = fast_hasher(time_cost=1)
     auth.create_user("admin", PASSWORD)
+    initial = epoch_on_disk(tmp_path, "admin")  # random, not 0: count from it
     auth.hasher = fast_hasher(time_cost=2)
     before = accounts_on_disk(tmp_path)["admin"]["password_hash"]
     assert auth.hasher.check_needs_rehash(str(before))
@@ -399,7 +403,7 @@ def test_login_rehash_still_upgrades_an_old_hash(tmp_path: Path) -> None:
     after = str(accounts_on_disk(tmp_path)["admin"]["password_hash"])
     assert after != before
     assert not auth.hasher.check_needs_rehash(after)
-    assert epoch_on_disk(tmp_path, "admin") == 0, "a rehash must not sign anyone out"
+    assert epoch_on_disk(tmp_path, "admin") == initial, "a rehash must not sign anyone out"
     assert stray_files(tmp_path) == []
 
 
@@ -491,6 +495,7 @@ def test_a_failed_replace_leaves_the_old_file_and_no_temp_file(
     or damage the account file it was replacing."""
     auth = make_auth(tmp_path)
     auth.create_user("admin", PASSWORD)
+    initial = epoch_on_disk(tmp_path, "admin")  # random, not 0: count from it
     original = (tmp_path / "users.json").read_bytes()
 
     def refuse(src: object, dst: object, **kwargs: object) -> None:
@@ -505,7 +510,7 @@ def test_a_failed_replace_leaves_the_old_file_and_no_temp_file(
     assert stray_files(tmp_path) == []
     # And the next write still works: nothing was left locked.
     auth.revoke_sessions("admin")
-    assert epoch_on_disk(tmp_path, "admin") == 1
+    assert epoch_on_disk(tmp_path, "admin") == initial + 1
 
 
 def test_account_file_is_flushed_to_disk_before_it_is_swapped_in(
@@ -592,6 +597,7 @@ def test_a_failed_directory_fsync_never_fails_the_write_and_a_real_fault_is_a_wa
     (EIO) is logged as a warning, because it is one an operator should see."""
     auth = make_auth(tmp_path)
     auth.create_user("admin", PASSWORD)
+    initial = epoch_on_disk(tmp_path, "admin")  # random, not 0: count from it
     real_fsync = os.fsync
 
     def failing_dir_fsync(fd: int) -> None:
@@ -604,7 +610,7 @@ def test_a_failed_directory_fsync_never_fails_the_write_and_a_real_fault_is_a_wa
         auth.revoke_sessions("admin")
     monkeypatch.undo()
 
-    assert epoch_on_disk(tmp_path, "admin") == 1, "the write must still land"
+    assert epoch_on_disk(tmp_path, "admin") == initial + 1, "the write must still land"
     warnings = [r for r in caplog.records if r.levelname == "WARNING" and "fsync" in r.message]
     assert bool(warnings) is warned, [(r.levelname, r.message) for r in caplog.records]
     assert any("fsync" in r.message for r in caplog.records), "control: the failure was seen"
@@ -638,6 +644,7 @@ def test_revocations_during_a_password_changes_verify_are_kept(tmp_path: Path) -
     password change's verify."""
     auth = make_auth(tmp_path)
     auth.create_user("admin", PASSWORD)
+    initial = epoch_on_disk(tmp_path, "admin")  # random, not 0: count from it
     revokers = 6
     released = threading.Event()
     all_back = threading.Barrier(revokers + 1)
@@ -677,7 +684,7 @@ def test_revocations_during_a_password_changes_verify_are_kept(tmp_path: Path) -
     assert not errors, f"{errors!r}"
     auth.hasher = fast_hasher()
     assert password_works(auth, "admin", NEW_PASSWORD), "the password change was lost"
-    assert epoch_on_disk(tmp_path, "admin") == revokers + 1, (
+    assert epoch_on_disk(tmp_path, "admin") == initial + revokers + 1, (
         "revocations that landed during the change's verify were lost"
     )
     assert stray_files(tmp_path) == []
