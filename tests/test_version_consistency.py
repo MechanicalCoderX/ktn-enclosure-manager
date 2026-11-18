@@ -114,6 +114,25 @@ def test_ci_python_matches_the_shipped_runtime() -> None:
     )
 
 
+def test_python_floor_matches_the_shipped_runtime() -> None:
+    """requires-python, ruff and mypy all target the image's Python.
+
+    Dependabot chooses each direct dependency's version under the lowest
+    Python that requires-python allows. While the floor was 3.11 and the image
+    3.15, a release that dropped 3.11 was never proposed, security fixes
+    included. ruff and mypy below the floor would also let through code the
+    image's interpreter does not need and miss what it allows. When the base
+    image moves, this fails until all three move with it.
+    """
+    pyproject = tomllib.loads((ROOT / "backend" / "pyproject.toml").read_text())
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    (image,) = set(re.findall(r"FROM python:(\d+\.\d+)-slim", dockerfile))
+
+    assert pyproject["project"]["requires-python"] == f">={image}"
+    assert pyproject["tool"]["ruff"]["target-version"] == "py" + image.replace(".", "")
+    assert pyproject["tool"]["mypy"]["python_version"] == image
+
+
 def test_readme_never_pins_an_image_tag() -> None:
     """The README must stay version-neutral about the image.
 

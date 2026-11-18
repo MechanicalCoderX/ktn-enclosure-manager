@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- The backend requires Python 3.15 or later, the version the image already
+  ships (`requires-python`, ruff and mypy all target it). The image is
+  unaffected; a local development install on an older Python is refused.
+  Dependabot chooses dependency versions under this floor, so it no longer
+  holds back releases that drop Python 3.11, security fixes included. A test
+  keeps the floor equal to the image's Python.
+
 ## [1.6.4] — 2026-11-18
 
 Security hardening that follows up the 1.6.3 reviews. No data migration. One

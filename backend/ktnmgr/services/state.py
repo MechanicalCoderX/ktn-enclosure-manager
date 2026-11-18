@@ -13,7 +13,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from ktnmgr import __version__
 from ktnmgr.config import Settings, truenas_url_for_display
@@ -49,8 +49,6 @@ from ktnmgr.truenas.correlate import (
 
 log = logging.getLogger(__name__)
 
-T = TypeVar("T")
-
 #: Verbatim sysfs slot statuses in which the enclosure is itself calling the
 #: bay failed. Kept next to the predicate below so the two readers of this list
 #: - health classification and the notifier's floor - cannot drift apart.
@@ -58,7 +56,7 @@ _ENCLOSURE_FAULT_STATUSES = ("critical", "unrecoverable")
 
 
 @dataclass
-class Cached(Generic[T]):
+class Cached[T]:
     """Last-good value plus the freshness metadata the diagnostics page shows."""
 
     value: T
