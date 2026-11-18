@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.6.4] — 2026-11-18
 
 Security hardening that follows up the 1.6.3 reviews. No data migration. One
 change in behaviour needs a look before upgrading (below), and there is one
