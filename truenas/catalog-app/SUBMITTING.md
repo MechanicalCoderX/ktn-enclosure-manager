@@ -1,5 +1,15 @@
 # Submitting to the official TrueNAS catalog
 
+> **Historical record (updated 2026-11-22).** The submission is done. The app
+> was merged into the official catalog as
+> [truenas/apps#5679](https://github.com/truenas/apps/pull/5679) on 2026-11-17,
+> and the discussion issue
+> [truenas/apps#5599](https://github.com/truenas/apps/issues/5599) closed the
+> same day. A TrueNAS bot (truenasbot) now bumps the catalog after each release.
+> The text below describes the submission as it was and is kept for the
+> record. To install from the catalog, see
+> [docs/INSTALL-TRUENAS.md](../../docs/INSTALL-TRUENAS.md#1-install-from-the-truenas-community-catalog).
+
 This directory holds the app in the format used by
 [truenas/apps](https://github.com/truenas/apps), so it can be proposed for the
 **community** train.
