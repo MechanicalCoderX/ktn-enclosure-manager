@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Fails if backend/requirements.txt is not exactly what its inputs compile to.
+# Fails if backend/requirements.txt or backend/build-requirements.txt is not
+# exactly what its inputs compile to.
 #
-# The lock is recompiled from requirements.in with the lock's own pins as
+# Each lock is recompiled from its .in file with the lock's own pins as
 # constraints, so every version stays put and only the body is re-derived:
 # the hashes (from the index, not copied from the old file), the environment
 # markers, and which packages are in it at all. The two bodies are compared
@@ -22,17 +23,25 @@ cd "$(dirname "$0")/../backend"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-sed -n 's/^\([A-Za-z0-9][^\\]*\) \\$/\1/p' requirements.txt > "$tmp/pins.txt"
-[ -s "$tmp/pins.txt" ] || { echo "no pins read from requirements.txt" >&2; exit 1; }
+# Each lock against its own input: the runtime lock against requirements.in,
+# the image's build backend against build-requirements.in. Both are checked
+# before the script exits, so one run reports every drifted lock.
+status=0
+for name in requirements build-requirements; do
+    sed -n 's/^\([A-Za-z0-9][^\\]*\) \\$/\1/p' "$name.txt" > "$tmp/pins.txt"
+    [ -s "$tmp/pins.txt" ] || { echo "no pins read from $name.txt" >&2; exit 1; }
 
-"${uv[@]}" pip compile --universal --python-version 3.15 --generate-hashes \
-    --no-header --no-annotate --quiet \
-    requirements.in -c "$tmp/pins.txt" -o "$tmp/requirements.txt"
+    "${uv[@]}" pip compile --universal --python-version 3.15 --generate-hashes \
+        --no-header --no-annotate --quiet \
+        "$name.in" -c "$tmp/pins.txt" -o "$tmp/$name.txt"
 
-if ! grep -v '^ *#' requirements.txt | diff -u - "$tmp/requirements.txt"; then
-    echo "backend/requirements.txt does not match what requirements.in compiles to" \
-         "(diff above: - committed, + recompiled). Recompile it as CONTRIBUTING.md," \
-         "\"Dependency lock\", describes." >&2
-    exit 1
-fi
-echo "backend/requirements.txt matches its inputs ($(wc -l < "$tmp/pins.txt") pins)."
+    if ! grep -v '^ *#' "$name.txt" | diff -u - "$tmp/$name.txt"; then
+        echo "backend/$name.txt does not match what $name.in compiles to" \
+             "(diff above: - committed, + recompiled). Recompile it as CONTRIBUTING.md," \
+             "\"Dependency lock\", describes." >&2
+        status=1
+        continue
+    fi
+    echo "backend/$name.txt matches its inputs ($(wc -l < "$tmp/pins.txt") pins)."
+done
+exit "$status"

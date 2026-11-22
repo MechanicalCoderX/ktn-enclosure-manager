@@ -68,8 +68,21 @@ dependency is built from source there: building one runs a build backend that
 no hash covers. Every pin therefore needs a wheel for the image's Python on
 amd64 and arm64. If a new pin has only a source distribution for that Python,
 the image build fails; pick a version that has wheels, or do without the
-dependency, rather than removing the flag. The project itself is still built
-in the image, by setuptools, which pip fetches unhashed.
+dependency, rather than removing the flag.
+
+The project itself is built in the image by setuptools, which comes from a
+second lock, `backend/build-requirements.txt`, compiled the same way from
+`backend/build-requirements.in` (a copy of pyproject's `[build-system].requires`):
+
+```bash
+uv pip compile --universal --python-version 3.15 --generate-hashes \
+    build-requirements.in -o build-requirements.txt
+```
+
+The Dockerfile installs it hash-checked and wheels-only, builds the project
+with `--no-build-isolation` (so pip fetches nothing unhashed), then uninstalls
+setuptools. After changing `[build-system].requires`, copy the change into the
+`.in` file and recompile.
 
 `tests/test_image_build_inputs.py` fails if the two lists differ, if a pin
 falls outside pyproject's range, if the lock's Python differs from the

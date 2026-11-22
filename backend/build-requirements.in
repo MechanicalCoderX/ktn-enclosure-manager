@@ -1,0 +1,7 @@
+# The image's build backend, compiled into build-requirements.txt (a
+# hash-pinned lock) so the Dockerfile installs it hash-checked and builds the
+# project with --no-build-isolation instead of letting pip fetch it unhashed.
+# A copy of pyproject.toml's [build-system].requires: Dependabot regenerates a
+# compiled lock only from a .in file. tests/test_image_build_inputs.py fails if
+# the two lists differ. Regenerate command: CONTRIBUTING.md, "Dependency lock".
+setuptools>=68

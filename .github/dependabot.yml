@@ -13,6 +13,11 @@ updates:
   # requires-python allows. That floor is ">=3.15", the image's Python, so
   # every release the image can run is proposed;
   # tests/test_version_consistency.py fails if the image moves without it.
+  # backend/build-requirements.txt (setuptools, the image's build backend) is
+  # compiled the same way from build-requirements.in. The uv ecosystem's file
+  # fetcher takes every .txt and .in in this directory (dependabot-core,
+  # uv/lib/dependabot/uv/file_fetcher.rb); that it then proposes a setuptools
+  # bump is unconfirmed until its first run.
   # uv's support for `uv pip compile` files is in dependabot-core's code and
   # specs, not its docs.
   - package-ecosystem: uv
