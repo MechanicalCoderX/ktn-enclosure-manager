@@ -84,11 +84,13 @@ jobs:
         #
         # First the lock as a file: exactly what the image ships, read from
         # the file rather than the environment (--disable-pip needs every
-        # line pinned and hashed, which the lock is). Then the environment,
-        # which adds the dev tools.
+        # line pinned and hashed, which the lock is). Then the build-backend
+        # lock the same way: setuptools runs as root during the image build.
+        # Then the environment, which adds the dev tools.
         run: |
           pip install pip-audit
           pip-audit --desc --disable-pip -r backend/requirements.txt
+          pip-audit --desc --disable-pip -r backend/build-requirements.txt
           pip-audit --desc --skip-editable
 
   frontend:
@@ -244,6 +246,38 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+
+      # Trivy never executes the image, so a wrong-arch .so, a missing wheel
+      # or a broken entrypoint on arm64 would pass the scan and ship. Start it
+      # under QEMU and ask /healthz. QEMU is slow, hence the 120 s budget
+      # (amd64 gets 90 s natively in tls-smoke). arm64 only: the amd64 leg is
+      # started by tls-smoke. No /dev/sg* exists on the runner, so the
+      # container runs without devices, exactly as tls-smoke does.
+      - name: Start the arm64 image and check /healthz
+        if: matrix.arch == 'arm64'
+        run: |
+          source .github/tls-smoke-lib.sh
+          IMAGE=ktn-enclosure-manager:ci
+          name=ktn-arm64
+          trap 'docker logs "$name" 2>&1 || true; docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+          mkdir -p smoke/data-arm64
+          sudo chown 1000:1000 smoke/data-arm64
+          docker run -d --name "$name" "${HARDENING[@]}" \
+            -v "$PWD/smoke/data-arm64:/data" -p 127.0.0.1:18420:8420 \
+            -e KTN_IDENT_HELPER_SOCKET=/run/ktn/ident.sock \
+            "$IMAGE"
+          code=000
+          for _ in $(seq 1 60); do
+            code=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
+              http://127.0.0.1:18420/healthz 2>/dev/null || true)
+            [ "$code" = 200 ] && break
+            [ "$(docker inspect -f '{{.State.Running}}' "$name")" = true ] \
+              || fail "the arm64 container exited"
+            sleep 2
+          done
+          [ "$code" = 200 ] || fail "arm64 /healthz returned $code after 120 s"
+          machine=$(docker exec "$name" python -c "import platform; print(platform.machine())")
+          [ "$machine" = aarch64 ] || fail "the image runs as $machine, not aarch64"
 
   # The only container-level test. Everything above checks the Python and
   # shell pieces of opt-in TLS on their own; this runs the built image the way

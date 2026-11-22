@@ -36,6 +36,12 @@ from ktnmgr.models import Bay, SlotHealth
 
 log = logging.getLogger(__name__)
 
+
+def _printable(text: str, limit: int) -> str:
+    """``text`` with control characters dropped, cut to ``limit`` characters."""
+    clean = "".join(c for c in text if c.isprintable())
+    return clean if len(clean) <= limit else clean[:limit] + "..."
+
 DEFAULT_TIMEOUT = 10.0
 
 #: Minimum spacing between delivery attempts for the same undelivered alert.
@@ -94,7 +100,7 @@ class HealthNotifier:
         detail: str = DETAIL_FULL,
     ) -> None:
         self.url = url.rstrip("/") if url else ""
-        self.style = style if style in ("ntfy", "json") else "ntfy"
+        self.style = self._style(style)
         # Settings refuses an unknown KTN_ALERT_DETAIL at startup. A caller
         # that bypasses Settings with a typo gets the smaller message: an
         # unknown value must never send more than the operator asked for.
@@ -290,9 +296,30 @@ class HealthNotifier:
         log.info("notified: %s", title)
         return True
 
+    @staticmethod
+    def _style(value: str) -> str:
+        """KTN_ALERT_STYLE: case and whitespace do not matter, empty is the
+        default. An unknown value still falls back to ntfy (startup must not
+        fail over it) but says so once, rather than silently."""
+        known = str(value).strip().lower()
+        if known in ("ntfy", "json"):
+            return known
+        if known:
+            log.warning(
+                "KTN_ALERT_STYLE %r is not 'ntfy' or 'json'; using 'ntfy'",
+                _printable(str(value).strip(), 40),
+            )
+        return "ntfy"
+
     @property
     def _where(self) -> str:
-        """Scheme and host only: the path and query of the URL are secrets."""
+        """Scheme and host only: the path and query of the URL are secrets.
+
+        The host is withheld when the URL contains "@": a userinfo holding an
+        unencoded "/", "?" or "#" ends urlsplit's netloc early, and its
+        ``hostname`` is then the username or the front of a token (the same
+        rule as config._truenas_transport_target).
+        """
         try:
             parts = urlsplit(self.url)
             host = parts.hostname
@@ -302,7 +329,9 @@ class HealthNotifier:
             # runs inside _send()'s error handlers, so raising here would
             # escape them.
             return "<malformed webhook url>"
-        return f"{parts.scheme}://{host or '?'}"
+        if "@" in self.url:
+            host = "<host withheld: URL contains userinfo>"
+        return f"{_printable(parts.scheme, 20)}://{_printable(host or '?', 100)}"
 
     def _scrub(self, text: str) -> str:
         return text.replace(self.url, "<webhook url>") if self.url else text

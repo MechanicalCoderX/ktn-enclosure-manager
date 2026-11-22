@@ -41,6 +41,8 @@ DOCKERFILE = ROOT / "Dockerfile"
 BACKEND = ROOT / "backend"
 LOCK = BACKEND / "requirements.txt"
 LOCK_INPUT = BACKEND / "requirements.in"
+BUILD_LOCK = BACKEND / "build-requirements.txt"
+BUILD_LOCK_INPUT = BACKEND / "build-requirements.in"
 DEPENDABOT = ROOT / ".github" / "dependabot.yml"
 VERIFY = ROOT / ".github" / "workflows" / "verify.yml"
 LOCK_CHECK = ROOT / "scripts" / "check-lock.sh"
@@ -115,15 +117,15 @@ def _calls(tmp_path: Path) -> list[str]:
 
 @pytest.mark.parametrize(
     ("fail_call", "step"),
-    [(1, "install"), (2, "install"), (3, "check")],
-    ids=["lock-install", "project-install", "pip-check"],
+    [(1, "install"), (2, "install"), (3, "install"), (4, "uninstall"), (5, "check")],
+    ids=["lock-install", "build-lock-install", "project-install", "setuptools-uninstall", "pip-check"],
 )
 def test_a_failed_step_fails_the_build(tmp_path: Path, fail_call: int, step: str) -> None:
     result = _run_with_fake_pip(tmp_path, fail_call)
     assert result.returncode != 0, f"pip call {fail_call} (`pip {step}`) failed; the line exited 0"
     calls = _calls(tmp_path)
     assert calls[fail_call - 1] == step, calls
-    assert "uninstall" not in calls, f"the line carried on after a failed step: {calls}"
+    assert len(calls) == fail_call, f"the line carried on after a failed step: {calls}"
 
 
 def test_only_the_pip_uninstall_may_fail(tmp_path: Path) -> None:
@@ -132,9 +134,11 @@ def test_only_the_pip_uninstall_may_fail(tmp_path: Path) -> None:
     Removing pip is best-effort by design, so its failure must not fail the
     build - and every step must still have run.
     """
-    result = _run_with_fake_pip(tmp_path, fail_call=4)
+    result = _run_with_fake_pip(tmp_path, fail_call=6)
     assert result.returncode == 0, result.stderr
-    assert _calls(tmp_path) == ["install", "install", "check", "uninstall"]
+    assert _calls(tmp_path) == [
+        "install", "install", "install", "uninstall", "check", "uninstall",
+    ]
 
 
 def test_no_other_run_installs_python_packages() -> None:
@@ -150,10 +154,10 @@ def test_no_other_run_installs_python_packages() -> None:
 # ------------------------------------------------------------------ L1
 
 
-def _lock_pins() -> dict[str, tuple[str, list[str]]]:
+def _lock_pins(lock: Path = LOCK) -> dict[str, tuple[str, list[str]]]:
     """name -> (version, hashes) for every requirement in the lock."""
     pins: dict[str, tuple[str, list[str]]] = {}
-    text = LOCK.read_text()
+    text = lock.read_text()
     # One logical requirement per entry: join the backslash continuations.
     for entry in re.sub(r"\\\n", " ", text).splitlines():
         entry = entry.split("#", 1)[0].strip()
@@ -168,8 +172,8 @@ def _lock_pins() -> dict[str, tuple[str, list[str]]]:
     return pins
 
 
-def _lock_header() -> str:
-    lines = LOCK.read_text().splitlines()
+def _lock_header(lock: Path = LOCK) -> str:
+    lines = lock.read_text().splitlines()
     return "\n".join(lines[: next(i for i, x in enumerate(lines) if not x.startswith("#"))])
 
 
@@ -382,6 +386,91 @@ def test_ci_rederives_the_lock_from_its_inputs() -> None:
     )
 
 
+# ------------------------------------------------------- build backend lock
+
+
+def _build_requires() -> list[str]:
+    return tomllib.loads((BACKEND / "pyproject.toml").read_text())["build-system"]["requires"]
+
+
+def _steps(cmd: str) -> list[str]:
+    return [s.strip() for s in re.split(r"&&|\|\|", cmd.replace("(", " ").replace(")", " "))]
+
+
+def test_build_lock_input_is_pyprojects_build_requires() -> None:
+    """build-requirements.in is a copy of [build-system].requires.
+
+    Same reason as requirements.in: Dependabot recompiles a lock only from a
+    .in file. This is what keeps the two from drifting.
+    """
+    assert BUILD_LOCK_INPUT.is_file(), "backend/build-requirements.in is missing"
+    lines = [line.split("#", 1)[0].strip() for line in BUILD_LOCK_INPUT.read_text().splitlines()]
+    listed = [line for line in lines if line]
+    assert listed, "build-requirements.in lists nothing"
+    assert sorted(str(Requirement(r)) for r in listed) == sorted(
+        str(Requirement(r)) for r in _build_requires()
+    )
+
+
+def test_build_lock_exists_hashed_and_satisfies_build_requires() -> None:
+    assert BUILD_LOCK.is_file(), "backend/build-requirements.txt (the build backend's lock) is missing"
+    pins = _lock_pins(BUILD_LOCK)
+    unhashed = [name for name, (_, hashes) in pins.items() if not hashes]
+    assert not unhashed, f"pins without hashes: {unhashed}"
+    for raw in _build_requires():
+        req = Requirement(raw)
+        name = canonicalize_name(req.name)
+        assert name in pins, f"{req.name} is a build requirement but not in the build lock"
+        assert req.specifier.contains(pins[name][0], prereleases=True), f"{name} vs {req}"
+
+
+def test_build_lock_targets_the_image_python_on_every_platform() -> None:
+    header = _lock_header(BUILD_LOCK)
+    assert "uv pip compile" in header, header
+    assert "--universal" in header
+    assert "--generate-hashes" in header
+    runtime = re.search(r"^FROM python:(\d+\.\d+)-slim@sha256:", DOCKERFILE.read_text(), re.MULTILINE)
+    assert runtime
+    match = re.search(r"--python-version[=\s]+(\d+\.\d+)", header)
+    assert match and match.group(1) == runtime.group(1), header
+
+
+def test_image_builds_the_project_with_the_hashed_backend() -> None:
+    """setuptools comes from the hash-checked build lock, not an isolated env.
+
+    Without --no-build-isolation pip fetches [build-system].requires itself,
+    unhashed, newest at build time, as root; the wheel it builds then ships.
+    """
+    steps = _steps(_pip_run_command())
+    lock = [s for s in steps if "-r /app/backend/build-requirements.txt" in s]
+    assert len(lock) == 1, steps
+    assert "--require-hashes" in lock[0]
+    assert re.search(r"--only-binary[ =]:all:(\s|$)", lock[0]), lock[0]
+    project = [s for s in steps if re.search(r"pip install\b.*\s/app/backend$", s)]
+    assert len(project) == 1, steps
+    assert "--no-build-isolation" in project[0]
+    assert "--no-deps" in project[0]
+    order = [steps.index(lock[0]), steps.index(project[0])]
+    assert order == sorted(order), "the project is built before its backend is installed"
+
+
+def test_image_removes_the_build_backend_before_pip() -> None:
+    steps = _steps(_pip_run_command())
+    gone = [i for i, s in enumerate(steps) if re.search(r"pip uninstall\b.*\bsetuptools\b", s)]
+    project = next(i for i, s in enumerate(steps) if re.search(r"pip install\b.*\s/app/backend$", s))
+    pip_gone = next(i for i, s in enumerate(steps) if re.search(r"pip uninstall\b.*\bpip\b", s))
+    assert len(gone) == 1, steps
+    assert project < gone[0] < pip_gone, steps
+    # Strict: unlike removing pip, a setuptools that stayed is a failed build.
+    assert "|| true" not in steps[gone[0]]
+
+
+def test_ci_rederives_the_build_lock_from_its_input() -> None:
+    script = LOCK_CHECK.read_text()
+    assert "build-requirements.in" in script and "build-requirements.txt" in script
+    assert _compile_options(_lock_header(BUILD_LOCK)) <= _compile_options(script)
+
+
 # ------------------------------------------------------------------ L4
 
 
@@ -415,3 +504,19 @@ def test_syntax_frontend_matches_the_stage_dependabot_bumps() -> None:
         "copy the stage's version and digest onto line 1"
     )
     assert not re.search(r"--from=syntax-pin\b", DOCKERFILE.read_text()), "syntax-pin must not be used"
+
+
+def test_arm64_image_is_started_not_just_scanned() -> None:
+    """The arm64 leg of the image job runs the image and checks its arch.
+
+    Trivy never executes anything; without this step a broken arm64 runtime
+    passes the gate and ships.
+    """
+    steps = yaml.safe_load(VERIFY.read_text())["jobs"]["image"]["steps"]
+    runs = [s for s in steps if "ktn-enclosure-manager:ci" in s.get("run", "")]
+    assert len(runs) == 1, "expected one step that runs the :ci image"
+    step = runs[0]
+    assert step["if"] == "matrix.arch == 'arm64'"
+    assert "docker run" in step["run"]
+    assert "/healthz" in step["run"]
+    assert "aarch64" in step["run"]
