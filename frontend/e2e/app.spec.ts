@@ -1187,6 +1187,41 @@ test.describe("keyboard", () => {
     await expect(dialog).toHaveCount(0);
     await expect(opener).toBeFocused();
   });
+
+  test("a failed sign-out-everywhere hands focus back to its button", async ({ page }) => {
+    // Review of #62, N3 and N4: after a failed revoke, focus used to jump to
+    // "Current password" at the top, and the error was only a live region.
+    // The request is refused in the browser, so no session is revoked.
+    await bootstrapAndLogin(page);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/auth/revoke-sessions", async (route) => {
+      await held;
+      await route.fulfill({ status: 500, json: { detail: "e2e: revoke refused" } });
+    });
+    await page.getByRole("button", { name: "Change password" }).click();
+    const dialog = page.getByRole("dialog");
+    const revoke = dialog.getByRole("button", { name: "Sign out everywhere" });
+    await revoke.focus();
+    await page.keyboard.press("Enter");
+    await expect(revoke).toBeDisabled();
+
+    release();
+    const alert = dialog.getByRole("alert");
+    await expect(alert).toContainText("e2e: revoke refused");
+    await expect(revoke).toBeFocused();
+    const errorId = await alert.getAttribute("id");
+    expect(errorId, "the error needs an id to be described by").toBeTruthy();
+    await expect(revoke).toHaveAttribute("aria-describedby", errorId!);
+    await expect(dialog.getByLabel("Current password")).toHaveAttribute(
+      "aria-describedby", errorId!,
+    );
+    // Control: with no error showing, nothing points at a missing element.
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Change password" }).click();
+    await expect(page.getByRole("dialog").getByLabel("Current password"))
+      .not.toHaveAttribute("aria-describedby");
+  });
 });
 
 test.describe("change password", () => {

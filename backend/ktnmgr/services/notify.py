@@ -72,16 +72,25 @@ _NTFY_STYLE: dict[str, tuple[str, str]] = {
 }
 
 
-def _type_names(exc: BaseException) -> str:
+#: How many levels of nested exception groups _type_names spells out. anyio
+#: nests one or two; the cap only stops a pathological group from raising
+#: RecursionError inside the except clause that logs it.
+_TYPE_NAMES_MAX_DEPTH = 5
+
+
+def _type_names(exc: BaseException, _depth: int = 0) -> str:
     """The exception's class name, plus the class names inside a group.
 
     Class names only, never the messages: those can quote the webhook URL. A
     group's own name alone ("ExceptionGroup") would hide the useful part, such
-    as the OverflowError of an out-of-range port.
+    as the OverflowError of an out-of-range port. Groups nested deeper than
+    _TYPE_NAMES_MAX_DEPTH are shown as "[...]".
     """
     name = type(exc).__name__
     if isinstance(exc, BaseExceptionGroup):
-        inner = sorted({_type_names(e) for e in exc.exceptions})
+        if _depth >= _TYPE_NAMES_MAX_DEPTH:
+            return name + "[...]"
+        inner = sorted({_type_names(e, _depth + 1) for e in exc.exceptions})
         name += "[" + ", ".join(inner) + "]"
     return name
 
@@ -275,7 +284,7 @@ class HealthNotifier:
             # and is deliberately not caught.
             log.warning(
                 "could not deliver health notification: %s: unexpected error "
-                "sending the alert",
+                "sending the alert (check KTN_ALERT_WEBHOOK_URL)",
                 _type_names(exc),
             )
             return False

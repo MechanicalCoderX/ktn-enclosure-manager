@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- The "unexpected error sending the alert" health-notification warning now
+  ends with "(check KTN_ALERT_WEBHOOK_URL)", like the other two URL warnings.
+  An out-of-range port, the usual cause, is a URL typo.
+- After a failed **Sign out everywhere**, focus returns to that button, not
+  to "Current password" at the top of the dialog. The dialog's fields and the
+  button are described by the error (`aria-describedby`), so it stays
+  reachable when a screen reader cuts the live announcement short.
+- The chassis status-flags region is labelled "Chassis status flags table",
+  matching the other tables.
+
+### Fixed
+- A pathologically nested exception group can no longer make the alert
+  warning itself raise `RecursionError`; groups deeper than five levels are
+  logged as `[...]`.
+
 ## [1.6.5] — 2026-11-22
 
 ### Security

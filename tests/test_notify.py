@@ -712,17 +712,21 @@ UNEXPECTED = "unexpected error sending the alert"
 #:   is the case that rules out logging httpx's message: with the "@host"
 #:   missing, the password is parsed as a port and httpx reports
 #:   "Invalid port: '<password>'".
-#: - The next two raise a bare UnicodeError that httpx does not wrap: idna's
+#: - The next three raise a bare UnicodeError that httpx does not wrap: idna's
 #:   InvalidCodepoint for an ASCII "xn--" label that does not decode (an emoji
 #:   domain in A-label form), and UnicodeEncodeError for a lone surrogate,
-#:   which os.environ produces from a non-UTF-8 byte.
+#:   which os.environ produces from a non-UTF-8 byte. The second idna case
+#:   decodes to "s3cret" plus an emoji, so idna's own message quotes the
+#:   marker: it is the case that fails if that clause ever logs str(exc).
 #: - The rest are out-of-range ports. httpx does no range check, so these get
 #:   as far as anyio's connect, which raises an ExceptionGroup of
 #:   OverflowError. The hosts are loopback and resolve without DNS, which is
 #:   what makes them reach the connect: on an unresolvable host the DNS
 #:   failure (a ConnectError) comes first and hides it. Nothing is sent: the
-#:   port is rejected before the connect() call. [::1] may also give a
-#:   ConnectError on a host with no IPv6, which is handled as well.
+#:   port is rejected inside Python's socket.connect() while its arguments are
+#:   converted, before the connect(2) syscall. [::1] may also give a
+#:   ConnectError on a host with no IPv6, and "localhost" on a host whose
+#:   /etc/hosts lacks it (the lookup then fails); both are handled as well.
 MALFORMED_URLS = [
     pytest.param(
         "https://alice:pw-s3cret@ntfy.example:notaport/topic-s3cret?auth=TOKEN-s3cret",
@@ -737,6 +741,10 @@ MALFORMED_URLS = [
     pytest.param(
         "https://alice:pw-s3cret@xn--ls8h.la/topic-s3cret?auth=TOKEN-s3cret",
         (UNENCODABLE,), id="idna-undecodable",
+    ),
+    pytest.param(
+        "https://alice:pw-x@xn--s3cret-nx54e.la/topic-x",
+        (UNENCODABLE,), id="idna-label-quotes-marker",
     ),
     pytest.param(
         "https://ntfy.example/topic-s3cret\udcff?auth=TOKEN-s3cret",
@@ -760,7 +768,7 @@ MALFORMED_URLS = [
     ),
     pytest.param(
         "https://alice:pw-s3cret@localhost:99999/topic-s3cret?auth=TOKEN-s3cret",
-        (UNEXPECTED,), id="port-localhost",
+        (UNEXPECTED, "could not deliver health notification to"), id="port-localhost",
     ),
 ]
 
@@ -882,6 +890,14 @@ class MadeUpLibraryError(Exception):
     """Stands in for whatever the HTTP stack raises next that nobody listed."""
 
 
+def _nested_group(leaf: Exception, depth: int) -> ExceptionGroup[Exception]:
+    """An ExceptionGroup nested `depth` levels deep around `leaf`."""
+    group: ExceptionGroup[Exception] = ExceptionGroup("level 0", [leaf])
+    for level in range(1, depth):
+        group = ExceptionGroup(f"level {level}", [group])
+    return group
+
+
 @pytest.mark.parametrize(
     ("make_error", "logged_type"),
     [
@@ -892,6 +908,12 @@ class MadeUpLibraryError(Exception):
                 f"connect to {url}", [MadeUpLibraryError(url), OverflowError(url)]
             ),
             "ExceptionGroup[MadeUpLibraryError, OverflowError]", id="exception-group",
+        ),
+        # Deeper than the class-name walk's cap: the levels past it are shown
+        # as "[...]". The recursion-limit case is test_type_names_* below.
+        pytest.param(
+            lambda url: _nested_group(OverflowError(url), 8),
+            "ExceptionGroup[" * 5 + "ExceptionGroup[...]" + "]" * 5, id="deep-group",
         ),
     ],
 )
@@ -913,10 +935,30 @@ async def test_an_unexpected_error_is_a_failed_delivery_logged_by_type_only(
 
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert warnings == [
-        f"could not deliver health notification: {logged_type}: {UNEXPECTED}"
+        (f"could not deliver health notification: {logged_type}: {UNEXPECTED}"
+         " (check KTN_ALERT_WEBHOOK_URL)")
     ], warnings
     assert not [r for r in caplog.records if r.exc_info]
     assert notifier._retry_at, "the cooldown was not set"
+
+
+def test_type_names_stops_at_its_depth_cap_far_below_the_recursion_limit() -> None:
+    """A group nested past Python's recursion limit must not make the warning
+    itself raise RecursionError inside the except clause: that would escape
+    _send() with the group as its context, and the caller's log.exception
+    would print the group's messages, which can quote the URL. The
+    RecursionError is caught here and turned into a plain failure, because a
+    1200-deep traceback chain also overflows pytest's own reporting."""
+    from ktnmgr.services.notify import _type_names
+
+    group = _nested_group(OverflowError("https://alice:pw-s3cret@x/"), 1200)
+    try:
+        name: str | None = _type_names(group)
+    except RecursionError:
+        name = None
+    assert name == "ExceptionGroup[" * 5 + "ExceptionGroup[...]" + "]" * 5, (
+        "the depth cap is gone: _type_names recursed into the whole group"
+    )
 
 
 async def test_cancellation_is_not_swallowed_by_the_last_clause(
