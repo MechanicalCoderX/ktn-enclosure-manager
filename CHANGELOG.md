@@ -31,6 +31,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - The package declares its license as the SPDX string `MIT` and needs
   setuptools 77 or later to build. setuptools stops accepting the old
   TOML-table form after 2027-02-18.
+- An end-to-end test of the Identify expiry no longer fails now and then on
+  a catch-up poll fired by its own clock jump. Test-only.
 - The backend requires Python 3.15 or later, the version the image already
   ships (`requires-python`, ruff and mypy all target it). The image is
   unaffected; a local development install on an older Python is refused.
