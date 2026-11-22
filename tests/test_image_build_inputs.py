@@ -415,3 +415,19 @@ def test_syntax_frontend_matches_the_stage_dependabot_bumps() -> None:
         "copy the stage's version and digest onto line 1"
     )
     assert not re.search(r"--from=syntax-pin\b", DOCKERFILE.read_text()), "syntax-pin must not be used"
+
+
+def test_arm64_image_is_started_not_just_scanned() -> None:
+    """The arm64 leg of the image job runs the image and checks its arch.
+
+    Trivy never executes anything; without this step a broken arm64 runtime
+    passes the gate and ships.
+    """
+    steps = yaml.safe_load(VERIFY.read_text())["jobs"]["image"]["steps"]
+    runs = [s for s in steps if "ktn-enclosure-manager:ci" in s.get("run", "")]
+    assert len(runs) == 1, "expected one step that runs the :ci image"
+    step = runs[0]
+    assert step["if"] == "matrix.arch == 'arm64'"
+    assert "docker run" in step["run"]
+    assert "/healthz" in step["run"]
+    assert "aarch64" in step["run"]
