@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.6.5] — release candidate, not yet released
 
 ### Security
 - Health-alert log lines no longer name a host when `KTN_ALERT_WEBHOOK_URL`
