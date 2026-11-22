@@ -3,7 +3,7 @@ name = "ktn-enclosure-manager"
 version = "1.6.4"
 description = "Local, zero-cost enclosure manager for SES disk shelves on TrueNAS SCALE (validated on EMC KTN-STL3)"
 requires-python = ">=3.15"
-license = { text = "MIT" }
+license = "MIT"
 dependencies = [
     "fastapi>=0.115",
     # Not uvicorn[standard]: pip check ignores extras, and [standard] also
@@ -38,7 +38,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
