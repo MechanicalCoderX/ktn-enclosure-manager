@@ -227,10 +227,18 @@ test.describe("identify expiry", () => {
     const t0 = Math.ceil((Date.now() + 60_000) / 1000) * 1000;
     fake.browserNow = t0;
     await page.clock.pauseAt(t0);
-    await advanceTo(page, fake, t0 + POLL_MS);
-    // Exactly one interval tick falls in any one-interval window.
-    const ticks = fake.requests.filter((t) => t > t0);
+    // The jump to t0 fires an overdue poll once, and that catch-up request
+    // can be stamped just after t0 (CI run 45052350684 saw t0+1 ms next to the
+    // tick at t0+5000). So the phase is read from the SECOND interval after
+    // the jump, which only the steady cadence can reach.
+    await advanceTo(page, fake, t0 + 2 * POLL_MS);
+    // Exactly one interval tick falls in any one-interval window ...
+    const ticks = fake.requests.filter((t) => t > t0 + POLL_MS);
     expect(ticks, "expected exactly one bay poll in one poll interval").toHaveLength(1);
+    // ... and it is a steady interval, one period after the tick before it.
+    expect(fake.requests, "expected the poll before it one interval earlier").toContain(
+      ticks[0] - POLL_MS,
+    );
     return ticks[0] + 3 * POLL_MS + POLL_MS / 2;
   }
 
