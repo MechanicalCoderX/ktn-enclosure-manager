@@ -7,6 +7,7 @@
  * a production system would.
  *
  *   KTN_E2E_SYNTHETIC_SLOTS=0 bash scripts/e2e-server.sh &   # backend on :8421
+ *   export KTN_DEMO_PASSWORD="$(openssl rand -base64 18)"     # throwaway, this session only
  *   node frontend/scripts/screenshots.mjs
  *
  * KTN_E2E_SYNTHETIC_SLOTS=0 prunes the fixture's synthetic empty bay (SES 99)
@@ -22,7 +23,19 @@ import { mkdir } from "node:fs/promises";
 const BASE = process.env.KTN_BASE_URL ?? "http://127.0.0.1:8421";
 const OUT = new URL("../../docs/images/", import.meta.url).pathname;
 const USER = "admin";
-const PASSWORD = "screenshot-administrator";
+// The e2e server starts with no account: the first run creates "admin" with
+// this password and later runs sign in with it, so export one value for the
+// whole session. There is deliberately no default, so no password is ever
+// committed to this public repository.
+const PASSWORD = process.env.KTN_DEMO_PASSWORD ?? "";
+if (PASSWORD.length < 12) {
+  console.error(
+    "KTN_DEMO_PASSWORD must be set to a throwaway password of 12+ characters " +
+      "for the local e2e server, e.g.\n" +
+      '  export KTN_DEMO_PASSWORD="$(openssl rand -base64 18)"',
+  );
+  process.exit(2);
+}
 
 const WIDTH = 1500;
 const HEIGHT = 940;
