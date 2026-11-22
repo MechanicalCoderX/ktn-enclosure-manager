@@ -600,7 +600,7 @@ async def test_userinfo_credentials_never_reach_the_logs_when_rejected(
         await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
 
     text = log_text(caplog)
-    assert "ntfy.example" in text and "401" in text, text
+    assert "withheld" in text and "401" in text, text
     assert "s3cret" not in text and "alice" not in text, text
 
 
@@ -619,7 +619,7 @@ async def test_userinfo_credentials_never_reach_the_logs_when_raising(
         await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
 
     text = log_text(caplog)
-    assert "could not deliver" in text and "ntfy.example" in text, text
+    assert "could not deliver" in text and "withheld" in text, text
     assert "s3cret" not in text and "alice" not in text, text
 
 
@@ -935,3 +935,84 @@ async def test_cancellation_is_not_swallowed_by_the_last_clause(
 
     with pytest.raises(asyncio.CancelledError):
         await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+
+
+# Malformed userinfo ends urlsplit's netloc early, so .hostname is the username
+# or the front of a token. "@" anywhere in the URL withholds the host.
+@pytest.mark.parametrize("url", [
+    "http://FAKEMARKER:pa/ss@nas.lan/t",
+    "http://TOKENfakemarker/dEf+==@nas.lan/t",
+    "http://FAKEMARKER:pa?x@nas.lan/t",
+    "http://FAKEMARKER#x@nas.lan/t",
+    "ws://FAKEMARKER/x@nas.lan/t",
+    "  http://FAKEMARKER/x@nas.lan/t",
+])
+async def test_where_withholds_the_host_when_the_url_has_userinfo(
+    url: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    notifier = HealthNotifier(url, state_path=tmp_path / "n.json")
+    assert "fakemarker" not in notifier._where.lower()
+    assert "nas.lan" not in notifier._where  # withheld whole, not guessed at
+
+    with caplog.at_level("DEBUG"):
+        log_ = logging.getLogger("ktnmgr.services.notify")
+        log_.warning("from %s", notifier._where)
+    assert "fakemarker" not in "\n".join(r.getMessage() for r in caplog.records).lower()
+
+
+def test_where_still_names_scheme_and_host_for_a_plain_url() -> None:
+    """Control: the guard must not blank every URL."""
+    assert HealthNotifier("https://ntfy.example/topic-s3cret?a=b")._where == "https://ntfy.example"
+
+
+def test_where_strips_control_characters_from_the_host() -> None:
+    where = HealthNotifier("http://ho\x1b[31mst\r\n.example/t")._where
+    assert all(c.isprintable() for c in where), repr(where)
+
+
+async def test_malformed_userinfo_never_reaches_the_log_on_a_failed_send(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    url = "http://FAKEMARKER:pa/ss@nas.lan/t"
+    transport = httpx.MockTransport(lambda request: httpx.Response(500))
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        "ktnmgr.services.notify.httpx.AsyncClient",
+        lambda **kw: real_client(transport=transport, **kw),
+    )
+    notifier = HealthNotifier(url, state_path=tmp_path / "n.json")
+    with caplog.at_level("DEBUG"):
+        await notifier.evaluate([make_bay(0, SlotHealth.FAILED)])
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "could not deliver" in text, "control: the failure path did not log"
+    assert "fakemarker" not in text.lower(), text
+
+
+@pytest.mark.parametrize("value", ["JSON", " json ", "Json\n"])
+def test_alert_style_accepts_case_and_whitespace_variants(
+    value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="ktnmgr.services.notify"):
+        assert HealthNotifier("http://hook/x", style=value).style == "json"
+    assert not caplog.records
+
+
+@pytest.mark.parametrize("value", ["", "  ", "ntfy", "NTFY"])
+def test_alert_style_default_and_ntfy_are_silent(
+    value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="ktnmgr.services.notify"):
+        assert HealthNotifier("http://hook/x", style=value).style == "ntfy"
+    assert not caplog.records
+
+
+def test_unknown_alert_style_warns_once_and_falls_back_to_ntfy(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    bad = "jsno\x1b[31m" + "x" * 100
+    with caplog.at_level("WARNING", logger="ktnmgr.services.notify"):
+        assert HealthNotifier("http://hook/x", style=bad).style == "ntfy"
+    assert len(caplog.records) == 1
+    msg = caplog.records[0].getMessage()
+    assert "KTN_ALERT_STYLE" in msg and "ntfy" in msg and "jsno" in msg
+    assert "\x1b" not in msg and "x" * 60 not in msg, msg
