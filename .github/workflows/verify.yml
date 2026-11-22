@@ -84,11 +84,13 @@ jobs:
         #
         # First the lock as a file: exactly what the image ships, read from
         # the file rather than the environment (--disable-pip needs every
-        # line pinned and hashed, which the lock is). Then the environment,
-        # which adds the dev tools.
+        # line pinned and hashed, which the lock is). Then the build-backend
+        # lock the same way: setuptools runs as root during the image build.
+        # Then the environment, which adds the dev tools.
         run: |
           pip install pip-audit
           pip-audit --desc --disable-pip -r backend/requirements.txt
+          pip-audit --desc --disable-pip -r backend/build-requirements.txt
           pip-audit --desc --skip-editable
 
   frontend:
