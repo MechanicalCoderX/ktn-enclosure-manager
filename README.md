@@ -42,14 +42,22 @@ hardware identity, or touching the TrueNAS WebUI.
 - TrueNAS SCALE (developed and validated on **25.10.5**, kernel 6.12.95)
 - A SAS HBA in IT/HBA mode with an SES enclosure attached, visible as
   `/sys/class/enclosure/*`
-- Docker (present on TrueNAS SCALE) or the TrueNAS *Custom App* UI
+- Docker (present on TrueNAS SCALE), the TrueNAS community catalog, or the
+  TrueNAS *Custom App* UI
 - Optional: a TrueNAS API key, for pool/vdev/ZFS/SMART data
 
 Nothing is installed on the host. `sg3-utils` ships inside the image.
 
 ## Install
 
-**On TrueNAS SCALE — no shell required.** Apps → Discover Apps → **⋮** →
+**From the TrueNAS community catalog — easiest.** Apps → Discover Apps, search
+**KTN Enclosure Manager**, install, and add your enclosure's `/dev/sgN` under
+**Devices**. The catalog form grants that device read-write; for a read-only,
+monitoring-only grant use Install via YAML below. Walkthrough and exactly what
+the catalog install grants:
+**[docs/INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md#1-install-from-the-truenas-community-catalog)**.
+
+**As a custom app on TrueNAS SCALE — no shell required.** Apps → Discover Apps → **⋮** →
 **Install via YAML**, paste [`truenas/install-via-yaml.yaml`](truenas/install-via-yaml.yaml),
 edit the four `### EDIT ###` lines, install. Full walkthrough:
 **[docs/INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md)**.

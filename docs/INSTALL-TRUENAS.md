@@ -1,10 +1,62 @@
 # Installing on TrueNAS SCALE
 
-Three ways, easiest first.
+Three ways, easiest first. The catalog install (1) takes a few clicks. Install
+via YAML (2) is the custom-app path with every option, including a read-only
+device grant and HTTPS with the TrueNAS certificate. Docker Compose (3) builds
+from source.
 
 ---
 
-## 1. Install via YAML (recommended)
+## 1. Install from the TrueNAS community catalog
+
+KTN Enclosure Manager is in the TrueNAS community app catalog
+([truenas/apps](https://github.com/truenas/apps), `community` train).
+
+1. Find your enclosure's SCSI generic device on the host (System → Shell):
+   `lsscsi -g | grep enclosu` gives `/dev/sgN`, and
+   `cat /sys/class/enclosure/*/id` gives the enclosure id.
+2. Apps → Discover Apps, search **KTN Enclosure Manager**, then **Install**.
+   If it does not appear, check that the `community` train is enabled in the
+   Apps catalog settings.
+3. Under **Devices**, add your enclosure: Host Device `/dev/sgN`, Container
+   Device the same path.
+4. Optional fields:
+   - **Restrict to Enclosure IDs** takes the id from step 1.
+   - **Require a login** is on by default. Turning it off gives an open
+     dashboard; Identify still needs an account unless you also tick
+     **Allow Identify without a login**.
+   - **TrueNAS API Key** adds pool, vdev, ZFS and SMART data per bay. It works
+     without one.
+5. Install, then open the app's **Web UI** button (default port **30598**) and
+   create the administrator account. There is no default password.
+
+**What the catalog install grants.** These come from the catalog template, so
+they differ from Install via YAML in two places:
+
+- **Device access is read-write (`rw`).** The template grants each device you
+  list as `rw`, and the form has no read-only option. The `w` is used only for
+  the IDENT LED SEND DIAGNOSTIC; every telemetry read uses a read-only open (see
+  [SECURITY.md](../SECURITY.md)). If you want a monitoring-only deployment with a
+  `:r` grant, where Identify returns a permission error, use Install via YAML (2).
+- **API connection.** With an API key set, the app connects to the TrueNAS API at
+  `https://host.docker.internal:<port>` (the **TrueNAS Web Interface HTTPS Port**
+  field, default 443). The template turns certificate verification off for
+  that connection. The key is only ever sent over https.
+- Otherwise it is the same as the YAML install: not privileged, every capability
+  dropped except `SETUID`/`SETGID`, no `/sys` mount, and state on the **Data
+  Storage** you choose (an ixVolume by default, or a host path).
+
+The form has no dedicated HTTPS fields for the app's own web UI. To serve HTTPS
+with the TrueNAS certificate, use Install via YAML (2) and the section on it below.
+
+**Updates** arrive through the Apps page's Update button. The catalog is
+bumped by a TrueNAS bot after each release, so it can trail the
+[GitHub releases](https://github.com/MechanicalCoderX/ktn-enclosure-manager/releases)
+by a few days.
+
+---
+
+## 2. Install via YAML (custom app)
 
 TrueNAS SCALE 24.10+ can install any Docker Compose file directly. This is the
 supported "custom app" path and needs no shell access.
@@ -240,7 +292,7 @@ app's config directory.
 
 ---
 
-## 2. Docker Compose from a shell
+## 3. Docker Compose from a shell
 
 ```bash
 git clone https://github.com/MechanicalCoderX/ktn-enclosure-manager.git
@@ -256,29 +308,16 @@ want to modify the app or avoid the registry.
 
 ---
 
-## 3. Official TrueNAS catalog
-
-Not available yet. The app source in a format suitable for submission to the
-[truenas/apps](https://github.com/truenas/apps) community train lives in
-[`truenas/catalog-app/`](../truenas/catalog-app/), along with
-[SUBMITTING.md](../truenas/catalog-app/SUBMITTING.md).
-
-The one unusual thing this app asks a catalog reviewer to accept is the SES
-device node itself (`/dev/sg*` at `rw`). Since 1.1.0 there is no writable
-`/sys`, no AppArmor relaxation and no extra capability: the LED is driven by a
-SCSI command on that node under the default profile. The permission floor was
-measured exactly in 1.5.2 — every telemetry read runs on a read-only open, and
-the `w` exists for one SEND DIAGNOSTIC — see [SECURITY.md](../SECURITY.md).
-Method 1 works today regardless.
-
----
-
 ## Verifying the install
 
 ```bash
 docker logs ktn-enclosure-manager | grep "startup complete"
 # -> startup complete: 1 enclosure(s): EMC ESES Enclosure 0x...
 ```
+
+A catalog install names its container differently: read the same line in the
+app's **Logs** on the Apps page, or find the name with
+`docker ps --format '{{.Names}}' | grep ktn` and use that in the commands here.
 
 If it reports `0 enclosure(s)`, check `/sys/class/enclosure` is non-empty
 **on the host**. If it is empty, the HBA is not passed through or is not in
@@ -287,7 +326,8 @@ Docker's own read-only `/sys` already exposes `/sys/class/enclosure`, which is
 all the app reads.
 
 If the Chassis tab says unavailable, the SES device node is missing from the
-`devices:` block or points at the wrong `/dev/sgN`. Telemetry runs on a
+`devices:` block (on a catalog install, the **Devices** list) or points at the
+wrong `/dev/sgN`. Telemetry runs on a
 read-only open, so even a `:r` grant is enough for it; confirm the same way
 the app reads:
 
@@ -301,6 +341,9 @@ write is the one operation that needs the `w`; grant `:rw` to enable it (see
 [SECURITY.md](../SECURITY.md)).
 
 ## Upgrading
+
+Catalog install: use the Update button on the Apps page when it appears. It
+can trail a GitHub release by a few days.
 
 Install via YAML: change the image tag and redeploy, or use the app's Update
 button when a new tag is published.
