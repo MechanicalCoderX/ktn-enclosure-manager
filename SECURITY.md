@@ -166,9 +166,13 @@ E2E on that same lock and fails if it no longer matches what
 (`--only-binary :all:`), so none of the dependencies is built during the
 image build, and a pin without a wheel fails the build rather than running a
 build backend nobody hashed. Runtime dependencies are declared by name, never
-through an extra, so the image's `pip check` covers every one. Not covered by
-the hashes: setuptools, which pip fetches during the image build to build the
-project itself; it is not left in the image.
+through an extra, so the image's `pip check` covers every one. The project's
+own build backend, setuptools, comes from a second hash-pinned lock,
+`backend/build-requirements.txt`, installed the same way; the project is built
+with `--no-build-isolation`, so pip fetches nothing unhashed, and setuptools is
+uninstalled before the image is finished (since 1.6.5). CI starts the arm64
+image under emulation as well as the amd64 one, so both published
+architectures are run, not only scanned, before a release (since 1.6.5).
 
 CodeQL (`security-extended`) runs on Python and TypeScript weekly and on every
 pull request, `pip-audit` (on the lock and on the test environment) and
@@ -416,7 +420,9 @@ is kept out of the logs at every level (since 1.5.7):
 - the `httpx` and `httpcore` loggers are held at `WARNING`, so their
   `HTTP Request: POST <url>` line never appears, whatever `KTN_LOG_LEVEL` says;
 - the app's own warnings name the endpoint by scheme and host only, and the
-  URL is scrubbed from any delivery-error text it quotes;
+  URL is scrubbed from any delivery-error text it quotes. When the URL
+  contains `@` the host is withheld too: a username or token holding an
+  unencoded `/`, `?` or `#` would otherwise be read as the host (since 1.6.5);
 - a malformed URL is logged by error class only, with no part of the URL,
   because the part httpx complains about can be the password or token
   (since 1.6.2).

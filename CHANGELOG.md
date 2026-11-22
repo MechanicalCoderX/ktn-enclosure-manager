@@ -6,7 +6,31 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- Health-alert log lines no longer name a host when `KTN_ALERT_WEBHOOK_URL`
+  contains `@`. A username or token holding an unencoded `/`, `?` or `#` made
+  the logged "host" the username or the front of the token. Control
+  characters are also stripped from the logged scheme and host.
+- The image's build backend is hash-pinned. setuptools now comes from a
+  second lock, `backend/build-requirements.txt` (installed
+  `--require-hashes --only-binary :all:`); the project is built with
+  `--no-build-isolation` and setuptools is uninstalled before the image is
+  finished. Before, pip fetched the newest setuptools unhashed into an
+  isolated build environment, as root. `scripts/check-lock.sh`, the
+  image-input tests and CI's `pip-audit` cover both locks.
+
 ### Changed
+- An unrecognised `KTN_ALERT_STYLE` now logs one warning naming the value and
+  the fallback to `ntfy` (the fallback itself is unchanged). `JSON`, ` json `
+  and other case or whitespace variants are accepted as `json`; before, they
+  silently meant `ntfy`.
+- CI starts the linux/arm64 image under QEMU, waits for `/healthz` to answer
+  200 and checks the interpreter reports `aarch64`, so a broken arm64 runtime
+  fails the release gate instead of shipping. Before, arm64 was built and
+  scanned but never run.
+- The package declares its license as the SPDX string `MIT` and needs
+  setuptools 77 or later to build. setuptools stops accepting the old
+  TOML-table form after 2027-02-18.
 - The backend requires Python 3.15 or later, the version the image already
   ships (`requires-python`, ruff and mypy all target it). The image is
   unaffected; a local development install on an older Python is refused.
