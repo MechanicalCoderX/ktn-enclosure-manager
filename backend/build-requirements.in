@@ -4,4 +4,4 @@
 # A copy of pyproject.toml's [build-system].requires: Dependabot regenerates a
 # compiled lock only from a .in file. tests/test_image_build_inputs.py fails if
 # the two lists differ. Regenerate command: CONTRIBUTING.md, "Dependency lock".
-setuptools>=68
+setuptools>=77
