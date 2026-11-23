@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.27.1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# syntax=docker/dockerfile:1.29.0@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
 #
 # The line above names the BuildKit frontend, an image that is pulled and
 # executed at build time - in the publish job too, which holds packages:write.
@@ -17,7 +17,7 @@
 # -------------------------------------------------------------- syntax-pin
 # Never built: nothing copies from it and it is not the last stage, so BuildKit
 # skips it. It exists only so Dependabot proposes new frontend releases (above).
-FROM docker/dockerfile:1.27.1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e AS syntax-pin
+FROM docker/dockerfile:1.29.0@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183 AS syntax-pin
 
 # ---------------------------------------------------------------- frontend
 # Pinned by digest: a floating tag makes today's build and next month's differ
