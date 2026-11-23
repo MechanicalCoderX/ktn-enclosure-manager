@@ -20,9 +20,9 @@ from ktnmgr.config import Settings, truenas_url_for_display
 from ktnmgr.main import build_app
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
-PASSWORD = "a-sufficiently-long-password"
+PASSWORD = "test-fixture-admin-password"
 CSRF = {"x-ktn-request": "1"}
-SECRET = "synthetic-d1a9-secret"
+SECRET = "fixture-secret-in-the-url"
 
 
 @pytest.mark.parametrize(

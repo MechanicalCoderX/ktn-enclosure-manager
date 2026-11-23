@@ -41,7 +41,7 @@ FLAG = "KTN_TRUENAS_ALLOW_INSECURE"
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
 LOGICAL_ID = "0x50060480aabbcc00"
-PASSWORD = "a-sufficiently-long-password"
+PASSWORD = "test-fixture-admin-password"
 CSRF = {"x-ktn-request": "1"}
 
 

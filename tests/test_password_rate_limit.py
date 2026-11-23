@@ -20,7 +20,7 @@ from ktnmgr.config import Settings
 from ktnmgr.main import build_app
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
-PASSWORD = "the-original-password"
+PASSWORD = "test-fixture-password"
 CSRF = {"x-ktn-request": "1"}
 LIMIT = 3  # small, so the test does not hammer Argon2 five times
 

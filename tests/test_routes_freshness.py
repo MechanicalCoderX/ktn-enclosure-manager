@@ -40,7 +40,7 @@ from ktnmgr.main import build_app
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
 LOGICAL_ID = "0x50060480aabbcc00"
-PASSWORD = "a-sufficiently-long-password"
+PASSWORD = "test-fixture-admin-password"
 CSRF = {"x-ktn-request": "1"}
 
 #: The fixture shelf: bay 1 (SES slot 0) holds sdb, bay 2 (SES slot 1) holds sdc.
