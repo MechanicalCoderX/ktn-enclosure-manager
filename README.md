@@ -359,9 +359,14 @@ npx playwright test                                          # E2E against the r
 
 ```bash
 KTN_E2E_SYNTHETIC_SLOTS=0 bash scripts/e2e-server.sh &   # backend on :8421
+export KTN_DEMO_PASSWORD="$(openssl rand -base64 18)"   # throwaway admin password for that server
 node frontend/scripts/screenshots.mjs        # the PNGs
 node frontend/scripts/identify-demo.mjs      # the demo GIF (see its header for the ffmpeg step)
 ```
+
+Both scripts create the server's first account with `KTN_DEMO_PASSWORD` (or
+sign in with it on a later run) and refuse to start without it; no password
+lives in the repository.
 
 `KTN_E2E_SYNTHETIC_SLOTS=0` prunes the fixture's synthetic empty bay (SES 99,
 a discovery test aid) so the images show the shelf's real 15 bays.

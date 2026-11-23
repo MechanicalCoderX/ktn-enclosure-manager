@@ -6,6 +6,7 @@
  * real 15-bay layout.
  *
  *   KTN_E2E_SYNTHETIC_SLOTS=0 bash scripts/e2e-server.sh &   # backend on :8421
+ *   export KTN_DEMO_PASSWORD="$(openssl rand -base64 18)"     # throwaway, this session only
  *   node frontend/scripts/identify-demo.mjs                   # writes .webm
  *   # then convert (palette pass keeps the file small and the colours clean):
  *   ffmpeg -i /tmp/identify-demo/*.webm -vf \
@@ -18,7 +19,19 @@ import { chromium } from "@playwright/test";
 const BASE = process.env.KTN_BASE_URL ?? "http://127.0.0.1:8421";
 const OUTDIR = "/tmp/identify-demo";
 const USER = "admin";
-const PASSWORD = "screenshot-administrator";
+// The e2e server starts with no account: the first run creates "admin" with
+// this password and later runs sign in with it, so export one value for the
+// whole session. There is deliberately no default, so no password is ever
+// committed to this public repository.
+const PASSWORD = process.env.KTN_DEMO_PASSWORD ?? "";
+if (PASSWORD.length < 12) {
+  console.error(
+    "KTN_DEMO_PASSWORD must be set to a throwaway password of 12+ characters " +
+      "for the local e2e server, e.g.\n" +
+      '  export KTN_DEMO_PASSWORD="$(openssl rand -base64 18)"',
+  );
+  process.exit(2);
+}
 
 const browser = await chromium.launch();
 const context = await browser.newContext({
