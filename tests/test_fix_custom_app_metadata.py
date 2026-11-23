@@ -27,7 +27,7 @@ SCRIPT = ROOT / "truenas" / "fix-custom-app-metadata.py"
 APP = "ktn-enclosure-manager"
 OLD_PORTAL = {"Web UI": "http://0.0.0.0:8420/"}
 NEW_PORTAL = {"Web UI": "https://truenas.example.test:8420/"}
-SECRET = "sentinel-api-key-0123456789"  # must never be printed
+SECRET = "fixture-api-key-value-1234567890"  # must never be printed
 
 
 def load_script() -> types.ModuleType:

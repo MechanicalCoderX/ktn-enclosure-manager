@@ -23,7 +23,7 @@ from ktnmgr.main import build_app
 from ktnmgr.services.auth import SESSION_COOKIE, AuthError, AuthService
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
-PASSWORD = "the-original-password"
+PASSWORD = "test-fixture-password"
 CSRF = {"x-ktn-request": "1"}
 
 

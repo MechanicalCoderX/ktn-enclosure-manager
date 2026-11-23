@@ -38,7 +38,7 @@ import pytest
 from argon2 import PasswordHasher
 from ktnmgr.services.auth import AuthError, AuthService
 
-PASSWORD = "the-original-password"
+PASSWORD = "test-fixture-password"
 NEW_PASSWORD = "a-different-password"
 
 #: Upper bound for any single wait in this module. Generous so a loaded CI

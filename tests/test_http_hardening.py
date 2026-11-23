@@ -29,7 +29,7 @@ from ktnmgr.services.auth import AuthError, RateLimiter
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sysfs_root"
 ENTRYPOINT = Path(__file__).parent.parent / "docker-entrypoint.sh"
-PASSWORD = "a-sufficiently-long-password"
+PASSWORD = "test-fixture-admin-password"
 CSRF = {"x-ktn-request": "1"}
 
 
