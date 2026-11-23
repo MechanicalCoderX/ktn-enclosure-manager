@@ -89,7 +89,7 @@ lines marked `### EDIT ###`:
 | Edit | What |
 |---|---|
 | `/mnt/YOURPOOL/...` | the dataset from step 1 |
-| `/dev/sg16` | your SES device from step 2 |
+| `/dev/sgX` | your SES device from step 2 (for example `/dev/sg16`) |
 | `KTN_TRUENAS_URL` / `KTN_TRUENAS_API_KEY` | optional, for pool/vdev/SMART data. Use `https://`: over `http://` the key is not sent unless `KTN_TRUENAS_ALLOW_INSECURE=true` (see the README) |
 
 **Step 4 — open it and create your administrator**
@@ -165,8 +165,9 @@ you create the administrator in the browser.
 One device node — your enclosure — and nothing else. The container is not
 privileged, mounts no host path besides its own data dataset (plus, only with
 the optional HTTPS below, two read-only certificate files), keeps Docker's
-default AppArmor profile, and drops every capability except the two used to
-drop the web process to uid 1000. See [SECURITY.md](../SECURITY.md).
+default AppArmor profile, and drops every capability except `SETUID` and
+`SETGID`: they drop the web process to uid 1000, and let the root helper create
+its socket under gid 1000. See [SECURITY.md](../SECURITY.md).
 
 ### Serving HTTPS with the TrueNAS certificate
 

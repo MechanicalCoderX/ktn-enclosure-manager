@@ -59,7 +59,7 @@ the catalog install grants:
 
 **As a custom app on TrueNAS SCALE — no shell required.** Apps → Discover Apps → **⋮** →
 **Install via YAML**, paste [`truenas/install-via-yaml.yaml`](truenas/install-via-yaml.yaml),
-edit the four `### EDIT ###` lines, install. Full walkthrough:
+edit the three `### EDIT ###` lines, install. Full walkthrough:
 **[docs/INSTALL-TRUENAS.md](docs/INSTALL-TRUENAS.md)**.
 
 A prebuilt image is published for every release, so there is nothing to build:
@@ -104,7 +104,8 @@ cat /sys/class/enclosure/*/id     # -> 0x...  (put in KTN_ENCLOSURE_ALLOWLIST)
 The container is **not** privileged, mounts no host path other than its own data
 directory (plus, only if you turn on HTTPS, two read-only certificate files),
 runs under the default AppArmor profile, and drops every capability except
-`SETUID`/`SETGID` (used once, to drop the web process to uid 1000). Its only
+`SETUID`/`SETGID` (to drop the web process to uid 1000, and for the root helper
+to create its socket under gid 1000). Its only
 hardware access is the SES device node.
 
 The Identify LED is driven by a SCSI command rather than a sysfs write, which is

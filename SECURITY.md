@@ -82,7 +82,7 @@ The shipped `docker-compose.yml` drops **all** capabilities and adds back only:
 
 | Capability | Why |
 |---|---|
-| `SETUID`, `SETGID` | `setpriv` drops the web process to uid 1000 |
+| `SETUID`, `SETGID` | `setpriv` drops the web process to uid 1000; the root helper uses `SETGID` (setegid) to create its socket under gid 1000, so no `CHOWN` is needed |
 
 `no-new-privileges` is set, the **default AppArmor profile is left in place**,
 `--privileged` is never used, and there is no `/sys` bind mount. The only host
