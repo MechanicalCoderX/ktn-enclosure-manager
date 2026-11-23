@@ -873,7 +873,7 @@ export function ChassisView({ chassis }: { chassis: Chassis | null }) {
         </div>
         {chassis.overall_flags && Object.keys(chassis.overall_flags).length > 0 && (
           <div className="table-scroll" tabIndex={0} role="region"
-               aria-label="Chassis status flags">
+               aria-label="Chassis status flags table">
             <table>
               <tbody>
                 <tr>

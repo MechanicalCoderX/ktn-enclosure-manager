@@ -514,8 +514,9 @@ async def test_notifier_sees_every_bay_whose_identity_resolved() -> None:
         "https://xn--ls8h.la/topic-s3cret",
         "https://ntfy.example/topic-s3cret\udcff",
         # Out-of-range ports on loopback: these get past DNS to anyio's
-        # connect, which raises an ExceptionGroup of OverflowError before any
-        # connect() call, so nothing is sent and no network is needed.
+        # connect, which raises an ExceptionGroup of OverflowError inside
+        # socket.connect() while its arguments are converted, before the
+        # connect(2) syscall, so nothing is sent and no network is needed.
         "https://alice:pw-s3cret@127.0.0.1:99999/topic-s3cret?auth=TOKEN-s3cret",
         "https://alice:pw-s3cret@127.0.0.1:65536/topic-s3cret?auth=TOKEN-s3cret",
         "https://alice:pw-s3cret@127.0.0.1:-1/topic-s3cret?auth=TOKEN-s3cret",

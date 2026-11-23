@@ -142,6 +142,10 @@ function ChangePasswordDialog({
   const [busy, setBusy] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstField = useRef<HTMLInputElement>(null);
+  const revokeButton = useRef<HTMLButtonElement>(null);
+  // The control that started the request in flight: a failed "Sign out
+  // everywhere" hands focus back to that button, not to the top of the form.
+  const startedBy = useRef<HTMLElement | null>(null);
 
   // Escape is heard on the document, not on the dialog: pressing Enter on a
   // button that then disables itself drops Chromium's focus to <body>, outside
@@ -157,18 +161,25 @@ function ChangePasswordDialog({
   }, [busy, onClose]);
 
   // When a request ends with the dialog still open (it failed), put focus back
-  // inside it if the disabled button let it fall out, so Tab starts from the
-  // top of the form rather than wherever the browser parked it.
+  // inside it if the disabled button let it fall out: on the button that
+  // started it when that is "Sign out everywhere", otherwise on the first
+  // field, where a failed password change is retyped.
   const wasBusy = useRef(false);
   useEffect(() => {
     if (wasBusy.current && !busy && !dialogRef.current?.contains(document.activeElement)) {
-      firstField.current?.focus();
+      (startedBy.current ?? firstField.current)?.focus();
     }
     wasBusy.current = busy;
   }, [busy]);
 
+  // The error is announced by role="alert", and focus can move in the same
+  // commit, which some screen readers answer by cutting the announcement
+  // short. Describing every control by the error keeps it reachable.
+  const describedBy = error ? "cp-error" : undefined;
+
   const revokeAll = async () => {
     setError(null);
+    startedBy.current = revokeButton.current;
     setBusy(true);
     try {
       await api.revokeSessions();
@@ -195,6 +206,7 @@ function ChangePasswordDialog({
       setError("New password must differ from the current one");
       return;
     }
+    startedBy.current = null;
     setBusy(true);
     try {
       await api.changePassword(current, next);
@@ -219,19 +231,19 @@ function ChangePasswordDialog({
           <label htmlFor="cp-current">Current password</label>
           <input id="cp-current" type="password" autoComplete="current-password"
                  ref={firstField} value={current} onChange={(e) => setCurrent(e.target.value)}
-                 required autoFocus />
+                 aria-describedby={describedBy} required autoFocus />
 
           <label htmlFor="cp-new">New password</label>
           <input id="cp-new" type="password" autoComplete="new-password"
-                 minLength={12} value={next}
+                 minLength={12} value={next} aria-describedby={describedBy}
                  onChange={(e) => setNext(e.target.value)} required />
 
           <label htmlFor="cp-confirm">Confirm new password</label>
           <input id="cp-confirm" type="password" autoComplete="new-password"
-                 minLength={12} value={confirm}
+                 minLength={12} value={confirm} aria-describedby={describedBy}
                  onChange={(e) => setConfirm(e.target.value)} required />
 
-          {error && <div className="notice error" role="alert">{error}</div>}
+          {error && <div id="cp-error" className="notice error" role="alert">{error}</div>}
 
           <div className="modal-actions">
             <button type="button" className="btn secondary" onClick={onClose}
@@ -251,7 +263,7 @@ function ChangePasswordDialog({
           you sign back in.
         </p>
         <button type="button" className="btn secondary" onClick={revokeAll}
-                disabled={busy}>
+                ref={revokeButton} aria-describedby={describedBy} disabled={busy}>
           Sign out everywhere
         </button>
       </div>
