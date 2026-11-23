@@ -1,6 +1,6 @@
 """Every place that states the version must state the same one.
 
-The release version appears in seven files. Keeping them in step by hand is
+The release version appears in several files. Keeping them in step by hand is
 exactly the kind of thing that quietly rots: the catalog-app package sat at
 1.2.0 for four releases before anyone noticed, and a compose file still
 pointing at an older image tag would hand users a stale container while the
@@ -48,19 +48,36 @@ def test_image_tags_match(relative: str) -> None:
         assert tag == __version__, f"{relative} pins {tag}, expected {__version__}"
 
 
-def test_catalog_app_matches() -> None:
-    """The package submitted to truenas/apps carries its own version pair."""
-    app_yaml = (ROOT / "truenas" / "catalog-app" / "app.yaml").read_text()
-    ix_values = (ROOT / "truenas" / "catalog-app" / "ix_values.yaml").read_text()
+def test_catalog_app_snapshot_is_consistent() -> None:
+    """truenas/catalog-app/ is a snapshot of the package truenas/apps serves.
 
-    for field in ("app_version", "version"):
-        match = re.search(rf"^{field}:\s*(\S+)\s*$", app_yaml, re.MULTILINE)
-        assert match, f"{field} not found in catalog-app/app.yaml"
-        assert match.group(1) == __version__, f"app.yaml {field} is {match.group(1)}"
+    Upstream owns that package: its maintainers reworked our submission, its
+    `version` is the catalog package's own version (not the app's), and
+    truenasbot pins the image as `<app version>@sha256:<digest>` after each
+    release. So the snapshot cannot be bumped ahead of a release. It must
+    agree with itself, must not claim an app version newer than this one,
+    and UPSTREAM.md must name the upstream commit it was copied from.
+    """
+    pkg = ROOT / "truenas" / "catalog-app"
+    app_yaml = (pkg / "app.yaml").read_text()
+    ix_values = (pkg / "ix_values.yaml").read_text()
 
-    tag = re.search(r"^\s*tag:\s*(\S+)\s*$", ix_values, re.MULTILINE)
-    assert tag, "tag not found in catalog-app/ix_values.yaml"
-    assert tag.group(1) == __version__
+    app_version = re.search(r"^app_version:\s*(\S+)\s*$", app_yaml, re.MULTILINE)
+    assert app_version, "app_version not found in catalog-app/app.yaml"
+    tag = re.search(r"^\s*tag:\s*['\"]?([0-9][^@'\"\s]*)", ix_values, re.MULTILINE)
+    assert tag, "image tag not found in catalog-app/ix_values.yaml"
+    assert tag.group(1) == app_version.group(1), (
+        f"ix_values tag {tag.group(1)} != app_version {app_version.group(1)}"
+    )
+
+    def parts(v: str) -> tuple[int, ...]:
+        return tuple(int(x) for x in v.split("."))
+
+    assert parts(app_version.group(1)) <= parts(__version__), (
+        f"catalog snapshot claims {app_version.group(1)}, newer than {__version__}"
+    )
+    upstream = (pkg / "UPSTREAM.md").read_text()
+    assert re.search(r"\b[0-9a-f]{40}\b", upstream), "UPSTREAM.md names no commit"
 
 
 def test_changelog_has_an_entry_for_this_version() -> None:

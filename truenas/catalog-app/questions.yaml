@@ -1,122 +1,143 @@
 groups:
-  - name: Enclosure Configuration
-    description: Which disk shelf to manage
-  - name: TrueNAS Integration
-    description: Optional — adds pool, vdev, ZFS error and SMART data
-  - name: Access Control
-    description: Whether a login is required to view the dashboard
+  - name: KTN Enclosure Manager Configuration
+    description: Configure KTN Enclosure Manager
   - name: Network Configuration
-    description: Where the web interface listens
+    description: Configure Network for KTN Enclosure Manager
   - name: Storage Configuration
-    description: Where application state is kept
+    description: Configure Storage for KTN Enclosure Manager
   - name: Labels Configuration
-    description: Custom container labels
+    description: Configure Labels for KTN Enclosure Manager
   - name: Resources Configuration
-    description: CPU and memory limits
+    description: Configure Resources for KTN Enclosure Manager
 
 questions:
-  # ----------------------------------------------------- enclosure
-  - variable: enclosure
+  - variable: TZ
+    group: KTN Enclosure Manager Configuration
+    label: Timezone
+    schema:
+      type: string
+      default: Etc/UTC
+      required: true
+      $ref:
+        - definitions/timezone
+
+  - variable: ktn
     label: ""
-    group: Enclosure Configuration
+    group: KTN Enclosure Manager Configuration
     schema:
       type: dict
       attrs:
-        - variable: sg_device
-          label: SES device node
+        - variable: devices
+          label: Devices
           description: |
-            The SCSI generic device for your enclosure. Find it with:
-              lsscsi -g | grep enclosu
-            The application discovers the correct enclosure itself; this only
-            has to point at a node that exists.
+            The SCSI generic device nodes for your enclosures.</br>
+            Find them with: lsscsi -g | grep enclosu</br>
+            Eg: Host Device: /dev/sg16, Container Device: /dev/sg16
           schema:
-            type: string
+            type: list
+            min: 1
             required: true
-            valid_chars: '^/dev/(sg|bsg)[a-zA-Z0-9/:]+$'
-            valid_chars_error: Must be a /dev/sg* or /dev/bsg/* path
-
+            default: []
+            items:
+              - variable: device
+                label: Device
+                schema:
+                  type: dict
+                  attrs:
+                    - variable: host_device
+                      label: Host Device
+                      description: The device node on the host.
+                      schema:
+                        type: string
+                        required: true
+                        valid_chars: "^/dev/(sg|bsg)[a-zA-Z0-9/:]+$"
+                        valid_chars_error: Must be a /dev/sg* or /dev/bsg/* path
+                    - variable: container_device
+                      label: Container Device
+                      description: The device node inside the container. Normally the same as the host device.
+                      schema:
+                        type: string
+                        required: true
+                        valid_chars: "^/dev/(sg|bsg)[a-zA-Z0-9/:]+$"
+                        valid_chars_error: Must be a /dev/sg* or /dev/bsg/* path
         - variable: allowlist
-          label: Restrict to enclosure ID (optional)
+          label: Restrict to Enclosure IDs
           description: |
-            Comma-separated enclosure logical identifiers. Leave empty to manage
-            every enclosure found. Find yours with:
-              cat /sys/class/enclosure/*/id
+            The enclosure logical identifiers to manage.</br>
+            Leave empty to manage every enclosure found.</br>
+            Find yours with: cat /sys/class/enclosure/*/id
           schema:
-            type: string
-            default: ""
-
-  # ----------------------------------------------------- access control
-  - variable: access
-    label: ""
-    group: Access Control
-    schema:
-      type: dict
-      attrs:
+            type: list
+            default: []
+            items:
+              - variable: enclosure_id
+                label: Enclosure ID
+                schema:
+                  type: string
+                  default: ""
+                  required: true
         - variable: auth_required
           label: Require a login
           description: |
-            On (default): you create an administrator account on first run and
-            sign in to view anything.
-
-            Off: the app is an open, read-only dashboard reachable by anyone
-            who can reach the port, which is how most monitoring apps here
-            work. This exposes everything readable, including the audit log and
-            raw sg_ses diagnostic output. Only turn it off on a network you
-            would already let read those.
+            Require an account to view the dashboard.</br>
+            When enabled, you create an administrator on first run.</br>
+            When disabled, anyone who can reach the port can read everything the
+            app can read, including the audit log and raw sg_ses output.
           schema:
             type: boolean
             default: true
-
         - variable: allow_anonymous_ident
           label: Allow Identify without a login
           description: |
-            Only applies when "Require a login" is off, and stays off unless
-            you turn it on.
-
-            The Identify LED is the one write this app can perform. It is
-            non-destructive - it cannot power a drive off, reset a PHY or set a
-            fault LED - but with a login not required, turning this on lets
-            anyone who can reach the port light a drive LED.
+            Allow the Identify LED to be set without an account.</br>
+            Only applies when Require a login is disabled.
           schema:
             type: boolean
             default: false
             show_if: [["auth_required", "=", false]]
-
-  # ----------------------------------------------------- truenas api
-  - variable: truenas
-    label: ""
-    group: TrueNAS Integration
-    schema:
-      type: dict
-      attrs:
-        - variable: url
-          label: TrueNAS URL
+        - variable: truenas_api_key
+          label: TrueNAS API Key
           description: |
+            Used for pool, vdev, ZFS error and SMART data.</br>
             Leave empty to run without it. The drive map, chassis telemetry and
-            IDENT all work without the API; only pool, vdev, ZFS error and SMART
-            data need it. Use https://, e.g. https://truenas.example.lan:
-            TrueNAS revokes an API key sent over plain http://, so with an
-            http:// URL the app does not send the key and shows why.
-          schema:
-            type: string
-            default: ""
-
-        - variable: api_key
-          label: API key
-          description: Credentials → API Keys → Add. Stored only in the container environment.
+            Identify all work without it.</br>
+            Create one under <b>Credentials -> Users</b>: open the user and choose <b>Access -> View API Keys</b>
+            and add a key, for a user with the <b>Readonly Admin</b> role.
           schema:
             type: string
             default: ""
             private: true
-
-        - variable: verify_tls
-          label: Verify TLS certificate
-          description: Disable only for a self-signed certificate you cannot replace.
+        - variable: truenas_port
+          label: TrueNAS Web Interface HTTPS Port
+          description: The HTTPS port of the TrueNAS web interface (System > General Settings > GUI).
           schema:
-            type: boolean
-            default: true
+            type: int
+            default: 443
+            min: 1
+            max: 65535
+            required: true
+            show_if: [["truenas_api_key", "!=", ""]]
+        - variable: additional_envs
+          label: Additional Environment Variables
+          schema:
+            type: list
+            default: []
+            items:
+              - variable: env
+                label: Environment Variable
+                schema:
+                  type: dict
+                  attrs:
+                    - variable: name
+                      label: Name
+                      schema:
+                        type: string
+                        required: true
+                    - variable: value
+                      label: Value
+                      schema:
+                        type: string
 
-  # ----------------------------------------------------- network
   - variable: network
     label: ""
     group: Network Configuration
@@ -124,19 +145,26 @@ questions:
       type: dict
       attrs:
         - variable: web_port
-          label: Web Port
+          label: WebUI Port
           schema:
             type: dict
             attrs:
               - variable: bind_mode
                 label: Port Bind Mode
+                description: |
+                  The port bind mode.</br>
+                  - Publish: The port will be published on the host for external access.</br>
+                  - Expose: The port will be exposed for inter-container communication.</br>
+                  - None: The port will not be exposed or published.</br>
+                  Note: If the Dockerfile defines an EXPOSE directive,
+                  the port will still be exposed for inter-container communication regardless of this setting.
                 schema:
                   type: string
-                  default: published
+                  default: "published"
                   enum:
-                    - value: published
+                    - value: "published"
                       description: Publish port on the host for external access
-                    - value: exposed
+                    - value: "exposed"
                       description: Expose port for inter-container communication
                     - value: ""
                       description: None
@@ -144,14 +172,16 @@ questions:
                 label: Port Number
                 schema:
                   type: int
-                  default: 8420
+                  default: 30598
                   min: 1
                   max: 65535
                   required: true
               - variable: host_ips
                 label: Host IPs
+                description: IPs on the host to bind this port
                 schema:
                   type: list
+                  show_if: [["bind_mode", "=", "published"]]
                   default: []
                   items:
                     - variable: host_ip
@@ -159,10 +189,104 @@ questions:
                       schema:
                         type: string
                         required: true
-                        "$ref":
+                        $ref:
                           - definitions/node_bind_ip
-
-  # ----------------------------------------------------- storage
+        - variable: networks
+          label: Networks
+          description: The docker networks to join
+          schema:
+            type: list
+            show_if: [["host_network", "=", false]]
+            default: []
+            items:
+              - variable: network
+                label: Network
+                schema:
+                  type: dict
+                  attrs:
+                    - variable: name
+                      label: Name
+                      description: |
+                        The name of the network to join.</br>
+                        The network must already exist.
+                      schema:
+                        type: string
+                        default: ""
+                        required: true
+                    - variable: containers
+                      label: Containers
+                      description: The containers to add to this network.
+                      schema:
+                        type: list
+                        items:
+                          - variable: container
+                            label: Container
+                            schema:
+                              type: dict
+                              attrs:
+                                - variable: name
+                                  label: Container Name
+                                  schema:
+                                    type: string
+                                    required: true
+                                    enum:
+                                      - value: ktn-enclosure-manager
+                                        description: ktn-enclosure-manager
+                                - variable: config
+                                  label: Container Network Configuration
+                                  schema:
+                                    type: dict
+                                    attrs:
+                                      - variable: aliases
+                                        label: Aliases (Optional)
+                                        description: The network aliases to use for this container on this network.
+                                        schema:
+                                          type: list
+                                          default: []
+                                          items:
+                                            - variable: alias
+                                              label: Alias
+                                              schema:
+                                                type: string
+                                      - variable: interface_name
+                                        label: Interface Name (Optional)
+                                        description: The network interface name to use for this network
+                                        schema:
+                                          type: string
+                                      - variable: mac_address
+                                        label: MAC Address (Optional)
+                                        description: The MAC address to use for this network interface.
+                                        schema:
+                                          type: string
+                                      - variable: ipv4_address
+                                        label: IPv4 Address (Optional)
+                                        description: The IPv4 address to use for this network interface.
+                                        schema:
+                                          type: string
+                                      - variable: ipv6_address
+                                        label: IPv6 Address (Optional)
+                                        description: The IPv6 address to use for this network interface.
+                                        schema:
+                                          type: string
+                                      - variable: gw_priority
+                                        label: Gateway Priority (Optional)
+                                        description: Indicates the priority of the gateway for this network interface.
+                                        schema:
+                                          type: int
+                                          "null": true
+                                      - variable: priority
+                                        label: Priority (Optional)
+                                        description: Indicates in which order Compose connects the service’s containers to its networks.
+                                        schema:
+                                          type: int
+                                          "null": true
+        - variable: host_network
+          label: Host Network
+          description: |
+            Bind to the host network. It's recommended to keep this disabled.
+          schema:
+            type: boolean
+            default: false
   - variable: storage
     label: ""
     group: Storage Configuration
@@ -170,50 +294,236 @@ questions:
       type: dict
       attrs:
         - variable: data
-          label: Application data
-          description: |
-            Accounts, session key, IDENT timers and the audit log. Use a dataset
-            so these survive redeployment.
+          label: Data Storage
           schema:
             type: dict
             attrs:
               - variable: type
                 label: Type
+                description: |
+                  ixVolume: Is dataset created automatically by the system.</br>
+                  Host Path: Is a path that already exists on the system.
                 schema:
                   type: string
                   required: true
-                  default: ix_volume
+                  default: "ix_volume"
                   enum:
-                    - value: host_path
-                      description: Host Path (Local Path)
-                    - value: ix_volume
-                      description: ixVolume (dataset created automatically)
+                    - value: "host_path"
+                      description: Host Path (Path that already exists on the system)
+                    - value: "ix_volume"
+                      description: ixVolume (Dataset created automatically by the system)
               - variable: ix_volume_config
                 label: ixVolume Configuration
+                description: The configuration for the ixVolume dataset.
                 schema:
                   type: dict
                   show_if: [["type", "=", "ix_volume"]]
+                  $ref:
+                    - "normalize/ix_volume"
                   attrs:
+                    - variable: acl_enable
+                      label: Enable ACL
+                      description: Enable ACL for the storage.
+                      schema:
+                        type: boolean
+                        default: false
                     - variable: dataset_name
                       label: Dataset Name
+                      description: The name of the dataset to use for storage.
                       schema:
                         type: string
                         required: true
-                        immutable: true
-                        default: data
+                        hidden: true
+                        default: "data"
+                    - variable: acl_entries
+                      label: ACL Configuration
+                      schema:
+                        type: dict
+                        show_if: [["acl_enable", "=", true]]
+                        attrs: []
               - variable: host_path_config
                 label: Host Path Configuration
                 schema:
                   type: dict
                   show_if: [["type", "=", "host_path"]]
                   attrs:
+                    - variable: acl_enable
+                      label: Enable ACL
+                      description: Enable ACL for the storage.
+                      schema:
+                        type: boolean
+                        default: false
+                    - variable: acl
+                      label: ACL Configuration
+                      schema:
+                        type: dict
+                        show_if: [["acl_enable", "=", true]]
+                        attrs: []
+                        $ref:
+                          - "normalize/acl"
                     - variable: path
                       label: Host Path
+                      description: The host path to use for storage.
                       schema:
                         type: hostpath
+                        show_if: [["acl_enable", "=", false]]
                         required: true
-
-  # ----------------------------------------------------- resources
+        - variable: additional_storage
+          label: Additional Storage
+          schema:
+            type: list
+            default: []
+            items:
+              - variable: storageEntry
+                label: Storage Entry
+                schema:
+                  type: dict
+                  attrs:
+                    - variable: type
+                      label: Type
+                      description: |
+                        ixVolume: Is dataset created automatically by the system.</br>
+                        Host Path: Is a path that already exists on the system.</br>
+                        SMB Share: Is a SMB share that is mounted to as a volume.</br>
+                        NFS Share: Is a NFS share that is mounted to as a volume.
+                      schema:
+                        type: string
+                        required: true
+                        default: "ix_volume"
+                        enum:
+                          - value: "host_path"
+                            description: Host Path (Path that already exists on the system)
+                          - value: "ix_volume"
+                            description: ixVolume (Dataset created automatically by the system)
+                          - value: "cifs"
+                            description: SMB/CIFS Share (Mounts a volume to a SMB share)
+                          - value: "nfs"
+                            description: NFS Share (Mounts a volume to a NFS share)
+                    - variable: read_only
+                      label: Read Only
+                      description: Mount the volume as read only.
+                      schema:
+                        type: boolean
+                        default: false
+                    - variable: mount_path
+                      label: Mount Path
+                      description: The path inside the container to mount the storage.
+                      schema:
+                        type: path
+                        required: true
+                    - variable: host_path_config
+                      label: Host Path Configuration
+                      schema:
+                        type: dict
+                        show_if: [["type", "=", "host_path"]]
+                        attrs:
+                          - variable: acl_enable
+                            label: Enable ACL
+                            description: Enable ACL for the storage.
+                            schema:
+                              type: boolean
+                              default: false
+                          - variable: acl
+                            label: ACL Configuration
+                            schema:
+                              type: dict
+                              show_if: [["acl_enable", "=", true]]
+                              attrs: []
+                              $ref:
+                                - "normalize/acl"
+                          - variable: path
+                            label: Host Path
+                            description: The host path to use for storage.
+                            schema:
+                              type: hostpath
+                              show_if: [["acl_enable", "=", false]]
+                              required: true
+                    - variable: ix_volume_config
+                      label: ixVolume Configuration
+                      description: The configuration for the ixVolume dataset.
+                      schema:
+                        type: dict
+                        show_if: [["type", "=", "ix_volume"]]
+                        $ref:
+                          - "normalize/ix_volume"
+                        attrs:
+                          - variable: acl_enable
+                            label: Enable ACL
+                            description: Enable ACL for the storage.
+                            schema:
+                              type: boolean
+                              default: false
+                          - variable: dataset_name
+                            label: Dataset Name
+                            description: The name of the dataset to use for storage.
+                            schema:
+                              type: string
+                              required: true
+                              default: "storage_entry"
+                          - variable: acl_entries
+                            label: ACL Configuration
+                            schema:
+                              type: dict
+                              show_if: [["acl_enable", "=", true]]
+                              attrs: []
+                              $ref:
+                                - "normalize/acl"
+                    - variable: cifs_config
+                      label: SMB Configuration
+                      description: The configuration for the SMB dataset.
+                      schema:
+                        type: dict
+                        show_if: [["type", "=", "cifs"]]
+                        attrs:
+                          - variable: server
+                            label: Server
+                            description: The server to mount the SMB share.
+                            schema:
+                              type: string
+                              required: true
+                          - variable: path
+                            label: Path
+                            description: The path to mount the SMB share.
+                            schema:
+                              type: string
+                              required: true
+                          - variable: username
+                            label: Username
+                            description: The username to use for the SMB share.
+                            schema:
+                              type: string
+                              required: true
+                          - variable: password
+                            label: Password
+                            description: The password to use for the SMB share.
+                            schema:
+                              type: string
+                              required: true
+                              private: true
+                          - variable: domain
+                            label: Domain
+                            description: The domain to use for the SMB share.
+                            schema:
+                              type: string
+                    - variable: nfs_config
+                      label: NFS Configuration
+                      description: The configuration for the NFS dataset.
+                      schema:
+                        type: dict
+                        show_if: [["type", "=", "nfs"]]
+                        attrs:
+                          - variable: server
+                            label: Server
+                            description: The server to mount the NFS share.
+                            schema:
+                              type: string
+                              required: true
+                          - variable: path
+                            label: Path
+                            description: The path to mount the NFS share.
+                            schema:
+                              type: string
+                              required: true
   - variable: labels
     label: ""
     group: Labels Configuration
@@ -252,8 +562,8 @@ questions:
                             description: ktn-enclosure-manager
 
   - variable: resources
-    group: Resources Configuration
     label: ""
+    group: Resources Configuration
     schema:
       type: dict
       attrs:
@@ -264,13 +574,15 @@ questions:
             attrs:
               - variable: cpus
                 label: CPUs
+                description: CPUs limit for KTN Enclosure Manager.
                 schema:
                   type: int
                   default: 2
                   required: true
               - variable: memory
                 label: Memory (in MB)
+                description: Memory limit for KTN Enclosure Manager.
                 schema:
                   type: int
-                  default: 512
+                  default: 4096
                   required: true

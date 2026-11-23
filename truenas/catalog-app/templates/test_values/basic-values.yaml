@@ -1,23 +1,23 @@
-enclosure:
-  # CI has no SAS shelf, so this points at a node that exists in the runner.
-  # The app discovers the real enclosure itself and degrades cleanly without
-  # one, so rendering and startup are still exercised.
-  sg_device: /dev/null
-  allowlist: ""
+resources:
+  limits:
+    cpus: 2
+    memory: 4096
 
-access:
+TZ: Etc/UTC
+
+ktn:
+  devices: []
+  allowlist: []
   auth_required: true
   allow_anonymous_ident: false
-
-truenas:
-  url: ""
-  api_key: ""
-  verify_tls: true
+  truenas_port: 443
+  truenas_api_key: test-api-key
+  additional_envs: []
 
 network:
   web_port:
     bind_mode: published
-    port_number: 30420
+    port_number: 30842
     host_ips: []
 
 ix_volumes:
@@ -29,8 +29,4 @@ storage:
     ix_volume_config:
       dataset_name: data
       create_host_path: true
-
-resources:
-  limits:
-    cpus: 2
-    memory: 512
+  additional_storage: []
